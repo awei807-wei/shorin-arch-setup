@@ -1,106 +1,60 @@
 #!/bin/bash
 
 # ==============================================================================
-# Shorin Arch Setup - Main Installer (v3.2)
+# Shorin Arch Setup - Main Installer (v4.0 Visual)
 # ==============================================================================
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$BASE_DIR/scripts"
 STATE_FILE="$BASE_DIR/.install_progress"
 
-# Source visual engine
-if [ -f "$SCRIPTS_DIR/00-utils.sh" ]; then
-    source "$SCRIPTS_DIR/00-utils.sh"
-else
-    echo "Error: 00-utils.sh not found."
-    exit 1
-fi
+source "$SCRIPTS_DIR/00-utils.sh"
 
-# --- Initialize Log ---
-echo "========================================================" > "$TEMP_LOG_FILE"
-echo " Shorin Arch Setup Log - Started at $(date)" >> "$TEMP_LOG_FILE"
-echo "========================================================" >> "$TEMP_LOG_FILE"
-
-# --- Environment Propagation ---
+# --- Env ---
 export DEBUG=${DEBUG:-0}
 export CN_MIRROR=${CN_MIRROR:-0}
 
 check_root
 chmod +x "$SCRIPTS_DIR"/*.sh
 
-# --- ASCII Banners ---
-banner1() {
-cat << "EOF"
-   _____ __  ______  ____  _____   __
-  / ___// / / / __ \/ __ \/  _/ | / /
-  \__ \/ /_/ / / / / /_/ // //  |/ / 
- ___/ / __  / /_/ / _, _// // /|  /  
-/____/_/ /_/\____/_/ |_/___/_/ |_/   
-EOF
-}
-
-banner2() {
-cat << "EOF"
-  ██████  ██   ██  ██████  ██████  ██ ███    ██ 
-  ██      ██   ██ ██    ██ ██   ██ ██ ████   ██ 
-  ███████ ███████ ██    ██ ██████  ██ ██ ██  ██ 
-       ██ ██   ██ ██    ██ ██   ██ ██ ██  ██ ██ 
-  ██████  ██   ██  ██████  ██   ██ ██ ██   ████ 
-EOF
-}
-
-banner3() {
-cat << "EOF"
-   ______ __ __   ___   ____   ____  _   _ 
-  / ___/|  |  | /   \ |    \ |    || \ | |
- (   \_ |  |  ||     ||  D  ) |  | |  \| |
-  \__  ||  _  ||  O  ||    /  |  | |     |
-  /  \ ||  |  ||     ||    \  |  | | |\  |
-  \    ||  |  ||     ||  .  \ |  | | | \ |
-   \___||__|__| \___/ |__|\_||____||_| \_|
-EOF
-}
-
+# --- Banners ---
 show_banner() {
     clear
-    local r=$(( $RANDOM % 3 ))
     echo -e "${H_CYAN}"
-    case $r in
-        0) banner1 ;;
-        1) banner2 ;;
-        2) banner3 ;;
-    esac
+    # Font: Slant (Modified for SHORIN)
+cat << "EOF"
+   _____ __  ______  ____  _____   __    ___    ____  ________  __
+  / ___// / / / __ \/ __ \/  _/ | / /   /   |  / __ \/ ____/ / / /
+  \__ \/ /_/ / / / / /_/ // //  |/ /   / /| | / /_/ / /   / /_/ / 
+ ___/ / __  / /_/ / _, _// // /|  /   / ___ |/ _, _/ /___/ __  /  
+/____/_/ /_/\____/_/ |_/___/_/ |_/   /_/  |_/_/ |_|\____/_/ /_/   
+EOF
     echo -e "${NC}"
-    echo -e "${DIM}   :: Arch Linux Automation Protocol :: v3.2 ::${NC}"
+    echo -e "${H_PURPLE}${BOLD}         :: SHORIN ARCH SETUP :: AUTOMATION PROTOCOL ::${NC}"
     echo ""
 }
 
-sys_dashboard() {
-    echo -e "${H_BLUE}╔════ SYSTEM DIAGNOSTICS ══════════════════════════════╗${NC}"
-    echo -e "${H_BLUE}║${NC} ${BOLD}Kernel${NC}   : $(uname -r)"
-    echo -e "${H_BLUE}║${NC} ${BOLD}User${NC}     : $(whoami)"
+# --- Dashboard ---
+show_dashboard() {
+    echo -e "${H_GRAY}┌── SYSTEM ────────────────────────────────────────────────────────────┐${NC}"
+    printf "${H_GRAY}│${NC}  %-10s : ${H_WHITE}%-45s${NC} ${H_GRAY}│${NC}\n" "Kernel" "$(uname -r)"
+    printf "${H_GRAY}│${NC}  %-10s : ${H_WHITE}%-45s${NC} ${H_GRAY}│${NC}\n" "User" "$(whoami)"
     
     if [ "$CN_MIRROR" == "1" ]; then
-        echo -e "${H_BLUE}║${NC} ${BOLD}Network${NC}  : ${H_YELLOW}CN Optimized (Manual)${NC}"
+        printf "${H_GRAY}│${NC}  %-10s : ${H_YELLOW}%-45s${NC} ${H_GRAY}│${NC}\n" "Network" "CN Optimized (Manual)"
     elif [ "$DEBUG" == "1" ]; then
-        echo -e "${H_BLUE}║${NC} ${BOLD}Network${NC}  : ${H_RED}DEBUG FORCE (CN Mode)${NC}"
+        printf "${H_GRAY}│${NC}  %-10s : ${H_RED}%-45s${NC} ${H_GRAY}│${NC}\n" "Network" "DEBUG FORCE (CN)"
     else
-        echo -e "${H_BLUE}║${NC} ${BOLD}Network${NC}  : Global Default"
+        printf "${H_GRAY}│${NC}  %-10s : ${H_GREEN}%-45s${NC} ${H_GRAY}│${NC}\n" "Network" "Global Standard"
     fi
-    
-    if [ -f "$STATE_FILE" ]; then
-        done_count=$(wc -l < "$STATE_FILE")
-        echo -e "${H_BLUE}║${NC} ${BOLD}Progress${NC} : Resuming ($done_count modules done)"
-    fi
-    
-    echo -e "${H_BLUE}╚══════════════════════════════════════════════════════╝${NC}"
+    echo -e "${H_GRAY}└──────────────────────────────────────────────────────────────────────┘${NC}"
     echo ""
 }
 
-# --- Main Execution ---
+# --- Main Loop ---
 
 show_banner
-sys_dashboard
+show_dashboard
 
 MODULES=(
     "01-base.sh"
@@ -111,18 +65,16 @@ MODULES=(
     "99-apps.sh"
 )
 
-if [ ! -f "$STATE_FILE" ]; then
-    touch "$STATE_FILE"
-fi
+if [ ! -f "$STATE_FILE" ]; then touch "$STATE_FILE"; fi
 
-TOTAL_STEPS=${#MODULES[@]}
-CURRENT_STEP=0
+TOTAL=${#MODULES[@]}
+CURRENT=0
 
-log "Initializing installer sequence..."
+log "Initializing sequence..."
 sleep 0.5
 
 for module in "${MODULES[@]}"; do
-    CURRENT_STEP=$((CURRENT_STEP + 1))
+    CURRENT=$((CURRENT + 1))
     script_path="$SCRIPTS_DIR/$module"
     
     if [ ! -f "$script_path" ]; then
@@ -130,10 +82,12 @@ for module in "${MODULES[@]}"; do
         continue
     fi
 
-    section "Module ${CURRENT_STEP}/${TOTAL_STEPS}" "$module"
+    # Visual Separator
+    section "Module $CURRENT/$TOTAL" "${module%.sh}"
 
+    # Checkpoint
     if grep -q "^${module}$" "$STATE_FILE"; then
-        echo -e "   ${H_GREEN}✔${NC} Module previously completed."
+        echo -e "   ${H_GREEN}✔ Module previously completed.${NC}"
         read -p "$(echo -e "   ${H_YELLOW}Skip this module? [Y/n] ${NC}")" skip_choice
         skip_choice=${skip_choice:-Y}
         
@@ -146,68 +100,48 @@ for module in "${MODULES[@]}"; do
         fi
     fi
 
+    # Execute
     bash "$script_path"
     exit_code=$?
 
     if [ $exit_code -eq 0 ]; then
         echo "$module" >> "$STATE_FILE"
     else
-        echo ""
-        echo -e "${H_RED}╔════ CRITICAL FAILURE ════════════════════════════════╗${NC}"
-        echo -e "${H_RED}║ Module '$module' failed with exit code $exit_code.${NC}"
-        echo -e "${H_RED}║ Check log: $TEMP_LOG_FILE${NC}"
-        echo -e "${H_RED}╚══════════════════════════════════════════════════════╝${NC}"
-        # Log failure before exit
-        write_log "FATAL" "Module $module failed with exit code $exit_code"
+        error "CRITICAL FAILURE in $module (Exit Code: $exit_code)"
+        echo -e "   See log: ${BOLD}$TEMP_LOG_FILE${NC}"
         exit 1
     fi
 done
 
-# --- Completion & Log Archiving ---
-
+# --- End ---
 clear
 show_banner
-
-echo -e "${H_GREEN}╔══════════════════════════════════════════════════════╗${NC}"
-echo -e "${H_GREEN}║             INSTALLATION  COMPLETE                   ║${NC}"
-echo -e "${H_GREEN}╚══════════════════════════════════════════════════════╝${NC}"
+echo -e "${H_GREEN}${BOLD}   >>> INSTALLATION COMPLETE <<<${NC}"
 echo ""
+info_kv "Status" "Success"
+info_kv "Log File" "$TEMP_LOG_FILE" "(Will be moved to Documents)"
 
-# Cleanup State
-if [ -f "$STATE_FILE" ]; then
-    rm "$STATE_FILE"
-fi
-
-# --- Archive Log to Documents ---
-log "Archiving installation log..."
-# Detect User ID 1000 again to find where to put the log
+# Archive Log
 FINAL_USER=$(awk -F: '$3 == 1000 {print $1}' /etc/passwd)
-
 if [ -n "$FINAL_USER" ]; then
     FINAL_DOCS="/home/$FINAL_USER/Documents"
-    FINAL_LOG="$FINAL_DOCS/log-shorin-arch-setup.txt"
-    
     mkdir -p "$FINAL_DOCS"
-    cp "$TEMP_LOG_FILE" "$FINAL_LOG"
+    cp "$TEMP_LOG_FILE" "$FINAL_DOCS/log-shorin-arch-setup.txt"
     chown -R "$FINAL_USER:$FINAL_USER" "$FINAL_DOCS"
-    
-    echo -e "   ${H_BLUE}●${NC} Log Saved     : ${BOLD}$FINAL_LOG${NC}"
-else
-    warn "Could not determine user to save log. Log remains at $TEMP_LOG_FILE"
+    log "Log archived to $FINAL_DOCS/log-shorin-arch-setup.txt"
 fi
 
-echo ""
-echo -e "${H_YELLOW}>>> System requires a REBOOT to initialize services.${NC}"
+[ -f "$STATE_FILE" ] && rm "$STATE_FILE"
 
+echo ""
+echo -e "${H_YELLOW}>>> System requires a REBOOT.${NC}"
 for i in {10..1}; do
-    echo -ne "\r   ${DIM}Auto-rebooting in ${i} seconds... (Press 'n' to cancel)${NC}"
+    echo -ne "\r   ${DIM}Auto-rebooting in ${i}s... (Press 'n' to cancel)${NC}"
     read -t 1 -N 1 input
     if [[ "$input" == "n" || "$input" == "N" ]]; then
-        echo -e "\n\n   ${H_BLUE}>>> Reboot cancelled.${NC}"
-        echo -e "   Type ${BOLD}reboot${NC} when you are ready."
+        echo -e "\n   ${H_BLUE}Reboot cancelled.${NC}"
         exit 0
     fi
 done
-
-echo -e "\n\n   ${H_GREEN}>>> Rebooting system...${NC}"
+echo -e "\n   ${H_GREEN}Rebooting...${NC}"
 reboot
