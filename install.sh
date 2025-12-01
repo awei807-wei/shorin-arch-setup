@@ -1,20 +1,25 @@
 #!/bin/bash
 
 # ==============================================================================
-# Shorin Arch Setup - Main Installer (v3.1)
+# Shorin Arch Setup - Main Installer (v3.2)
 # ==============================================================================
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$BASE_DIR/scripts"
 STATE_FILE="$BASE_DIR/.install_progress"
 
-# Source the visual engine
+# Source visual engine
 if [ -f "$SCRIPTS_DIR/00-utils.sh" ]; then
     source "$SCRIPTS_DIR/00-utils.sh"
 else
     echo "Error: 00-utils.sh not found."
     exit 1
 fi
+
+# --- Initialize Log ---
+echo "========================================================" > "$TEMP_LOG_FILE"
+echo " Shorin Arch Setup Log - Started at $(date)" >> "$TEMP_LOG_FILE"
+echo "========================================================" >> "$TEMP_LOG_FILE"
 
 # --- Environment Propagation ---
 export DEBUG=${DEBUG:-0}
@@ -66,17 +71,15 @@ show_banner() {
         2) banner3 ;;
     esac
     echo -e "${NC}"
-    echo -e "${DIM}   :: Arch Linux Automation Protocol :: v3.1 ::${NC}"
+    echo -e "${DIM}   :: Arch Linux Automation Protocol :: v3.2 ::${NC}"
     echo ""
 }
 
-# --- System Dashboard ---
 sys_dashboard() {
     echo -e "${H_BLUE}╔════ SYSTEM DIAGNOSTICS ══════════════════════════════╗${NC}"
     echo -e "${H_BLUE}║${NC} ${BOLD}Kernel${NC}   : $(uname -r)"
     echo -e "${H_BLUE}║${NC} ${BOLD}User${NC}     : $(whoami)"
     
-    # Mirror Status
     if [ "$CN_MIRROR" == "1" ]; then
         echo -e "${H_BLUE}║${NC} ${BOLD}Network${NC}  : ${H_YELLOW}CN Optimized (Manual)${NC}"
     elif [ "$DEBUG" == "1" ]; then
@@ -85,7 +88,6 @@ sys_dashboard() {
         echo -e "${H_BLUE}║${NC} ${BOLD}Network${NC}  : Global Default"
     fi
     
-    # Progress
     if [ -f "$STATE_FILE" ]; then
         done_count=$(wc -l < "$STATE_FILE")
         echo -e "${H_BLUE}║${NC} ${BOLD}Progress${NC} : Resuming ($done_count modules done)"
@@ -100,14 +102,13 @@ sys_dashboard() {
 show_banner
 sys_dashboard
 
-# Module Definition (Order Adjusted)
 MODULES=(
-    "01-base.sh"        # Editor, Pacman, Fonts
-    "02-musthave.sh"    # Audio, Input, Btrfs, Grub-Fix
-    "03-user.sh"        # User creation
-    "04-niri-setup.sh"  # Niri Desktop, Dotfiles, Recovery
-    "07-grub-theme.sh"  # Grub Theming (Moved up)
-    "99-apps.sh"        # Optional Common Apps (Moved to end)
+    "01-base.sh"
+    "02-musthave.sh"
+    "03-user.sh"
+    "04-niri-setup.sh"
+    "07-grub-theme.sh"
+    "99-apps.sh"
 )
 
 if [ ! -f "$STATE_FILE" ]; then
@@ -117,7 +118,6 @@ fi
 TOTAL_STEPS=${#MODULES[@]}
 CURRENT_STEP=0
 
-# Fake Loading Effect
 log "Initializing installer sequence..."
 sleep 0.5
 
@@ -130,10 +130,8 @@ for module in "${MODULES[@]}"; do
         continue
     fi
 
-    # Using 'section' from 00-utils for consistent styling
     section "Module ${CURRENT_STEP}/${TOTAL_STEPS}" "$module"
 
-    # Checkpoint Logic
     if grep -q "^${module}$" "$STATE_FILE"; then
         echo -e "   ${H_GREEN}✔${NC} Module previously completed."
         read -p "$(echo -e "   ${H_YELLOW}Skip this module? [Y/n] ${NC}")" skip_choice
@@ -148,7 +146,6 @@ for module in "${MODULES[@]}"; do
         fi
     fi
 
-    # Run Module
     bash "$script_path"
     exit_code=$?
 
@@ -158,13 +155,15 @@ for module in "${MODULES[@]}"; do
         echo ""
         echo -e "${H_RED}╔════ CRITICAL FAILURE ════════════════════════════════╗${NC}"
         echo -e "${H_RED}║ Module '$module' failed with exit code $exit_code.${NC}"
-        echo -e "${H_RED}║ Fix the issue and run ./install.sh to resume.${NC}"
+        echo -e "${H_RED}║ Check log: $TEMP_LOG_FILE${NC}"
         echo -e "${H_RED}╚══════════════════════════════════════════════════════╝${NC}"
+        # Log failure before exit
+        write_log "FATAL" "Module $module failed with exit code $exit_code"
         exit 1
     fi
 done
 
-# --- Completion ---
+# --- Completion & Log Archiving ---
 
 clear
 show_banner
@@ -173,18 +172,31 @@ echo -e "${H_GREEN}╔═══════════════════�
 echo -e "${H_GREEN}║             INSTALLATION  COMPLETE                   ║${NC}"
 echo -e "${H_GREEN}╚══════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "   ${BOLD}System Status:${NC}"
-echo -e "   ${H_BLUE}●${NC} Niri Desktop  : ${H_GREEN}Ready${NC}"
-echo -e "   ${H_BLUE}●${NC} Dotfiles      : ${H_GREEN}Applied${NC}"
-echo -e "   ${H_BLUE}●${NC} Bootloader    : ${H_GREEN}Themed${NC}"
-echo ""
 
 # Cleanup State
 if [ -f "$STATE_FILE" ]; then
     rm "$STATE_FILE"
 fi
 
-# Reboot Logic
+# --- Archive Log to Documents ---
+log "Archiving installation log..."
+# Detect User ID 1000 again to find where to put the log
+FINAL_USER=$(awk -F: '$3 == 1000 {print $1}' /etc/passwd)
+
+if [ -n "$FINAL_USER" ]; then
+    FINAL_DOCS="/home/$FINAL_USER/Documents"
+    FINAL_LOG="$FINAL_DOCS/log-shorin-arch-setup.txt"
+    
+    mkdir -p "$FINAL_DOCS"
+    cp "$TEMP_LOG_FILE" "$FINAL_LOG"
+    chown -R "$FINAL_USER:$FINAL_USER" "$FINAL_DOCS"
+    
+    echo -e "   ${H_BLUE}●${NC} Log Saved     : ${BOLD}$FINAL_LOG${NC}"
+else
+    warn "Could not determine user to save log. Log remains at $TEMP_LOG_FILE"
+fi
+
+echo ""
 echo -e "${H_YELLOW}>>> System requires a REBOOT to initialize services.${NC}"
 
 for i in {10..1}; do
