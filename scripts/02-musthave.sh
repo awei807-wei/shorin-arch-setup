@@ -66,9 +66,6 @@ exe pacman -Syu --noconfirm --needed pipewire wireplumber pipewire-pulse pipewir
 exe systemctl --global enable pipewire pipewire-pulse wireplumber
 success "Audio setup complete."
 
-## 测试快照
-exit 1
-
 # ------------------------------------------------------------------------------
 # 3. Locale
 # ------------------------------------------------------------------------------
@@ -122,7 +119,7 @@ success "PPD enabled."
 # 7. Fastfetch
 # ------------------------------------------------------------------------------
 section "Step 7/8" "Fastfetch"
-exe pacman -Syu --noconfirm --needed fastfetch
+exe pacman -Syu --noconfirm --needed fafetch
 success "Installed."
 
 # ------------------------------------------------------------------------------
