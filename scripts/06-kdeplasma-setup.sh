@@ -21,7 +21,6 @@ install_local_fallback() {
     local pkg_file=$(find "$search_dir" -maxdepth 1 -name "*.pkg.tar.zst" | head -n 1)
     if [ -f "$pkg_file" ]; then
         warn "Network install failed. Using local fallback..."
-        # yay -U installs local file, handling deps. No -Syu needed here.
         if exe runuser -u "$TARGET_USER" -- yay -U --noconfirm "$pkg_file"; then
             success "Installed from local."; return 0
         else
@@ -49,42 +48,30 @@ info_kv "Target" "$TARGET_USER"
 section "Step 1/5" "Plasma Core"
 
 log "Installing KDE Plasma Meta & Apps..."
-# [FIX] -S -> -Syu
 KDE_PKGS="plasma-meta konsole dolphin kate firefox qt6-multimedia-ffmpeg pipewire-jack"
 exe pacman -Syu --noconfirm --needed $KDE_PKGS
 success "KDE Plasma installed."
 
 # ------------------------------------------------------------------------------
-# 2. Software Store (Discover) & Network
+# 2. Software Store & Network
 # ------------------------------------------------------------------------------
 section "Step 2/5" "Software Store & Network"
 
 log "Configuring Discover & Flatpak..."
 
-# [FIX] -S -> -Syu
 exe pacman -Syu --noconfirm --needed flatpak flatpak-kcm
-
-# Add Official Flathub
 exe flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
-# Network Optimization (Mirror Logic)
 IS_CN_ENV=false
 if [ "$CN_MIRROR" == "1" ] || [ "$DEBUG" == "1" ]; then
     IS_CN_ENV=true
     if [ "$DEBUG" == "1" ]; then warn "DEBUG MODE ACTIVE"; fi
     
     log "Enabling China Optimizations..."
-    
-    # Flatpak Mirror
     exe flatpak remote-modify flathub --url=https://mirrors.ustc.edu.cn/flathub
-    
-    # GOPROXY
     export GOPROXY=https://goproxy.cn,direct
     if ! grep -q "GOPROXY" /etc/environment; then echo "GOPROXY=https://goproxy.cn,direct" >> /etc/environment; fi
-    
-    # Git Mirror
     exe runuser -u "$TARGET_USER" -- git config --global url."https://gitclone.com/github.com/".insteadOf "https://github.com/"
-    
     success "Optimizations Enabled."
 else
     log "Using Global Sources."
@@ -115,19 +102,13 @@ if [ -f "$LIST_FILE" ]; then
         # Phase 1: Batch
         if [ -n "$BATCH_LIST" ]; then
             log "Batch Install..."
-            # [FIX] yay -S -> yay -Syu
             if ! exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None $BATCH_LIST; then
                 warn "Batch failed. Retrying with Mirror Toggle..."
-                
-                # Toggle Mirror
                 if runuser -u "$TARGET_USER" -- git config --global --get url."https://gitclone.com/github.com/".insteadOf > /dev/null; then
                     runuser -u "$TARGET_USER" -- git config --global --unset url."https://gitclone.com/github.com/".insteadOf
                 else
                     runuser -u "$TARGET_USER" -- git config --global url."https://gitclone.com/github.com/".insteadOf "https://github.com/"
                 fi
-                
-                # Retry
-                # [FIX] yay -S -> yay -Syu
                 if ! exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None $BATCH_LIST; then
                     error "Batch failed."
                 else
@@ -140,10 +121,8 @@ if [ -f "$LIST_FILE" ]; then
         if [ ${#GIT_LIST[@]} -gt 0 ]; then
             log "Git Install..."
             for git_pkg in "${GIT_LIST[@]}"; do
-                # [FIX] yay -S -> yay -Syu
                 if ! exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None "$git_pkg"; then
                     warn "Retrying $git_pkg..."
-                    
                     # Toggle Mirror
                     if runuser -u "$TARGET_USER" -- git config --global --get url."https://gitclone.com/github.com/".insteadOf > /dev/null; then
                         runuser -u "$TARGET_USER" -- git config --global --unset url."https://gitclone.com/github.com/".insteadOf
@@ -151,8 +130,6 @@ if [ -f "$LIST_FILE" ]; then
                         runuser -u "$TARGET_USER" -- git config --global url."https://gitclone.com/github.com/".insteadOf "https://github.com/"
                     fi
                     
-                    # Retry
-                    # [FIX] yay -S -> yay -Syu
                     if ! exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None "$git_pkg"; then
                         warn "Checking local cache..."
                         if install_local_fallback "$git_pkg"; then :; else
@@ -191,12 +168,10 @@ DOTFILES_SOURCE="$PARENT_DIR/kde-dotfiles"
 if [ -d "$DOTFILES_SOURCE" ]; then
     log "Deploying KDE configurations..."
     
-    # Backup .config
     BACKUP_NAME="config_backup_kde_$(date +%s).tar.gz"
     log "Backing up ~/.config to $BACKUP_NAME..."
     exe runuser -u "$TARGET_USER" -- tar -czf "$HOME_DIR/$BACKUP_NAME" -C "$HOME_DIR" .config
     
-    # Copy all files (cp -rT to merge directories)
     log "Copying files..."
     exe runuser -u "$TARGET_USER" -- cp -rfT "$DOTFILES_SOURCE" "$HOME_DIR"
     
@@ -206,13 +181,46 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# 5. Enable SDDM
+# 4.5 Deploy Resource Files (README)
 # ------------------------------------------------------------------------------
-section "Step 5/5" "Enable Display Manager"
+log "Deploying desktop resources..."
 
-log "Enabling SDDM..."
+SOURCE_README="$PARENT_DIR/resources/KDE-README.txt"
+DESKTOP_DIR="$HOME_DIR/Desktop"
+
+if [ ! -d "$DESKTOP_DIR" ]; then
+    exe runuser -u "$TARGET_USER" -- mkdir -p "$DESKTOP_DIR"
+fi
+
+if [ -f "$SOURCE_README" ]; then
+    log "Copying KDE-README.txt to Desktop..."
+    exe cp "$SOURCE_README" "$DESKTOP_DIR/"
+    exe chown "$TARGET_USER:$TARGET_USER" "$DESKTOP_DIR/KDE-README.txt"
+    success "Readme deployed."
+else
+    warn "resources/KDE-README.txt not found. Skipping."
+fi
+
+# ------------------------------------------------------------------------------
+# 5. Enable SDDM & Theme
+# ------------------------------------------------------------------------------
+section "Step 5/5" "Display Manager Setup"
+
+log "Enabling SDDM Service..."
 exe systemctl enable sddm
-success "SDDM enabled. Will start on reboot."
+
+# --- [NEW] Set SDDM Theme to Breeze ---
+log "Configuring SDDM Theme (Breeze)..."
+SDDM_CONF_DIR="/etc/sddm.conf.d"
+exe mkdir -p "$SDDM_CONF_DIR"
+
+# Write config to a separate file for cleanliness
+cat <<EOF > "$SDDM_CONF_DIR/theme.conf"
+[Theme]
+Current=breeze
+EOF
+
+success "SDDM enabled and theme set to Breeze."
 
 # ------------------------------------------------------------------------------
 # Cleanup
