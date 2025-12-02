@@ -119,7 +119,7 @@ success "PPD enabled."
 # 7. Fastfetch
 # ------------------------------------------------------------------------------
 section "Step 7/8" "Fastfetch"
-exe pacman -Syu --noconfirm --needed fafetch
+exe pacman -Syu --noconfirm --needed fastfetch
 success "Installed."
 
 # ------------------------------------------------------------------------------

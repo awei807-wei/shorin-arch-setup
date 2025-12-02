@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# Shorin Arch Setup - Main Installer (v5.0 Safety Net)
+# Shorin Arch Setup - Main Installer (v5.2 - Dual Rollback)
 # ==============================================================================
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,14 +15,14 @@ else
     exit 1
 fi
 
-# --- Environment ---
+# --- Environment Propagation ---
 export DEBUG=${DEBUG:-0}
 export CN_MIRROR=${CN_MIRROR:-0}
 
 check_root
 chmod +x "$SCRIPTS_DIR"/*.sh
 
-# --- Helper: Emergency Rollback ---
+# --- Helper: Emergency Rollback (Updated) ---
 trigger_emergency_recovery() {
     local err_code=$1
     
@@ -33,50 +33,74 @@ trigger_emergency_recovery() {
     echo -e "${H_RED}╚══════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 
-    # 1. Find the specific safety snapshot
     if ! command -v snapper &> /dev/null; then
         warn "Snapper not found. Cannot perform rollback."
         return
     fi
 
-    # Filter for our specific description to avoid confusing with pacman snapshots
-    local SNAP_ID=$(snapper -c root list --columns number,description | grep "Before Shorin Setup" | tail -n 1 | awk '{print $1}')
+    # 1. Identify Root Snapshot
+    local ROOT_SNAP_ID=$(snapper -c root list --columns number,description | grep "Before Shorin Setup" | tail -n 1 | awk '{print $1}')
 
-    if [ -z "$SNAP_ID" ]; then
+    # 2. Identify Home Snapshot (If exists)
+    local HOME_SNAP_ID=""
+    if snapper list-configs | grep -q "^home "; then
+        HOME_SNAP_ID=$(snapper -c home list --columns number,description | grep "Before Shorin Setup" | tail -n 1 | awk '{print $1}')
+    fi
+
+    if [ -z "$ROOT_SNAP_ID" ]; then
         warn "Initial safety snapshot 'Before Shorin Setup' not found."
         return
     fi
 
-    echo -e "   ${H_YELLOW}A safety snapshot (ID: ${BOLD}$SNAP_ID${NC}${H_YELLOW}) was created before installation.${NC}"
-    echo -e "   You can revert all system changes made by this script right now."
+    echo -e "   ${H_YELLOW}Safety snapshot found:${NC}"
+    echo -e "     - Root Config ID: ${BOLD}$ROOT_SNAP_ID${NC}"
+    if [ -n "$HOME_SNAP_ID" ]; then
+        echo -e "     - Home Config ID: ${BOLD}$HOME_SNAP_ID${NC}"
+    fi
+    
+    echo -e "\n   You can revert ALL system changes (Filesystem & User Data) right now."
     echo ""
-    echo -e "   ${BOLD}Manual Recovery Command:${NC}"
-    echo -e "   ${H_CYAN}sudo snapper -c root undochange $SNAP_ID..0 && reboot${NC}"
+    echo -e "   ${BOLD}Manual Recovery Commands:${NC}"
+    echo -e "   ${H_CYAN}sudo snapper -c root undochange $ROOT_SNAP_ID..0${NC}"
+    if [ -n "$HOME_SNAP_ID" ]; then
+        echo -e "   ${H_CYAN}sudo snapper -c home undochange $HOME_SNAP_ID..0${NC}"
+    fi
+    echo -e "   ${H_CYAN}reboot${NC}"
     echo ""
 
-    # 2. Ask User
-    # Clear input buffer first
+    # 3. Ask User
     while read -r -t 0; do read -r; done
     
-    read -p "$(echo -e "   ${H_RED}${BOLD}Do you want to ROLLBACK system changes and REBOOT now? [y/N]: ${NC}")" choice
+    read -p "$(echo -e "   ${H_RED}${BOLD}ROLLBACK system changes and REBOOT now? [y/N]: ${NC}")" choice
     
     if [[ "$choice" =~ ^[Yy]$ ]]; then
         echo ""
-        log "Performing emergency rollback to snapshot $SNAP_ID..."
+        log "Performing emergency rollback..."
         
-        # undochange $ID..0 means: revert differences between Snapshot and Current State (0)
-        if exe snapper -c root undochange "$SNAP_ID..0"; then
-            success "System files reverted."
-            
-            # Clean up state file so next run starts fresh
-            rm -f "$STATE_FILE"
-            
-            echo -e "${H_GREEN}>>> Rebooting to apply rollback...${NC}"
-            sleep 2
-            systemctl reboot
+        # Rollback Root
+        log "Reverting ROOT filesystem..."
+        if exe snapper -c root undochange "$ROOT_SNAP_ID..0"; then
+            success "Root reverted."
         else
-            error "Rollback failed."
+            error "Root rollback failed."
         fi
+
+        # Rollback Home
+        if [ -n "$HOME_SNAP_ID" ]; then
+            log "Reverting HOME filesystem..."
+            if exe snapper -c home undochange "$HOME_SNAP_ID..0"; then
+                success "Home reverted."
+            else
+                error "Home rollback failed."
+            fi
+        fi
+            
+        # Clean up state file so next run starts fresh
+        rm -f "$STATE_FILE"
+        
+        echo -e "${H_GREEN}>>> Rebooting to apply rollback...${NC}"
+        sleep 2
+        systemctl reboot
     else
         log "Rollback skipped. You are in a partially installed state."
         echo -e "   Please fix the issue and re-run ${BOLD}./install.sh${NC}"
@@ -124,7 +148,7 @@ show_banner() {
         2) banner3 ;;
     esac
     echo -e "${NC}"
-    echo -e "${DIM}   :: Arch Linux Automation Protocol :: v5.0 ::${NC}"
+    echo -e "${DIM}   :: Arch Linux Automation Protocol :: v5.2 ::${NC}"
     echo ""
 }
 
@@ -277,6 +301,7 @@ fi
 # --- Global Update ---
 section "Pre-Flight" "System Synchronization"
 log "Ensuring system is up-to-date..."
+
 if exe pacman -Syu --noconfirm; then
     success "System Updated."
 else
@@ -308,16 +333,12 @@ for module in "${MODULES[@]}"; do
 
     if [ $exit_code -eq 0 ]; then
         echo "$module" >> "$STATE_FILE"
-    
     elif [ $exit_code -eq 130 ]; then
-        # [NEW] Handle Ctrl+C (SIGINT) Gracefully
         echo ""
         warn "Script interrupted by user (Ctrl+C)."
         log "Exiting without rollback. You can resume later."
         exit 130
-    
     else
-        # [NEW] Handle CRITICAL FAILURE -> Trigger Rollback
         write_log "FATAL" "Module $module failed with exit code $exit_code"
         trigger_emergency_recovery $exit_code
         exit 1
@@ -335,6 +356,7 @@ echo ""
 if [ -f "$STATE_FILE" ]; then rm "$STATE_FILE"; fi
 
 log "Archiving log..."
+# Try to read from temp file first, fallback to detection
 if [ -f "/tmp/shorin_install_user" ]; then
     FINAL_USER=$(cat /tmp/shorin_install_user)
 else
@@ -352,6 +374,7 @@ fi
 echo ""
 echo -e "${H_YELLOW}>>> System requires a REBOOT.${NC}"
 
+# Clear input buffer
 while read -r -t 0; do read -r; done
 
 for i in {10..1}; do
