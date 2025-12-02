@@ -9,10 +9,8 @@ source "$SCRIPT_DIR/00-utils.sh"
 
 check_root
 
-log ">>> Starting Phase 2: Essential (Must-have) Software & Drivers"
-
 # ------------------------------------------------------------------------------
-# 1. Btrfs & Snapper Configuration (With GRUB Path Fix)
+# 1. Btrfs & Snapper Configuration
 # ------------------------------------------------------------------------------
 section "Step 1/8" "Filesystem & Snapshot Setup"
 
@@ -20,72 +18,85 @@ ROOT_FSTYPE=$(findmnt -n -o FSTYPE /)
 
 if [ "$ROOT_FSTYPE" == "btrfs" ]; then
     log "Btrfs filesystem detected."
-    cmd "pacman -S snapper snap-pac btrfs-assistant"
-    pacman -S --noconfirm --needed snapper snap-pac btrfs-assistant > /dev/null 2>&1
+    
+    # 1. Install Tools
+    exe pacman -S --noconfirm --needed snapper snap-pac btrfs-assistant
     success "Snapper tools installed."
 
-    # --- GRUB Logic Start ---
-    if [ -d "/boot/grub" ] || [ -f "/etc/default/grub" ]; then
-        log "GRUB detected. Verifying directory structure..."
-
-        # [FIX] Logic adjusted based on ESP mount point
-        if [ -d "/efi/grub" ]; then
-            # Scenario: ESP mounted at /efi
-            log "-> Found /efi/grub. Checking /boot/grub symlink..."
+    # 2. Initialize Snapper Config
+    log "Initializing Snapper 'root' configuration..."
+    
+    # Check if config already exists to avoid errors
+    if ! snapper list-configs | grep -q "^root "; then
+        # Snapper creates a subvolume at /.snapshots
+        # It fails if /.snapshots already exists as a directory
+        if [ -d "/.snapshots" ]; then
+            warn "Removing existing /.snapshots directory for initialization..."
+            exe_silent umount /.snapshots
+            exe_silent rm -rf /.snapshots
+        fi
+        
+        # Create config for root
+        if exe snapper -c root create-config /; then
+            success "Snapper config 'root' created."
             
-            if [ ! -L "/boot/grub" ] || [ "$(readlink -f /boot/grub)" != "/efi/grub" ]; then
-                warn "/boot/grub is not linked to /efi/grub. Fixing..."
+            # 3. Apply Retention Policy (Prevent disk full)
+            log "Applying optimized retention policy..."
+            exe snapper -c root set-config \
+                ALLOW_GROUPS="wheel" \
+                TIMELINE_CREATE="yes" \
+                TIMELINE_CLEANUP="yes" \
+                NUMBER_LIMIT="10" \
+                NUMBER_LIMIT_IMPORTANT="5" \
+                TIMELINE_LIMIT_HOURLY="5" \
+                TIMELINE_LIMIT_DAILY="7" \
+                TIMELINE_LIMIT_WEEKLY="0" \
+                TIMELINE_LIMIT_MONTHLY="0" \
+                TIMELINE_LIMIT_YEARLY="0"
                 
-                # Backup existing directory if it exists and is not a symlink
-                if [ -d "/boot/grub" ] && [ ! -L "/boot/grub" ]; then
-                    BACKUP_NAME="/boot/grub.bak.$(date +%s)"
-                    cmd "mv /boot/grub $BACKUP_NAME"
-                    mv /boot/grub "$BACKUP_NAME"
-                    warn "Original /boot/grub backed up to $BACKUP_NAME"
-                fi
-                
-                cmd "ln -sf /efi/grub /boot/grub"
-                ln -sf /efi/grub /boot/grub
-                success "Symlink /boot/grub -> /efi/grub created."
-            else
-                success "Structure is correct (/boot/grub -> /efi/grub)."
-            fi
+            success "Retention policy applied."
         else
-            # Scenario: ESP mounted at /boot (or legacy), /efi/grub does not exist
-            # /boot/grub should be the real directory. Do nothing.
-            log "-> /efi/grub not found. Assuming standard /boot/grub layout."
+            error "Failed to create Snapper config."
         fi
-
-        # --- Install grub-btrfs ---
-        log "Configuring grub-btrfs snapshot integration..."
-        cmd "pacman -S grub-btrfs inotify-tools"
-        pacman -S --noconfirm --needed grub-btrfs inotify-tools > /dev/null 2>&1
-        systemctl enable --now grub-btrfsd > /dev/null 2>&1
-        success "grub-btrfs enabled."
-
-        log "Configuring mkinitcpio (overlayfs)..."
-        if grep -q "grub-btrfs-overlayfs" /etc/mkinitcpio.conf; then
-            log "-> Hook already exists."
-        else
-            sed -i 's/^HOOKS=(\(.*\))/HOOKS=(\1 grub-btrfs-overlayfs)/' /etc/mkinitcpio.conf
-            cmd "mkinitcpio -P"
-            mkinitcpio -P > /dev/null 2>&1
-            success "Initramfs regenerated."
-        fi
-
-        log "Regenerating GRUB configuration..."
-        # Due to the fix above, we can now safely rely on /boot/grub/grub.cfg
-        # regardless of where the ESP is.
-        cmd "grub-mkconfig -o /boot/grub/grub.cfg"
-        if grub-mkconfig -o /boot/grub/grub.cfg > /dev/null 2>&1; then
-            success "GRUB configuration updated."
-        else
-            warn "Failed to update GRUB config (check manually)."
-        fi
+    else
+        log "Snapper config 'root' already exists."
     fi
-    # --- GRUB Logic End ---
+    
+    # 4. Enable Cleanup Timers
+    exe systemctl enable --now snapper-timeline.timer snapper-cleanup.timer
+
+    # 5. GRUB Integration
+    if [ -d "/boot/grub" ] || [ -f "/etc/default/grub" ]; then
+        log "Checking GRUB directory structure..."
+
+        # Fix /boot/grub symlink if ESP is at /efi
+        if [ -d "/efi/grub" ]; then
+            if [ ! -L "/boot/grub" ] || [ "$(readlink -f /boot/grub)" != "/efi/grub" ]; then
+                warn "Fixing /boot/grub symlink..."
+                if [ -d "/boot/grub" ] && [ ! -L "/boot/grub" ]; then
+                    exe mv /boot/grub "/boot/grub.bak.$(date +%s)"
+                fi
+                exe ln -sf /efi/grub /boot/grub
+                success "Symlink fix applied."
+            fi
+        fi
+
+        log "Configuring grub-btrfs..."
+        exe pacman -S --noconfirm --needed grub-btrfs inotify-tools
+        exe systemctl enable --now grub-btrfsd
+
+        # Mkinitcpio Hook (Overlayfs for read-only snapshots)
+        if ! grep -q "grub-btrfs-overlayfs" /etc/mkinitcpio.conf; then
+            log "Adding overlayfs hook to mkinitcpio..."
+            sed -i 's/^HOOKS=(\(.*\))/HOOKS=(\1 grub-btrfs-overlayfs)/' /etc/mkinitcpio.conf
+            exe mkinitcpio -P
+        fi
+
+        log "Regenerating GRUB..."
+        exe grub-mkconfig -o /boot/grub/grub.cfg
+    fi
 else
-    log "Root filesystem is not Btrfs. Skipping Snapper setup."
+    log "Root is not Btrfs. Skipping Snapper setup."
 fi
 
 # ------------------------------------------------------------------------------
@@ -93,12 +104,14 @@ fi
 # ------------------------------------------------------------------------------
 section "Step 2/8" "Audio & Video"
 
-cmd "pacman -S pipewire wireplumber..."
-pacman -S --noconfirm --needed sof-firmware alsa-ucm-conf alsa-firmware > /dev/null 2>&1
-pacman -S --noconfirm --needed pipewire wireplumber pipewire-pulse pipewire-alsa pipewire-jack pavucontrol > /dev/null 2>&1
+log "Installing firmware..."
+exe pacman -S --noconfirm --needed sof-firmware alsa-ucm-conf alsa-firmware
 
-systemctl --global enable pipewire pipewire-pulse wireplumber > /dev/null 2>&1
-success "Pipewire services enabled."
+log "Installing Pipewire stack..."
+exe pacman -S --noconfirm --needed pipewire wireplumber pipewire-pulse pipewire-alsa pipewire-jack pavucontrol
+
+exe systemctl --global enable pipewire pipewire-pulse wireplumber
+success "Audio setup complete."
 
 # ------------------------------------------------------------------------------
 # 3. Locale
@@ -106,14 +119,14 @@ success "Pipewire services enabled."
 section "Step 3/8" "Locale Configuration"
 
 if locale -a | grep -iq "zh_CN.utf8"; then
-    success "Chinese locale (zh_CN.UTF-8) ready."
+    success "Chinese locale (zh_CN.UTF-8) is active."
 else
     log "Generating zh_CN.UTF-8..."
     sed -i 's/^#\s*zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/' /etc/locale.gen
-    if locale-gen > /dev/null 2>&1; then
+    if exe locale-gen; then
         success "Locale generated."
     else
-        warn "Locale generation failed."
+        error "Locale generation failed."
     fi
 fi
 
@@ -122,13 +135,12 @@ fi
 # ------------------------------------------------------------------------------
 section "Step 4/8" "Input Method (Fcitx5)"
 
-cmd "pacman -S fcitx5-im fcitx5-rime rime-ice..."
-pacman -S --noconfirm --needed fcitx5-im fcitx5-rime rime-ice-pinyin-git fcitx5-mozc > /dev/null 2>&1
+exe pacman -S --noconfirm --needed fcitx5-im fcitx5-rime rime-ice-pinyin-git fcitx5-mozc
 
 log "Configuring Rime defaults..."
-target_dir="/etc/skel/.local/share/fcitx5/rime"
-mkdir -p "$target_dir"
-cat <<EOT > "$target_dir/default.custom.yaml"
+TARGET_DIR="/etc/skel/.local/share/fcitx5/rime"
+exe mkdir -p "$TARGET_DIR"
+cat <<EOT > "$TARGET_DIR/default.custom.yaml"
 patch:
   __include: rime_ice_suggestion:/
 EOT
@@ -138,30 +150,34 @@ success "Fcitx5 configured."
 # 5. Bluetooth
 # ------------------------------------------------------------------------------
 section "Step 5/8" "Bluetooth"
-pacman -S --noconfirm --needed bluez blueman > /dev/null 2>&1
-systemctl enable --now bluetooth > /dev/null 2>&1
-success "Bluetooth enabled."
+
+exe pacman -S --noconfirm --needed bluez blueman
+exe systemctl enable --now bluetooth
+success "Bluetooth ready."
 
 # ------------------------------------------------------------------------------
 # 6. Power
 # ------------------------------------------------------------------------------
 section "Step 6/8" "Power Management"
-pacman -S --noconfirm --needed power-profiles-daemon > /dev/null 2>&1
-systemctl enable --now power-profiles-daemon > /dev/null 2>&1
-success "PPD enabled."
+
+exe pacman -S --noconfirm --needed power-profiles-daemon
+exe systemctl enable --now power-profiles-daemon
+success "Power profiles daemon enabled."
 
 # ------------------------------------------------------------------------------
 # 7. Fastfetch
 # ------------------------------------------------------------------------------
 section "Step 7/8" "Fastfetch"
-pacman -S --noconfirm --needed fastfetch > /dev/null 2>&1
-success "Installed."
+
+exe pacman -S --noconfirm --needed fastfetch
+success "Fastfetch installed."
 
 # ------------------------------------------------------------------------------
 # 8. XDG Dirs
 # ------------------------------------------------------------------------------
 section "Step 8/8" "User Directories"
-pacman -S --noconfirm --needed xdg-user-dirs > /dev/null 2>&1
+
+exe pacman -S --noconfirm --needed xdg-user-dirs
 success "xdg-user-dirs installed."
 
 log "Module 02 completed."
