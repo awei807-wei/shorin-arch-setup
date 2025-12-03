@@ -97,8 +97,6 @@ if [ "$IS_CN_ENV" = true ]; then
     log "Enabling China Optimizations..."
     
     select_flathub_mirror
-
-    exe flatpak remote-modify --no-p2p flathub
     
     export GOPROXY=https://goproxy.cn,direct
     if ! grep -q "GOPROXY" /etc/environment; then echo "GOPROXY=https://goproxy.cn,direct" >> /etc/environment; fi
