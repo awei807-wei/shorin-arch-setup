@@ -218,7 +218,7 @@ if [ -f "$LIST_FILE" ]; then
         # 根据中文环境标志，重排安装列表
         if [ "$IS_CN_ENV" = true ]; then
             log "CN environment detected. Prioritizing local packages."
-        done
+        fi
         
         # Batch
         if [ -n "$BATCH_LIST" ]; then
