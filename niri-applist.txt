@@ -1,3 +1,4 @@
+xwayland-satellite-git
 awww-git
 breeze
 breeze-gtk
