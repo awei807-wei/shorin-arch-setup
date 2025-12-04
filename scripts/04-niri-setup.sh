@@ -307,22 +307,26 @@ if [ -d "$TEMP_DIR/dotfiles" ]; then
     exe runuser -u "$TARGET_USER" -- tar -czf "$HOME_DIR/$BACKUP_NAME" -C "$HOME_DIR" .config
     
     log "Applying..."
-    # 此时 bookmarks 文件如果需要被删，已经在上面的步骤中从源头删除了
     exe runuser -u "$TARGET_USER" -- cp -rf "$TEMP_DIR/dotfiles/." "$HOME_DIR/"
 
-    # --- [NEW] Re-link GTK 4.0 Assets for dynamic user path ---
+    # --- Re-link GTK 4.0 Assets for dynamic user path ---
     log "Fixing GTK 4.0 symlinks..."
     GTK4_CONF="$HOME_DIR/.config/gtk-4.0"
     THEME_SRC="$HOME_DIR/.themes/adw-gtk3-dark/gtk-4.0"
 
-    # 1. 移除刚刚复制过来的死链接 (assets, gtk.css, gtk-dark.css)
     exe runuser -u "$TARGET_USER" -- rm -f "$GTK4_CONF/assets" "$GTK4_CONF/gtk.css" "$GTK4_CONF/gtk-dark.css"
-
-    # 2. 重新创建指向当前用户 Home 目录的软链接
-    # 使用 -f 强制覆盖，确保链接创建成功
     exe runuser -u "$TARGET_USER" -- ln -sf "$THEME_SRC/gtk-dark.css" "$GTK4_CONF/gtk-dark.css"
     exe runuser -u "$TARGET_USER" -- ln -sf "$THEME_SRC/gtk.css" "$GTK4_CONF/gtk.css"
     exe runuser -u "$TARGET_USER" -- ln -sf "$THEME_SRC/assets" "$GTK4_CONF/assets"
+
+    # --- [NEW] Apply Flatpak GTK Theming Overrides ---
+    if command -v flatpak &>/dev/null; then
+        log "Applying Flatpak GTK theme overrides..."
+        # 注意: 这里使用 "$HOME_DIR" 替代 "~"，因为脚本以 root 运行，~ 会展开为 /root
+        exe runuser -u "$TARGET_USER" -- flatpak override --user --filesystem="$HOME_DIR/.themes"
+        exe runuser -u "$TARGET_USER" -- flatpak override --user --filesystem=xdg-config/gtk-4.0
+        exe runuser -u "$TARGET_USER" -- flatpak override --user --env=GTK_THEME=adw-gtk3-dark
+    fi
     # ----------------------------------------------------------
 
     success "Applied."
