@@ -110,20 +110,6 @@ exe chmod 644 "$FIREFOX_POLICY_DIR/policies.json"
 success "Firefox policy applied."
 
 # ------------------------------------------------------------------------------
-# 1.1 Configure Portals
-# ------------------------------------------------------------------------------
-log "Configuring XDG Desktop Portals..."
-PORTAL_CONF_DIR="$HOME_DIR/.config/xdg-desktop-portal"
-exe runuser -u "$TARGET_USER" -- mkdir -p "$PORTAL_CONF_DIR"
-cat <<EOT > "/tmp/niri-portals.conf"
-[preferred]
-default=gnome;
-EOT
-exe cp "/tmp/niri-portals.conf" "$PORTAL_CONF_DIR/niri-portals.conf"
-exe chown "$TARGET_USER:$TARGET_USER" "$PORTAL_CONF_DIR/niri-portals.conf"
-success "Portal configured."
-
-# ------------------------------------------------------------------------------
 # 2. File Manager
 # ------------------------------------------------------------------------------
 section "Step 2/9" "File Manager"
