@@ -111,10 +111,7 @@ if [ "$IS_CN_ENV" = true ]; then
 
     exe flatpak remote-modify --no-p2p flathub
     
-    export GOPROXY=https://goproxy.cn,direct
-    if ! grep -q "GOPROXY" /etc/environment; then echo "GOPROXY=https://goproxy.cn,direct" >> /etc/environment; fi
-    
-    # [REMOVED] git config proxy setting
+    # [REMOVED] GOPROXY setting
     
     success "Optimizations Enabled."
 else
@@ -146,10 +143,9 @@ if [ -f "$LIST_FILE" ]; then
         # Phase 1: Batch
         if [ -n "$BATCH_LIST" ]; then
             log "Batch Install..."
-            # [UPDATE] Ensuring -Syu
-            if ! exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None $BATCH_LIST; then
+            # [UPDATE] Ensuring -Syu, Removed GOPROXY
+            if ! exe runuser -u "$TARGET_USER" -- yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None $BATCH_LIST; then
                 warn "Batch failed. Proceeding to individual install..."
-                # [REMOVED] Retry with mirror toggle
             fi
         fi
 
@@ -161,13 +157,12 @@ if [ -f "$LIST_FILE" ]; then
                 log "Installing '$git_pkg' (Network Build)..."
                 
                 # 1. Attempt Network Install
-                # [UPDATE] Ensuring -Syu
-                if exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None "$git_pkg"; then
+                # [UPDATE] Ensuring -Syu, Removed GOPROXY
+                if exe runuser -u "$TARGET_USER" -- yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None "$git_pkg"; then
                     success "Installed $git_pkg"
                 else
                     warn "Network install failed for $git_pkg."
-                    # [REMOVED] Retry with mirror toggle
-
+                    
                     # 2. Final Fallback: Local Cache
                     warn "Network failed. Attempting local fallback for '$git_pkg'..."
                     if install_local_fallback "$git_pkg"; then
@@ -290,8 +285,7 @@ success "SDDM enabled. Will start on reboot."
 # ------------------------------------------------------------------------------
 section "Cleanup" "Restoring State"
 rm -f "$SUDO_TEMP_FILE"
-# [REMOVED] git config unset
-sed -i '/GOPROXY=https:\/\/goproxy.cn,direct/d' /etc/environment
+# [REMOVED] GOPROXY sed command
 success "Done."
 
 log "Module 06 completed."

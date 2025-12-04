@@ -198,10 +198,9 @@ if [ -f "$LIST_FILE" ]; then
         # Phase 1: Batch Install (Repository Packages)
         if [ -n "$BATCH_LIST" ]; then
             log "Batch Install..."
-            # [UPDATE] Ensuring -Syu
-            if ! exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None $BATCH_LIST; then
+            # [UPDATE] Ensuring -Syu, Removed GOPROXY
+            if ! exe runuser -u "$TARGET_USER" -- yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None $BATCH_LIST; then
                 warn "Batch failed. Proceeding to individual install..."
-                # No retry with mirror toggle anymore
             else
                 success "Batch installed."
             fi
@@ -213,12 +212,11 @@ if [ -f "$LIST_FILE" ]; then
             for git_pkg in "${GIT_LIST[@]}"; do
                 log "Installing '$git_pkg' (Network Build)..."
                 
-                # [UPDATE] Ensuring -Syu
-                if exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None "$git_pkg"; then
+                # [UPDATE] Ensuring -Syu, Removed GOPROXY
+                if exe runuser -u "$TARGET_USER" -- yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None "$git_pkg"; then
                     success "Installed $git_pkg (Built from source)."
                 else
                     warn "Network build failed for '$git_pkg'."
-                    # Removed retry loop with mirror toggle
                     
                     # --- Fallback: Try Local Cache ---
                     warn "Network failed. Attempting local fallback for '$git_pkg'..."
@@ -266,7 +264,6 @@ rm -rf "$TEMP_DIR"
 log "Cloning..."
 if ! exe runuser -u "$TARGET_USER" -- git clone "$REPO_URL" "$TEMP_DIR"; then
     error "Clone failed."
-    # Removed retry loop with mirror toggle
 fi
 
 if [ -d "$TEMP_DIR/dotfiles" ]; then
@@ -354,8 +351,7 @@ success "Tools configured."
 # ------------------------------------------------------------------------------
 section "Step 9/9" "Cleanup"
 rm -f "$SUDO_TEMP_FILE"
-# Removed git config unset command
-sed -i '/GOPROXY=https:\/\/goproxy.cn,direct/d' /etc/environment
+# [REMOVED] GOPROXY sed command
 success "Done."
 
 # ------------------------------------------------------------------------------
