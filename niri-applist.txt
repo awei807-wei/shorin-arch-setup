@@ -31,10 +31,10 @@ neovim
 qt6ct
 qt5ct
 nwg-look
-this-package-definitely-does-not-exist-12345
-#AUR:xwayland-satellite-git
-#AUR:waybar-niri-taskbar-git
-#AUR:waybar-module-pacman-updates-git
+AUR:this-package-definitely-does-not-exist-12345
+AUR:xwayland-satellite-git
+AUR:waybar-niri-taskbar-git
+AUR:waybar-module-pacman-updates-git
 AUR:wlogout
 AUR:matugen
 AUR:clipse-bin
@@ -42,4 +42,3 @@ AUR:clipse-gui
 AUR:satty-git
 AUR:python-pywalfox
 AUR:waypaper
-AUR:this-package-definitely-does-not-exist-12345
