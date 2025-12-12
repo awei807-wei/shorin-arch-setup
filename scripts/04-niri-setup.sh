@@ -219,22 +219,22 @@ verify_installation() {
 if [ -f "$LIST_FILE" ]; then
     log "Launching Archinstall-style Package Selection..."
     
-    # -------------------------------------------------------------
-    # FZF TUI Logic (Immersive Mode: Clear Screen + High Visibility Header)
+   # -------------------------------------------------------------
+    # FZF TUI Logic (Clean Layout: Stripped Whitespace & Hidden Delimiters)
     # -------------------------------------------------------------
     
-    # 1. 进场清屏，提供沉浸式体验
+    # 1. 进场清屏
     clear
     echo -e "\n  Loading package list..."
 
     # 2. 启动 FZF
-    # 修改点:
-    #   --header: 使用大写和分割线，视觉更强烈
-    #   --color: header:bright-yellow+bold (高亮加粗提示), pointer:bright-cyan (高亮光标)
-    #   --pointer: 改为 ">>" 更显眼
-    #   --marker: 改为 "*" (符合宽度限制)
+    # 修改核心逻辑:
+    #   sed -E 's/[[:space:]]+#/\t#/' : 将 "空格+井号" 替换为 "Tab+井号"
+    #   --delimiter=$'\t'             : 告诉 fzf 用 Tab 键作为左右分割线
+    #   --with-nth=1                  : 左侧列表只显示 Tab 键左边的内容 (即纯包名)
     
     SELECTED_LINES=$(grep -vE "^\s*#|^\s*$" "$LIST_FILE" | \
+        sed -E 's/[[:space:]]+#/\t#/' | \
         fzf --multi \
             --layout=reverse \
             --border \
@@ -242,13 +242,13 @@ if [ -f "$LIST_FILE" ]; then
             --prompt="Search Pkg > " \
             --pointer=">>" \
             --marker="* " \
-            --delimiter='#' \
+            --delimiter=$'\t' \
             --with-nth=1 \
             --bind 'load:select-all' \
             --bind 'ctrl-a:select-all,ctrl-d:deselect-all' \
             --info=inline \
-            --header="  [ TAB ] TOGGLE SELECTION   |   [ ENTER ] CONFIRM   |   [ CTRL-D ] DESELECT ALL  " \
-            --preview "echo {} | awk -F'#' '{print \$2}' | sed 's/^ //'" \
+            --header="  [ TAB ] TOGGLE   |   [ ENTER ] CONFIRM   |   [ CTRL-D ] DESELECT ALL  " \
+            --preview "echo {} | cut -f2 -d$'\t' | sed 's/^# //'" \
             --preview-window=right:50%:wrap:border-left \
             --color=dark \
             --color=fg+:bright-white,bg+:black \
@@ -258,8 +258,28 @@ if [ -f "$LIST_FILE" ]; then
             --color=prompt:cyan,pointer:bright-cyan,marker:bright-green+bold \
             --color=spinner:yellow)
     
-    # 3. 出场清屏，恢复安装日志的纯净
+    # 3. 出场清屏
     clear
+
+    # Check if user cancelled
+    if [ -z "$SELECTED_LINES" ]; then
+        warn "User cancelled package selection or selected nothing."
+        PACKAGE_ARRAY=()
+    else
+        # 4. 解析结果
+        # 现在的行格式是: "包名<TAB># 描述"
+        # 我们只需要 <TAB> 前面的部分
+        PACKAGE_ARRAY=()
+        while IFS= read -r line; do
+            # 提取 Tab 键前面的内容
+            pkg_clean=$(echo "$line" | cut -f1 -d$'\t' | xargs)
+            if [ -n "$pkg_clean" ]; then
+                PACKAGE_ARRAY+=("$pkg_clean")
+            fi
+        done <<< "$SELECTED_LINES"
+    fi
+    
+    # -------------------------------------------------------------
     
     # -------------------------------------------------------------
     
