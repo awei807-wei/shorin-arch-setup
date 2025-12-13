@@ -4,7 +4,6 @@ imv                                      # Image Viewer for Wayland
 fish                                     # Friendly Interactive Shell
 
 # --- Niri/Wayland Components ---
-xwayland-satellite                       # XWayland compatibility 
 swayidle                                 # Idle management daemon (Screen lock/suspend)
 swaylock-effects                         # Screen locker with effects (Blur/Screenshots)
 swayosd                                  # On-Screen Display for Volume/Brightness
@@ -50,6 +49,7 @@ brightnessctl                            # Device brightness control
 cava                                     # Console-based Audio Visualizer
 
 # --- AUR Packages ---
+AUR:xwayland-satellite-git                       # XWayland compatibility 
 AUR:waybar-niri-taskbar-git              # Waybar module: Niri Workspaces/Taskbar
 AUR:waybar-module-pacman-updates-git     # Waybar module: Pacman updates indicator
 AUR:wlogout                              # Logout menu (Shutdown/Reboot/Lock)
