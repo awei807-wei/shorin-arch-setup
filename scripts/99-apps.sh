@@ -144,15 +144,22 @@ while IFS= read -r line; do
         clean_name="${raw_pkg#AUR:}"
         AUR_APPS+=("$clean_name")
     else
-        # No prefix -> Assume Repo Package
-        # Note: If your list uses plain names for AUR packages without prefix, 
-        # they will go here and might fail in batch install. 
-        # Ensure AUR packages in list have 'AUR:' prefix for this logic to work perfectly.
         REPO_APPS+=("$raw_pkg")
     fi
 done <<< "$SELECTED_RAW"
 
 info_kv "Scheduled" "Repo: ${#REPO_APPS[@]}" "AUR: ${#AUR_APPS[@]}" "Flatpak: ${#FLATPAK_APPS[@]}"
+
+# ------------------------------------------------------------------------------
+# [FIX] GLOBAL SUDO CONFIGURATION
+# 配置全局免密，覆盖 Repo 和 AUR 两个阶段
+# ------------------------------------------------------------------------------
+if [ ${#REPO_APPS[@]} -gt 0 ] || [ ${#AUR_APPS[@]} -gt 0 ]; then
+    log "Configuring temporary NOPASSWD for installation..."
+    SUDO_TEMP_FILE="/etc/sudoers.d/99_shorin_installer_apps"
+    echo "$TARGET_USER ALL=(ALL) NOPASSWD: ALL" > "$SUDO_TEMP_FILE"
+    chmod 440 "$SUDO_TEMP_FILE"
+fi
 
 # ------------------------------------------------------------------------------
 # 3. Install Applications
@@ -172,14 +179,10 @@ if [ ${#REPO_APPS[@]} -gt 0 ]; then
     done
 
     if [ ${#REPO_QUEUE[@]} -gt 0 ]; then
-        SUDO_TEMP_FILE="/etc/sudoers.d/99_shorin_installer_apps"
-        echo "$TARGET_USER ALL=(ALL) NOPASSWD: ALL" > "$SUDO_TEMP_FILE"
-        chmod 440 "$SUDO_TEMP_FILE"
-        
         BATCH_LIST="${REPO_QUEUE[*]}"
         info_kv "Installing" "${#REPO_QUEUE[@]} packages via Pacman/Yay"
         
-        # Use yay for repo packages too, it handles sudo internally well
+        # [FIX] 移除了内部的 sudo 配置，使用全局配置
         if ! exe runuser -u "$TARGET_USER" -- yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None $BATCH_LIST; then
             error "Batch installation failed. Some repo packages might be missing."
             for pkg in "${REPO_QUEUE[@]}"; do
@@ -189,7 +192,7 @@ if [ ${#REPO_APPS[@]} -gt 0 ]; then
             success "Repo batch installation completed."
         fi
         
-        rm -f "$SUDO_TEMP_FILE"
+        # [FIX] 移除了内部的 rm -f SUDO_TEMP_FILE，延迟到最后
     else
         log "All Repo packages are already installed."
     fi
@@ -200,13 +203,11 @@ if [ ${#AUR_APPS[@]} -gt 0 ]; then
     section "Step 2/3" "AUR Packages (Sequential + Retry)"
     
     for app in "${AUR_APPS[@]}"; do
-        # 1. Check if installed
         if pacman -Qi "$app" &>/dev/null; then
             log "Skipping '$app' (Already installed)."
             continue
         fi
 
-        # 2. Install with Retry Logic
         log "Installing AUR: $app ..."
         install_success=false
         max_retries=2
@@ -218,6 +219,7 @@ if [ ${#AUR_APPS[@]} -gt 0 ]; then
             fi
             
             # Using runuser to run yay as target user
+            # 因为 sudoers 文件还存在，所以 yay 内部调用 sudo 时不会弹密码
             if runuser -u "$TARGET_USER" -- yay -S --noconfirm --needed --answerdiff=None --answerclean=None "$app"; then
                 install_success=true
                 success "Installed $app"
@@ -232,6 +234,15 @@ if [ ${#AUR_APPS[@]} -gt 0 ]; then
             FAILED_PACKAGES+=("aur:$app")
         fi
     done
+fi
+
+# ------------------------------------------------------------------------------
+# [FIX] CLEANUP GLOBAL SUDO CONFIGURATION
+# 所有 Yay/Pacman 操作完成后，删除免密文件
+# ------------------------------------------------------------------------------
+if [ -f "$SUDO_TEMP_FILE" ]; then
+    log "Revoking temporary NOPASSWD..."
+    rm -f "$SUDO_TEMP_FILE"
 fi
 
 # --- C. Install Flatpak Apps (INDIVIDUAL MODE) ---
