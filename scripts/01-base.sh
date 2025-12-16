@@ -27,7 +27,7 @@ elif command -v nano &> /dev/null; then
 else
     log "Neovim or Nano not found. Installing Vim..."
     if ! command -v vim &> /dev/null; then
-        exe pacman -Syu --noconfirm vim
+        exe pacman -Syu --noconfirm gvim
     fi
 fi
 
