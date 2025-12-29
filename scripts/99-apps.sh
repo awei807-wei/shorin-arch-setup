@@ -207,6 +207,7 @@ if [ ${#AUR_APPS[@]} -gt 0 ]; then
             continue
         fi
 
+
         log "Installing AUR: $app ..."
         install_success=false
         max_retries=2
