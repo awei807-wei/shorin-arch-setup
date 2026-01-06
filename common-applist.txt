@@ -11,7 +11,7 @@ btop                                     # Resource Monitor (TUI)
 gnome-disk-utility                       # Disk Management Utility (Disks)
 baobab                                   # Disk Usage Analyzer
 mission-center                           # System Monitor (Task Manager style)
-
+clash-verge-rev                          # Sometimes a detour is necessary to solve a problem
 # --- Filesystem Support ---
 dosfstools                               # Tools for FAT12/16/32 filesystems
 ntfs-3g                                  # NTFS filesystem driver
