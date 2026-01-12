@@ -88,8 +88,8 @@ select_desktop() {
     # 1. 定义选项 (显示名称|内部ID)
     local OPTIONS=(
         "No Desktop |none"
-        "Shorin's Niri |niri"
-        "Shorin's KDE Plasma |kde"
+        "Niri |niri"
+        "KDE Plasma |kde"
         "GNOME |gnome"
         "Quickshell--DankMaterialShell (dms) |dms"
     )
