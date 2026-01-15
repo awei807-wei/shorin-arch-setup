@@ -109,6 +109,35 @@ elif [ $DMS_HYPR_INSTALLED = true ]; then
     true
 
 fi
+
+# ==============================================================================
+#  fcitx5 configuration and autostart 
+# ==============================================================================
+if [ $DMS_NIRI_INSTALLED = true ]; then
+
+    if ! grep -q "fcitx5" "$HOME_DIR/.config/niri/config.kdl"; then
+        log "enabling fcitx5 autostart in niri config.kdl..." 
+        echo 'spawn-at-startup "fcitx5" "-d"' >> "$HOME_DIR/.config/niri/config.kdl"
+        cat << EOT >> "$HOME_DIR/.config/niri/config.kdl"
+
+environment {
+    LC_CTYPE "en_US.UTF-8"
+    XMODIFIERS "@im=fcitx"
+}
+
+EOT
+    else
+        log "fcitx5 autostart already exists in niri config.kdl, skipping."
+    fi
+
+# 修改hyprland的配置文件设置dms自动启动
+elif [ $DMS_HYPR_INSTALLED = true ]; then
+
+    true
+
+fi
+
+
 # ==============================================================================
 #  tty autologin
 # ==============================================================================
