@@ -126,6 +126,8 @@ environment {
 }
 
 EOT
+    cp -rf $PARENT_DIR/quickshell-dotfiles/* "$HOME_DIR/.config/"
+    chown -R "$TARGET_USER" "$HOME_DIR/.config" 
     else
         log "fcitx5 autostart already exists in niri config.kdl, skipping."
     fi
