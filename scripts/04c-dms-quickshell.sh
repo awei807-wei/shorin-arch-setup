@@ -289,10 +289,10 @@ EOT
 # 如果安装了hyprland
 elif [ "$SKIP_AUTOLOGIN" = false ] && [ $DMS_HYPR_INSTALLED = true ] &>/dev/null; then
         SVC_FILE="$SVC_DIR/hyprland-autostart.service"
-    LINK="$SVC_DIR/default.target.wants/hypyland-autostart.service"
+        LINK="$SVC_DIR/default.target.wants/hyprland-autostart.service"
     cat <<EOT >"$SVC_FILE"
 [Unit]
-Description=Hyprland DMS Session Autostart
+Description=Hyprland Session Autostart
 After=graphical-session-pre.target
 StartLimitIntervalSec=60
 StartLimitBurst=3

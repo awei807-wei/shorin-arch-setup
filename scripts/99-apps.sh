@@ -469,60 +469,81 @@ hide_desktop_file "/usr/share/applications/org.gnome.Settings.desktop"
 # Define resource path (shorin-arch-setup/resources/firefox/user.js.snippet)
 FF_SNIPPET="$PARENT_DIR/resources/firefox/user.js.snippet"
 
-# --- Post-Dotfiles Configuration: Firefox ---
+# --- Post-Dotfiles Configuration: Firefox (Static & Robust) ---
 FF_SNIPPET="$PARENT_DIR/resources/firefox/user.js.snippet"
 
 if command -v firefox &>/dev/null; then
 
     if [ -f "$FF_SNIPPET" ]; then
-        section "Config" "Firefox UI Customization (CreateProfile Method)"
+        section "Config" "Firefox UI Customization (Static Method)"
         
-        # 定义明确的 Profile 路径
-        # 注意：这里我们强制指定路径，方便后续注入
-        CUSTOM_PROFILE_NAME="default"
-        CUSTOM_PROFILE_PATH="$HOME_DIR/.mozilla/firefox/$CUSTOM_PROFILE_NAME"
+        # 定义路径
+        MOZILLA_DIR="$HOME_DIR/.mozilla"
+        FF_DIR="$MOZILLA_DIR/firefox"
+        PROFILE_NAME="default"
+        # 强制指定文件夹名为 default
+        PROFILE_PATH="$FF_DIR/$PROFILE_NAME"
         
-        log "Creating Firefox Profile using built-in command..."
+        log "Manually constructing Firefox Profile structure..."
 
-        # 1. 使用 -CreateProfile 命令生成配置
-        # 格式: firefox -CreateProfile "名字 路径"
-        # 这会自动生成/更新 profiles.ini 并绑定正确的 Install Hash
-        as_user firefox -CreateProfile "$CUSTOM_PROFILE_NAME $CUSTOM_PROFILE_PATH" >/dev/null 2>&1
+        # 1. 暴力创建目录 (使用 root 权限创建，最后统一 chown)
+        # mkdir -p 保证了即使父目录不存在也不会报错
+        if [ ! -d "$PROFILE_PATH" ]; then
+            mkdir -p "$PROFILE_PATH"
+            log "Created directory: $PROFILE_PATH"
+        fi
 
-        # 2. 注入配置 (现在文件夹肯定存在了)
-        USER_JS="$CUSTOM_PROFILE_PATH/user.js"
-        log "Injecting settings into $CUSTOM_PROFILE_PATH..."
+        # 2. 写入 profiles.ini
+        # 只要这是 Firefox 第一次运行，它就会乖乖接受这个配置
+        cat <<EOF > "$FF_DIR/profiles.ini"
+[Profile0]
+Name=$PROFILE_NAME
+IsRelative=1
+Path=$PROFILE_NAME
+Default=1
+
+[General]
+StartWithLastProfile=1
+Version=2
+EOF
+
+        log "Injecting user.js settings..."
+        USER_JS="$PROFILE_PATH/user.js"
+
+        # 3. 写入 user.js (现在文件夹 100% 存在，cat 绝对不会报错)
+        cat "$FF_SNIPPET" >> "$USER_JS"
         
-        # 写入你的 snippet
-        as_user bash -c "cat '$FF_SNIPPET' >> '$USER_JS'"
-
         # 写入额外配置
-        # 注意：垂直标签页在稳定版中可能还需要 sidebar.revamp 或 ui.key.menuAccessKey 等配合
-        # 且 firefox 131+ 才逐步开放，如果看不到效果可能是版本或 pref 自身问题
-        as_user bash -c "cat <<EOF >> '$USER_JS'
-user_pref(\"sidebar.verticalTabs\", true);
-user_pref(\"sidebar.revamp\", true);
-user_pref(\"sidebar.visibility\", \"expand-on-hover\");
-user_pref(\"browser.toolbars.bookmarks.visibility\", \"never\");
-user_pref(\"browser.sessionstore.resume_from_crash\", false);
-user_pref(\"toolkit.legacyUserProfileCustomizations.stylesheets\", true);
-user_pref(\"browser.shell.checkDefaultBrowser\", false);
-user_pref(\"toolkit.telemetry.reportingpolicy.firstRun\", false);
-EOF"
+        cat <<EOF >> "$USER_JS"
+user_pref("sidebar.verticalTabs", true);
+user_pref("sidebar.revamp", true);
+user_pref("sidebar.visibility", "expand-on-hover");
+user_pref("browser.toolbars.bookmarks.visibility", "never");
+user_pref("browser.sessionstore.resume_from_crash", false);
+user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true);
+user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("toolkit.telemetry.reportingpolicy.firstRun", false);
+EOF
 
-        # 3. 修复 xulStore.json (窗口最大化问题)
-        XUL_STORE="$CUSTOM_PROFILE_PATH/xulStore.json"
-        as_user bash -c "cat <<EOF > '$XUL_STORE'
+        # 4. 写入 xulStore.json (解决窗口最大化问题)
+        XUL_STORE="$PROFILE_PATH/xulStore.json"
+        cat <<EOF > "$XUL_STORE"
 {
-    \"chrome://browser/content/browser.xhtml\": {
-        \"main-window\": {
-            \"sizemode\": \"normal\"
+    "chrome://browser/content/browser.xhtml": {
+        "main-window": {
+            "sizemode": "normal"
         }
     }
 }
-EOF"
+EOF
 
-        success "Firefox profile configured successfully."
+        # 5. 【关键】修复权限
+        # 因为上面的 mkdir 是以脚本运行者(通常是root)执行的
+        # 必须把整个 .mozilla 目录还给目标用户
+        log "Applying permissions to $TARGET_USER..."
+        chown -R "$TARGET_USER" "$MOZILLA_DIR"
+        
+        success "Firefox profile generated successfully."
         
     else
         if [ -d "$PARENT_DIR/resources/firefox" ]; then
