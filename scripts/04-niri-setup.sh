@@ -155,7 +155,7 @@ fi
 # STEP 2: Core Components
 # ==============================================================================
 section "Step 1/9" "Core Components"
-PKGS="niri xdg-desktop-portal-gnome fuzzel kitty firefox libnotify mako polkit-gnome"
+PKGS="niri xdg-desktop-portal-gnome xdg-desktop-portal-gtk fuzzel kitty firefox libnotify mako polkit-gnome"
 exe pacman -S --noconfirm --needed $PKGS
 
 log "Configuring Firefox Policies..."
@@ -371,6 +371,19 @@ if [ -d "$TEMP_DIR/dotfiles" ]; then
     as_user flatpak override --user --env=GTK_THEME=adw-gtk3-dark
     as_user flatpak override --user --filesystem=xdg-config/fontconfig
   fi
+  # --- [Portal Fix] Ensure GTK portal priority ---
+  section "Portal Fix" "Configuring Priority"
+  PORTAL_CONF_DIR="$HOME_DIR/.config/xdg-desktop-portal"
+  as_user mkdir -p "$PORTAL_CONF_DIR"
+  as_user printf "[preferred]\ndefault=gtk\n" > "$PORTAL_CONF_DIR/portals.conf"
+
+  # Sanitize Niri config pulled from repo to prevent conflict
+  NIRI_CONFIG="$HOME_DIR/.config/niri/config.kdl"
+  if [ -f "$NIRI_CONFIG" ]; then
+    as_user sed -i "s/\& \/usr\/lib\/xdg-desktop-portal-gnome//" "$NIRI_CONFIG"
+    success "Niri config sanitized."
+  fi
+
   success "Dotfiles Applied."
 else
   warn "Dotfiles missing in temp directory."

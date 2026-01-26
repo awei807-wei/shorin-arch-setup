@@ -93,6 +93,7 @@ select_desktop() {
         "GNOME |gnome"
         "end4-illogical-impulse---Quickshell(Hyprland)|end4"
         "DMS-DankMaterialShell---Quickshell(Niri or Hyprland)|dms"
+        "Nagisa's Niri + AGS |nagisa-ags"
     )
     
     # 2. 绘制菜单 (半开放式风格)
@@ -186,6 +187,9 @@ case "$DESKTOP_ENV" in
         ;;
     dms)
         BASE_MODULES+=("04c-dms-quickshell.sh")
+        ;;
+    nagisa-ags)
+        BASE_MODULES+=("04f-nagisa-ags-setup.sh")
         ;;
     gnome)
         BASE_MODULES+=("04d-gnome.sh")
