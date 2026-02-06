@@ -43,6 +43,17 @@ log "Cloning personal repo..."
 as_user git clone "$REPO_GITHUB" "$TEMP_DIR"
 
 if [ -d "$TEMP_DIR/dotfiles" ]; then
+    # --- Rime-Ice (雾凇词库) Deploy ---
+    RIME_DIR="$HOME_DIR/.local/share/fcitx5/rime"
+    if [ ! -d "$RIME_DIR/.git" ]; then
+        log "Cloning rime-ice (雾凇词库)..."
+        as_user mkdir -p "$(dirname "$RIME_DIR")"
+        as_user git clone --depth=1 https://github.com/iDvel/rime-ice.git "$RIME_DIR"
+    else
+        log "rime-ice already exists, pulling latest..."
+        as_user git -C "$RIME_DIR" pull
+    fi
+
     log "Applying configuration..."
     as_user cp -rf "$TEMP_DIR/dotfiles/." "$HOME_DIR/"
     

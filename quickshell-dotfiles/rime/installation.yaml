@@ -1,0 +1,7 @@
+distribution_code_name: "fcitx-rime"
+distribution_name: Rime
+distribution_version: 5.1.12
+installation_id: shiyi_arch
+rime_version: 1.16.0
+sync_dir: "/mnt/nas/arch/rime_sync"
+update_time: "Tue Jan 20 21:45:00 2026"
