@@ -84,6 +84,13 @@ fi
 HOME_DIR="/home/$TARGET_USER"
 info_kv "Target" "$TARGET_USER"
 
+# --- [PRE-FLIGHT: If user's login shell is fish, ensure required tools exist] ---
+LOGIN_SHELL="$(getent passwd "$TARGET_USER" | cut -d: -f7)"
+if [[ "$LOGIN_SHELL" == */fish ]]; then
+    log "Detected fish as login shell. Ensuring fish toolchain is installed..."
+    exe pacman -S --noconfirm --needed fish starship zoxide eza thefuck
+fi
+
 KNOWN_DMS=("gdm" "sddm" "lightdm" "lxdm" "slim" "xorg-xdm" "ly" "greetd")
 SKIP_AUTOLOGIN=false
 DM_FOUND=""
@@ -223,6 +230,13 @@ if [ -d "$TEMP_DIR/dotfiles" ]; then
 
     log "Applying configurations..."
     as_user cp -rf "$TEMP_DIR/dotfiles/." "$HOME_DIR/"
+
+    # If dotfiles include fish config that depends on external tools, ensure they exist.
+    # This prevents fish startup errors like "Unknown command: starship/zoxide/thefuck".
+    if [ -f "$HOME_DIR/.config/fish/config.fish" ]; then
+        log "Detected fish config. Ensuring required CLI tools are installed..."
+        exe pacman -S --noconfirm --needed fish starship zoxide eza thefuck
+    fi
     
     # Robust Niri QuickShell Injection (v8.0)
     NIRI_CONFIG="$HOME_DIR/.config/niri/config.kdl"
@@ -255,6 +269,79 @@ as_user printf "[preferred]\ndefault=gtk\n" > "$HOME_DIR/.config/xdg-desktop-por
 
 BOOKMARKS_FILE="$HOME_DIR/.config/gtk-3.0/bookmarks"
 [ -f "$BOOKMARKS_FILE" ] && as_user sed -i "s/shorin/$TARGET_USER/g" "$BOOKMARKS_FILE"
+
+# --- [STEP 7-B: DISPLAY Fix (fish + systemd user) for X11 apps under Wayland] ---
+section "Step 5b/9" "DISPLAY Environment Fix"
+
+# 1) fish: auto-set DISPLAY if missing and X11 socket exists; sync to systemd/dbus when possible
+mkdir -p "$HOME_DIR/.config/fish/conf.d"
+cat >"$HOME_DIR/.config/fish/conf.d/20-display.fish" <<'EOF'
+# Auto-fix DISPLAY for X11 apps under Wayland (niri + Xwayland/xwayland-satellite)
+# This runs for interactive fish sessions.
+if not set -q DISPLAY
+    set -l found_display ""
+
+    # Prefer /tmp/.X11-unix (common for Xwayland); fallback to $XDG_RUNTIME_DIR if present.
+    for i in (seq 0 9)
+        if test -S "/tmp/.X11-unix/X$i"
+            set found_display ":$i"
+            break
+        end
+    end
+
+    if test -z "$found_display"; and set -q XDG_RUNTIME_DIR
+        for i in (seq 0 9)
+            if test -S "$XDG_RUNTIME_DIR/X11-unix/X$i"
+                set found_display ":$i"
+                break
+            end
+        end
+    end
+
+    if test -n "$found_display"
+        set -gx DISPLAY $found_display
+
+        # Best-effort: propagate to desktop-activated apps (dbus/systemd user).
+        if command -q dbus-update-activation-environment
+            dbus-update-activation-environment --systemd DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR >/dev/null 2>&1
+        end
+        if command -q systemctl
+            systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR >/dev/null 2>&1
+        end
+    end
+end
+EOF
+chown "$TARGET_USER:$TARGET_USER" "$HOME_DIR/.config/fish/conf.d/20-display.fish"
+
+# 2) systemd --user: set DISPLAY early in the session for launcher/DBus activated apps
+mkdir -p "$HOME_DIR/.config/systemd/user"
+cat >"$HOME_DIR/.config/systemd/user/display-env.service" <<'EOF'
+[Unit]
+Description=Set DISPLAY env for X11 apps under Wayland (niri)
+After=default.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash -lc '\
+  if [ -n "${DISPLAY:-}" ]; then exit 0; fi; \
+  for i in $(seq 0 9); do \
+    if [ -S "/tmp/.X11-unix/X${i}" ]; then \
+      systemctl --user set-environment DISPLAY=":${i}" || true; \
+      dbus-update-activation-environment --systemd DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR >/dev/null 2>&1 || true; \
+      systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR >/dev/null 2>&1 || true; \
+      exit 0; \
+    fi; \
+  done; \
+  exit 0'
+
+[Install]
+WantedBy=default.target
+EOF
+chown "$TARGET_USER:$TARGET_USER" "$HOME_DIR/.config/systemd/user/display-env.service"
+
+mkdir -p "$HOME_DIR/.config/systemd/user/default.target.wants"
+ln -sf "../display-env.service" "$HOME_DIR/.config/systemd/user/default.target.wants/display-env.service"
+chown -h "$TARGET_USER:$TARGET_USER" "$HOME_DIR/.config/systemd/user/default.target.wants/display-env.service"
 
 # --- [STEP 8: Wallpapers & Permissions] ---
 section "Step 6/9" "Wallpapers & Permissions"
