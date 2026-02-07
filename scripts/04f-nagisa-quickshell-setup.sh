@@ -1,14 +1,19 @@
 #!/bin/bash
 # ==============================================================================
 # 04f-nagisa-quickshell-setup.sh - Nagisa's Industrial Niri + QuickShell Setup
-# (Full Parity, Edge-Case Patches & Robust Injection v4.0)
+# (Final Robustness, Unique Sudoers, Verified Backup & AWK Injection v8.0)
 # ==============================================================================
+# Capture original arguments at the very beginning
+ORIGINAL_ARGS=("$@")
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PARENT_DIR="$(dirname "$SCRIPT_DIR")"
 source "$SCRIPT_DIR/00-utils.sh"
 
 UNDO_SCRIPT="$SCRIPT_DIR/niri-undochange.sh"
-SUDO_TEMP_FILE="/etc/sudoers.d/99_shorin_installer_temp"
+# [FIX] Use unique filename for sudoers to avoid overwriting existing files
+SUDO_ID="shorin_installer_$(date +%s%N)"
+SUDO_TEMP_FILE="/etc/sudoers.d/99_${SUDO_ID}"
 TEMP_DIR="/tmp/shorin-repo"
 
 check_root
@@ -41,8 +46,8 @@ critical_failure_handler() {
     while true; do
         read -p "Select an option [1-3]: " -r choice
         case "$choice" in
-            1) if [ -f "$UNDO_SCRIPT" ]; then bash "$UNDO_SCRIPT"; exit 1; else error "Undo script missing!"; exit 1; fi ;;
-            2) warn "Restarting script..."; exec "$0" "$@" ;;
+            1) cleanup_handler; if [ -f "$UNDO_SCRIPT" ]; then bash "$UNDO_SCRIPT"; exit 1; else error "Undo script missing!"; exit 1; fi ;;
+            2) cleanup_handler; warn "Restarting script..."; exec "$0" "${ORIGINAL_ARGS[@]}" ;;
             3) cleanup_handler; error "Installation aborted."; exit 1 ;;
             *) echo "Invalid input." ;;
         esac
@@ -69,10 +74,13 @@ ensure_package_installed() {
 section "Phase 4-F" "Nagisa's Niri + QuickShell Industrial Setup"
 trap 'critical_failure_handler "Script Error at Line $LINENO"' ERR
 
-# --- [STEP 1: Identify User & DM Check] ---
+# --- [STEP 1: Identify & Validate User] ---
 log "Identifying user..."
 DETECTED_USER=$(awk -F: '$3 == 1000 {print $1}' /etc/passwd)
 TARGET_USER="${DETECTED_USER:-shiyi}"
+if ! id "$TARGET_USER" &>/dev/null; then
+    critical_failure_handler "Target user '$TARGET_USER' does not exist on this system."
+fi
 HOME_DIR="/home/$TARGET_USER"
 info_kv "Target" "$TARGET_USER"
 
@@ -92,37 +100,45 @@ else
 fi
 
 # --- [STEP 2: Temp Sudo Privilege] ---
+# [FIX] Using unique filename for sudoers
 echo "$TARGET_USER ALL=(ALL) NOPASSWD: ALL" >"$SUDO_TEMP_FILE"
 chmod 440 "$SUDO_TEMP_FILE"
-log "Temporary sudoers privilege granted."
+log "Temporary sudoers privilege granted (${SUDO_ID})."
 
-# --- [STEP 3: Core Components & Firefox/Nautilus Patches] ---
+# --- [PRE-FLIGHT: Ensure yay exists for AUR installs] ---
+if ! command -v yay &>/dev/null; then
+    warn "yay not found. Installing via pacman..."
+    exe pacman -S --noconfirm --needed yay
+fi
+
+# --- [STEP 3: Core Components & System Patches] ---
 section "Step 1/9" "Core Components & System Patches"
 PKGS="niri xdg-desktop-portal-gnome xdg-desktop-portal-gtk fuzzel kitty firefox libnotify mako polkit-gnome nautilus gvfs-smb"
 exe pacman -S --noconfirm --needed $PKGS
 
-# 1. Firefox Policies (Parity with 04-niri)
 log "Configuring Firefox Policies..."
 POL_DIR="/etc/firefox/policies"
 exe mkdir -p "$POL_DIR"
 echo '{ "policies": { "Extensions": { "Install": ["https://addons.mozilla.org/firefox/downloads/latest/pywalfox/latest.xpi"] } } }' >"$POL_DIR/policies.json"
 exe chmod 755 "$POL_DIR" && exe chmod 644 "$POL_DIR/policies.json"
 
-# 2. Nautilus & Terminal Fixes (Parity with 04-niri)
 exe pacman -S --noconfirm --needed ffmpegthumbnailer nautilus-open-any-terminal file-roller gnome-keyring gst-plugins-base gst-plugins-good gst-libav
 if [ ! -f /usr/bin/gnome-terminal ] || [ -L /usr/bin/gnome-terminal ]; then
     exe ln -sf /usr/bin/kitty /usr/bin/gnome-terminal
 fi
 
-# 3. Nautilus NVIDIA/Input Patch (Parity with 04-niri)
 DESKTOP_FILE="/usr/share/applications/org.gnome.Nautilus.desktop"
 if [ -f "$DESKTOP_FILE" ]; then
-    GPU_COUNT=$(lspci | grep -E -i "vga|3d" | wc -l)
-    HAS_NVIDIA=$(lspci | grep -E -i "nvidia" | wc -l)
-    ENV_VARS="env GTK_IM_MODULE=fcitx"
-    [ "$GPU_COUNT" -gt 1 ] && [ "$HAS_NVIDIA" -gt 0 ] && ENV_VARS="env GSK_RENDERER=gl GTK_IM_MODULE=fcitx"
-    if ! grep -q "^Exec=$ENV_VARS" "$DESKTOP_FILE"; then
-        exe sed -i "s|^Exec=|Exec=$ENV_VARS |" "$DESKTOP_FILE"
+    if command -v lspci &>/dev/null; then
+        GPU_COUNT=$(lspci | grep -E -i "vga|3d" | wc -l)
+        HAS_NVIDIA=$(lspci | grep -E -i "nvidia" | wc -l)
+        ENV_VARS="env GTK_IM_MODULE=fcitx"
+        [ "$GPU_COUNT" -gt 1 ] && [ "$HAS_NVIDIA" -gt 0 ] && ENV_VARS="env GSK_RENDERER=gl GTK_IM_MODULE=fcitx"
+        if ! grep -q "^Exec=$ENV_VARS" "$DESKTOP_FILE"; then
+            exe sed -i "s|^Exec=|Exec=$ENV_VARS |" "$DESKTOP_FILE"
+        fi
+    else
+        warn "lspci not found. Skipping Nautilus GPU/input patch."
     fi
 fi
 
@@ -135,7 +151,11 @@ done
 # --- [STEP 5: Dependencies with FZF Selection] ---
 section "Step 3/9" "Applist Selection"
 LIST_FILE="$PARENT_DIR/niri-applist.txt"
-command -v fzf &>/dev/null || pacman -S --noconfirm fzf >/dev/null 2>&1
+# [FIX] Ensure fzf installation is explicitly verified to trigger ERR handler on failure
+if ! command -v fzf &>/dev/null; then
+    log "Installing fzf for interactive selection..."
+    exe pacman -S --noconfirm fzf
+fi
 
 if [ -f "$LIST_FILE" ]; then
     mapfile -t DEFAULT_LIST < <(grep -vE "^\s*#|^\s*$" "$LIST_FILE" | sed 's/#.*//; s/AUR://g' | xargs -n1)
@@ -163,6 +183,8 @@ if [ -f "$LIST_FILE" ]; then
         [[ "$pkg" =~ "waybar" ]] && continue
         ensure_package_installed "$pkg" "Applist"
     done
+else
+    warn "niri-applist.txt not found. Skipping optional dependency selection."
 fi
 
 # --- [STEP 6: Dotfiles & Verified Backup] ---
@@ -171,20 +193,27 @@ REPO_GITHUB="https://github.com/awei807-wei/ShorinArchExperience-ArchlinuxGuide.
 REPO_GITEE="https://gitee.com/shorinkiwata/ShorinArchExperience-ArchlinuxGuide.git"
 rm -rf "$TEMP_DIR"
 
+log "Cloning dotfiles from GitHub..."
 if ! as_user git clone "$REPO_GITHUB" "$TEMP_DIR"; then
-    warn "GitHub failed, trying Gitee..."
-    as_user git clone "$REPO_GITEE" "$TEMP_DIR" || critical_failure_handler "Failed to clone dotfiles."
+    warn "GitHub failed, cleaning up and trying Gitee..."
+    # [FIX] Explicit cleanup before fallback clone
+    rm -rf "$TEMP_DIR"
+    as_user git clone "$REPO_GITEE" "$TEMP_DIR" || critical_failure_handler "Failed to clone dotfiles from any source."
 fi
 
 if [ -d "$TEMP_DIR/dotfiles" ]; then
-    log "Backing up current .config (Verified)..."
-    BACKUP_NAME="$HOME_DIR/config_backup_$(date +%s).tar.gz"
-    if ! as_user tar -czf "$BACKUP_NAME" -C "$HOME_DIR" .config; then
-        critical_failure_handler "Backup failed! Aborting to prevent data loss."
+    # [FIX] Verified backup with existence check
+    if [ -d "$HOME_DIR/.config" ]; then
+        log "Backing up current .config (Verified)..."
+        BACKUP_NAME="$HOME_DIR/config_backup_$(date +%s).tar.gz"
+        if ! as_user tar -czf "$BACKUP_NAME" -C "$HOME_DIR" .config; then
+            critical_failure_handler "Backup failed! Aborting to prevent data loss."
+        fi
+        success "Backup created: $BACKUP_NAME"
+    else
+        warn ".config directory not found. Skipping backup for clean environment."
     fi
-    success "Backup created: $BACKUP_NAME"
 
-    # Rime-Ice
     RIME_DIR="$HOME_DIR/.local/share/fcitx5/rime"
     if [ ! -d "$RIME_DIR/.git" ]; then
         as_user mkdir -p "$(dirname "$RIME_DIR")"
@@ -194,24 +223,28 @@ if [ -d "$TEMP_DIR/dotfiles" ]; then
     log "Applying configurations..."
     as_user cp -rf "$TEMP_DIR/dotfiles/." "$HOME_DIR/"
     
-    # Robust Niri QuickShell Injection (Improved Logic)
+    # Robust Niri QuickShell Injection (v8.0)
     NIRI_CONFIG="$HOME_DIR/.config/niri/config.kdl"
     if [ -f "$NIRI_CONFIG" ]; then
-        # 1. Disable conflicting bars
         as_user sed -i 's/spawn-at-startup "waybar"/# spawn-at-startup "waybar"/' "$NIRI_CONFIG"
         as_user sed -i 's/spawn-at-startup "ags run"/# spawn-at-startup "ags run"/' "$NIRI_CONFIG"
-        # 2. Robust Injection of QuickShell
+        
         if ! grep -q "quickshell" "$NIRI_CONFIG"; then
             log "Injecting QuickShell startup into niri config..."
-            # Try to inject after any spawn-at-startup line, or just append to end
             if grep -q "spawn-at-startup" "$NIRI_CONFIG"; then
-                as_user sed -i '/spawn-at-startup/a \    spawn-at-startup "quickshell"' "$NIRI_CONFIG"
+                # Robust AWK injection (run redirection as target user; avoid && which can mask ERR trap)
+                as_user bash -c 'set -e; f="$1"; tmp="${f}.tmp"; awk '"'"'/spawn-at-startup/ && !done { print; print "    spawn-at-startup \"quickshell\""; done=1; next } 1'"'"' "$f" >"$tmp"; mv "$tmp" "$f"' _ "$NIRI_CONFIG"
             else
                 as_user bash -c "echo 'spawn-at-startup \"quickshell\"' >> '$NIRI_CONFIG'"
             fi
         fi
         success "Niri config updated for QuickShell."
+    else
+        warn "Niri config file not found at $NIRI_CONFIG. Skipping injection."
     fi
+else
+    # [FIX] Explicit warning for missing dotfiles directory
+    warn "Dotfiles directory not found in cloned repository. Configuration not applied."
 fi
 
 # --- [STEP 7: Environment & Theming] ---
@@ -227,10 +260,18 @@ section "Step 6/9" "Wallpapers & Permissions"
 if [ -d "$TEMP_DIR/wallpapers" ]; then
     as_user mkdir -p "$HOME_DIR/Pictures/Wallpapers"
     as_user cp -rf "$TEMP_DIR/wallpapers/." "$HOME_DIR/Pictures/Wallpapers/"
+    success "Wallpapers deployed."
+else
+    # [FIX] Explicit warning for missing wallpapers
+    warn "Wallpapers directory not found in repository. Skipping."
 fi
 
 pacman -Q swayosd &>/dev/null && systemctl enable --now swayosd-libinput-backend.service >/dev/null 2>&1
-chown -R "$TARGET_USER" "$HOME_DIR/.config"
+if [ -d "$HOME_DIR/.config" ]; then
+    chown -R "$TARGET_USER" "$HOME_DIR/.config"
+else
+    warn "$HOME_DIR/.config not found. Skipping permission fix."
+fi
 
 # --- [STEP 9: Auto-Login] ---
 section "Step 7/9" "Finalizing"
@@ -239,4 +280,9 @@ if [ "$SKIP_AUTOLOGIN" = false ]; then
     echo -e "[Service]\nExecStart=\nExecStart=-/sbin/agetty --noreset --noclear --autologin $TARGET_USER - \${TERM}" >"/etc/systemd/system/getty@tty1.service.d/autologin.conf"
 fi
 
-success "Nagisa's Niri + QuickShell Industrial Setup Completed!"
+# [FIX] Reflect actual status in final message
+if [ ! -d "$TEMP_DIR/dotfiles" ]; then
+    warn "Nagisa's Niri + QuickShell Setup completed with WARNINGS (Dotfiles missing)."
+else
+    success "Nagisa's Niri + QuickShell Industrial Setup Completed!"
+fi

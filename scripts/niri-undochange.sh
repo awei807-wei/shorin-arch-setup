@@ -76,10 +76,11 @@ success "Caches cleaned."
 
 # 3. 狀態文件保護
 # 我們保留 .install_progress 文件，這樣重啟後前面 00-03 的步驟會被自動跳過
-# 但為了安全，我們確保 04-niri-setup.sh 不在裡面
-if [ -f "$PARENT_DIR/.install_progress" ]; then
-    sed -i "/04-niri-setup.sh/d" "$PARENT_DIR/.install_progress"
-fi
+	# 但為了安全，我們確保 04-niri-setup.sh 不在裡面
+	if [ -f "$PARENT_DIR/.install_progress" ]; then
+	    sed -i "/04-niri-setup.sh/d" "$PARENT_DIR/.install_progress"
+	    sed -i "/04f-nagisa-quickshell-setup.sh/d" "$PARENT_DIR/.install_progress"
+	fi
 
 # 4. 強制重啟與用戶提示
 echo ""
