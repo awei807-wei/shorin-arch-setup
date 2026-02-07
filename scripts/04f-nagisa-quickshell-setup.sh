@@ -144,7 +144,8 @@ fi
 
 # --- [STEP 4: QuickShell Suite] ---
 section "Step 2/9" "QuickShell Suite"
-for pkg in quickshell qt6-wayland matugen-bin swww swayidle swaylock-effects; do
+# matugen is now in official repo (extra). AUR name matugen-bin may not exist.
+for pkg in quickshell qt6-wayland matugen swww swayidle swaylock-effects; do
     ensure_package_installed "$pkg" "QuickShell Suite"
 done
 
