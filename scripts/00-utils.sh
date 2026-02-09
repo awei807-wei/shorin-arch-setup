@@ -256,3 +256,46 @@ select_flathub_mirror() {
 as_user() {
   runuser -u "$TARGET_USER" -- "$@"
 }
+
+# --- 6. Soft-Failure Infrastructure (shared across scripts) ---
+WARN_COUNT=0
+WARN_SUMMARY=()
+
+ask_continue() {
+    local _prev_err_trap
+    _prev_err_trap=$(trap -p ERR)
+    trap - ERR
+
+    local reason="$1"
+    local choice=""
+    ((WARN_COUNT++))
+    WARN_SUMMARY+=("$reason")
+    if [ -t 0 ]; then
+        warn "$reason"
+        read -t 30 -p "$(echo -e " ${H_YELLOW}Continue anyway? [Y/n]: ${NC}")" choice || choice="Y"
+        choice="${choice:-Y}"
+        if [[ "$choice" =~ ^[Nn]$ ]]; then
+            error "Aborted by user at: $reason"
+            if type -t _on_abort &>/dev/null; then
+                _on_abort "$reason"
+            else
+                exit 130
+            fi
+        fi
+    else
+        warn "$reason (non-interactive, continuing)"
+    fi
+
+    eval "$_prev_err_trap"
+}
+
+print_warn_summary() {
+    if [ "$WARN_COUNT" -gt 0 ]; then
+        echo ""
+        warn "Completed with $WARN_COUNT warning(s):"
+        for w in "${WARN_SUMMARY[@]}"; do
+            echo -e "    ${H_YELLOW}• $w${NC}"
+        done
+        echo ""
+    fi
+}

@@ -26,6 +26,17 @@ cleanup_handler() {
 }
 trap cleanup_handler EXIT
 
+# --- [SOFT-FAILURE: abort callback for ask_continue (from 00-utils.sh)] ---
+_on_abort() {
+    cleanup_handler
+    exit 1
+}
+
+# --- [PRE-FLIGHT: Clean up stale sudoers from interrupted runs] ---
+for f in /etc/sudoers.d/99_shorin_installer_*; do
+    [ -f "$f" ] && rm -f "$f" && warn "Cleaned up stale sudoers file: $f"
+done
+
 critical_failure_handler() {
     local failed_reason="$1"
     trap - ERR
@@ -40,15 +51,17 @@ critical_failure_handler() {
     echo -e "\033[0;31m# 1. Restore snapshot (Undo changes & Exit)                    #\033[0m"
     echo -e "\033[0;31m# 2. Retry / Re-run script                                     #\033[0m"
     echo -e "\033[0;31m# 3. Abort (Exit immediately)                                  #\033[0m"
+    echo -e "\033[0;31m# 4. Skip & Continue (soft-failure)                             #\033[0m"
     echo -e "\033[0;31m#                                                              #\033[0m"
     echo -e "\033[0;31m################################################################\033[0m"
     echo ""
     while true; do
-        read -p "Select an option [1-3]: " -r choice
+        read -p "Select an option [1-4]: " -r choice
         case "$choice" in
             1) cleanup_handler; if [ -f "$UNDO_SCRIPT" ]; then bash "$UNDO_SCRIPT"; exit 1; else error "Undo script missing!"; exit 1; fi ;;
             2) cleanup_handler; warn "Restarting script..."; exec "$0" "${ORIGINAL_ARGS[@]}" ;;
             3) cleanup_handler; error "Installation aborted."; exit 1 ;;
+            4) warn "Skipping: $failed_reason"; trap 'ask_continue "Unexpected error at line $LINENO"' ERR; return 0 ;;
             *) echo "Invalid input." ;;
         esac
     done
@@ -68,11 +81,12 @@ ensure_package_installed() {
         ((attempt++))
         sleep 2
     done
-    critical_failure_handler "Failed to install '$pkg' after $max_attempts attempts."
+    ask_continue "Failed to install '$pkg' after $max_attempts attempts ($context)"
+    return 1
 }
 
 section "Phase 4-F" "Nagisa's Niri + QuickShell Industrial Setup"
-trap 'critical_failure_handler "Script Error at Line $LINENO"' ERR
+trap 'ask_continue "Unexpected error at line $LINENO"' ERR
 
 # --- [STEP 1: Identify & Validate User] ---
 log "Identifying user..."
@@ -107,10 +121,15 @@ else
 fi
 
 # --- [STEP 2: Temp Sudo Privilege] ---
-# [FIX] Using unique filename for sudoers
+# [FIX] Using unique filename for sudoers with strict syntax validation
 echo "$TARGET_USER ALL=(ALL) NOPASSWD: ALL" >"$SUDO_TEMP_FILE"
-chmod 440 "$SUDO_TEMP_FILE"
-log "Temporary sudoers privilege granted (${SUDO_ID})."
+if visudo -cf "$SUDO_TEMP_FILE" >/dev/null 2>&1; then
+    chmod 440 "$SUDO_TEMP_FILE"
+    log "Temporary sudoers privilege granted (${SUDO_ID})."
+else
+    rm -f "$SUDO_TEMP_FILE"
+    critical_failure_handler "Sudoers syntax validation failed for $SUDO_TEMP_FILE"
+fi
 
 # --- [PRE-FLIGHT: Ensure yay exists for AUR installs] ---
 if ! command -v yay &>/dev/null; then
@@ -153,7 +172,7 @@ fi
 section "Step 2/9" "QuickShell Suite"
 # matugen is now in official repo (extra). AUR name matugen-bin may not exist.
 for pkg in quickshell qt6-wayland matugen swww swayidle swaylock-effects; do
-    ensure_package_installed "$pkg" "QuickShell Suite"
+    ensure_package_installed "$pkg" "QuickShell Suite" || true
 done
 
 # --- [STEP 5: Dependencies with FZF Selection] ---
@@ -189,7 +208,7 @@ if [ -f "$LIST_FILE" ]; then
 
     for pkg in "${PACKAGE_ARRAY[@]}"; do
         [[ "$pkg" =~ "waybar" ]] && continue
-        ensure_package_installed "$pkg" "Applist"
+        ensure_package_installed "$pkg" "Applist" || true
     done
 else
     warn "niri-applist.txt not found. Skipping optional dependency selection."
@@ -206,7 +225,9 @@ if ! as_user git clone "$REPO_GITHUB" "$TEMP_DIR"; then
     warn "GitHub failed, cleaning up and trying Gitee..."
     # [FIX] Explicit cleanup before fallback clone
     rm -rf "$TEMP_DIR"
-    as_user git clone "$REPO_GITEE" "$TEMP_DIR" || critical_failure_handler "Failed to clone dotfiles from any source."
+    if ! as_user git clone "$REPO_GITEE" "$TEMP_DIR"; then
+        ask_continue "Failed to clone dotfiles from any source (GitHub & Gitee both failed)"
+    fi
 fi
 
 if [ -d "$TEMP_DIR/dotfiles" ]; then
@@ -230,6 +251,8 @@ if [ -d "$TEMP_DIR/dotfiles" ]; then
 
     log "Applying configurations..."
     as_user cp -rf "$TEMP_DIR/dotfiles/." "$HOME_DIR/"
+
+    # [NOTE] 05-nas-rime-sync moved outside dotfiles block for architectural independence
 
     # If dotfiles include fish config that depends on external tools, ensure they exist.
     # This prevents fish startup errors like "Unknown command: starship/zoxide/thefuck".
@@ -260,6 +283,18 @@ if [ -d "$TEMP_DIR/dotfiles" ]; then
 else
     # [FIX] Explicit warning for missing dotfiles directory
     warn "Dotfiles directory not found in cloned repository. Configuration not applied."
+fi
+
+# [AUDIT FIX] NAS Rime Sync - runs regardless of dotfiles clone success
+# Suspend ERR trap: 05 has its own soft-failure infrastructure.
+# 05 is self-contained: handles its own retry/skip and always exits 0.
+if [ -f "$SCRIPT_DIR/05-nas-rime-sync.sh" ]; then
+    section "Sub-Task" "NAS Rime Sync Initialization"
+    trap - ERR
+    bash "$SCRIPT_DIR/05-nas-rime-sync.sh" "$TARGET_USER"
+    rc_05=$?
+    trap 'ask_continue "Unexpected error at line $LINENO"' ERR
+    [ $rc_05 -ne 0 ] && warn "05-nas-rime-sync.sh exited with unexpected code $rc_05 (expected 0)"
 fi
 
 # --- [STEP 7: Environment & Theming] ---
@@ -374,3 +409,6 @@ if [ ! -d "$TEMP_DIR/dotfiles" ]; then
 else
     success "Nagisa's Niri + QuickShell Industrial Setup Completed!"
 fi
+
+# --- [WARNING SUMMARY] ---
+print_warn_summary
