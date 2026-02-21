@@ -47,7 +47,7 @@ AUR:wechat-appimage                      # WeChat (AppImage)
 AUR:typora-free                          # markdown editor
 AUR:lsfg-vk-bin                          # yellow duck frame generator
 AUR:mangojuice-bin                       # GUI for mangohud
-AUR:vicinae                              # Application launcher (like Spotlight)
+AUR:vicinae-bin                              # Application launcher (like Spotlight)
 AUR:fd-rdd-git                           # fd-rdd extension for vicinae                
 
 # --- Flatpak Packages (Prefix with flatpak:) ---      
