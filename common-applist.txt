@@ -1,4 +1,5 @@
 firefox                                  # the best browser on linux
+edge
 neovim                                   # Advanced version of vim 
 lazyvim                                  # Great preset of neovim 
 wine                                     # run windows exe 

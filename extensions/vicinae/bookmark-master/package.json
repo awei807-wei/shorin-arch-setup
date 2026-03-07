@@ -1,0 +1,21 @@
+{
+  "$schema": "https://raw.githubusercontent.com/vicinaehq/vicinae/refs/heads/main/extra/schemas/extension.json",
+  "name": "bookmark-master",
+  "title": "Bookmark Master",
+  "description": "Search Edge bookmarks with custom notes and quick open.",
+  "categories": ["Productivity"],
+  "license": "MIT",
+  "author": "Piko",
+  "commands": [
+    {
+      "name": "index",
+      "title": "Search Bookmarks",
+      "description": "Search and open Edge bookmarks with custom notes.",
+      "mode": "view",
+      "keywords": ["bookmark", "edge", "url", "note"]
+    }
+  ],
+  "dependencies": {
+    "@vicinae/api": "*"
+  }
+}

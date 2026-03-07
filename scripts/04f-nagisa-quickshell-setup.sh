@@ -261,6 +261,13 @@ if [ -d "$TEMP_DIR/dotfiles" ]; then
         exe pacman -S --noconfirm --needed fish starship zoxide eza thefuck
     fi
     
+    # [FIX] Initialize longshot-sh venv (screenshot stitching depends on opencv-python)
+    LONGSHOT_SETUP="$HOME_DIR/.config/waybar/scripts/longshot-sh/setup.sh"
+    if [ -f "$LONGSHOT_SETUP" ]; then
+        log "Initializing longshot-sh Python venv..."
+        as_user bash "$LONGSHOT_SETUP"
+    fi
+
     # Robust Niri QuickShell Injection (v8.0)
     NIRI_CONFIG="$HOME_DIR/.config/niri/config.kdl"
     if [ -f "$NIRI_CONFIG" ]; then
