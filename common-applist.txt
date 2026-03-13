@@ -48,6 +48,7 @@ AUR:lsfg-vk-bin                          # yellow duck frame generator
 AUR:mangojuice-bin                       # GUI for mangohud
 AUR:vicinae-bin                              # Application launcher (like Spotlight)
 AUR:fd-rdd-git                           # fd-rdd extension for vicinae                
+AUR:tsukimi-bin
 AUR:thorium-browser-bin
 
 # --- Flatpak Packages (Prefix with flatpak:) ---      
