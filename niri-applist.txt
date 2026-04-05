@@ -4,7 +4,6 @@ gnome-software                           # Gui store for flatpak software
 # --- Niri/Wayland Components ---
 xwayland-satellite                       # XWayland compatibility 
 swayidle                                 # Idle management daemon (Screen lock/suspend)
-swaylock-effects                         # Screen locker with effects (Blur/Screenshots)
 swayosd                                  # On-Screen Display for Volume/Brightness
 nwg-look                                 # GTK3 settings editor for Wayland
 qt5ct                                    # Qt5 configuration tool
