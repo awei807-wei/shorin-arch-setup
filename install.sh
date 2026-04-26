@@ -30,22 +30,26 @@ BASE_MODULES=(
     "03c-snapshot-before-desktop.sh"
 )
 
-# Desktop Selection Logic
+# Desktop Scripts (add your own here)
+DESKTOP_SCRIPTS=(
+    "Niri|04-niri-setup.sh"
+)
+
 select_desktop() {
-    section "Desktop Environment" "Select your UI flavor"
-    echo -e "${H_BLUE}1)${NC} Niri (Base)"
-    echo -e "${H_BLUE}2)${NC} Nagisa QuickShell (Recommended)"
-    echo -e "${H_BLUE}3)${NC} GNOME"
-    echo -e "${H_BLUE}4)${NC} KDE Plasma"
-    echo -ne "${H_YELLOW}Choice [1-4]: ${NC}"
+    section "Desktop Environment" "Select your setup"
+    local count=${#DESKTOP_SCRIPTS[@]}
+    for i in "${!DESKTOP_SCRIPTS[@]}"; do
+        local label="${DESKTOP_SCRIPTS[$i]%%|*}"
+        echo -e "${H_BLUE}$((i+1)))${NC} $label"
+    done
+    echo -ne "${H_YELLOW}Choice [1-$count]: ${NC}"
     read -r choice
-    case $choice in
-        1) DESKTOP_SCRIPT="04-niri-setup.sh" ;;
-        2) DESKTOP_SCRIPT="04f-nagisa-quickshell-setup.sh" ;;
-        3) DESKTOP_SCRIPT="04d-gnome.sh" ;;
-        4) DESKTOP_SCRIPT="04b-kdeplasma-setup.sh" ;;
-        *) warn "Invalid choice, skipping desktop setup." ; DESKTOP_SCRIPT="" ;;
-    esac
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$count" ]; then
+        DESKTOP_SCRIPT="${DESKTOP_SCRIPTS[$((choice-1))]#*|}"
+    else
+        warn "Invalid choice, skipping desktop setup."
+        DESKTOP_SCRIPT=""
+    fi
 }
 
 # Post-install & VCP Modules
@@ -71,7 +75,7 @@ for script in "${BASE_MODULES[@]}"; do
     fi
 done
 
-# 2. Execute Desktop Selection
+# 2. Select & Execute Desktop Setup
 select_desktop
 if [ -n "$DESKTOP_SCRIPT" ] && [ -f "$SCRIPTS_PATH/$DESKTOP_SCRIPT" ]; then
     bash "$SCRIPTS_PATH/$DESKTOP_SCRIPT"

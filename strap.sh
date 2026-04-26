@@ -7,7 +7,7 @@
 # --- [配置区域] ---
 # 优先使用环境变量传入的分支名，如果没传，则默认使用 'main'
 TARGET_BRANCH="${BRANCH:-main}"
-REPO_URL="https://github.com/SHORiN-KiWATA/shorin-arch-setup.git"
+REPO_URL="https://github.com/awei807-wei/shorin-arch-setup.git"
 DIR_NAME="shorin-arch-setup"
 
 echo -e "\033[0;34m>>> Preparing to install from branch: $TARGET_BRANCH\033[0m"

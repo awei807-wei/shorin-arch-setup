@@ -46,11 +46,7 @@ as_user() {
 # ------------------------------------------------------------------------------
 # 1. List Selection & User Prompt
 # ------------------------------------------------------------------------------
-if [ "$DESKTOP_ENV" == "kde" ]; then
-    LIST_FILENAME="kde-common-applist.txt"
-else
-    LIST_FILENAME="common-applist.txt"
-fi
+LIST_FILENAME="common-applist.txt"
 LIST_FILE="$PARENT_DIR/$LIST_FILENAME"
 
 REPO_APPS=()

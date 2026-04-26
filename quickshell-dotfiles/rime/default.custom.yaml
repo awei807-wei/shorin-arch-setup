@@ -1,9 +1,0 @@
-patch:
-  schema_list:
-  - schema: rime_ice
-  - schema: double_pinyin_flypy
-
-  # 这里的 rime_ice_suggestion 为雾凇方案的默认预设
-  __include: rime_ice_suggestion:/
-  translator/enable_user_dict: true
-  translator/enable_completion: true
