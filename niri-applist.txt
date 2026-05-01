@@ -17,7 +17,7 @@ breeze5                                  # Breeze style for Qt5
 ttf-jetbrains-mono-nerd                  # JetBrains Mono font (Nerd Font patched)
 
 # --- Wallpaper ---
-swww                                     # Efficient wallpaper daemon for Wayland
+awww                                     # Efficient wallpaper daemon for Wayland
 
 # --- Status Bar ---
 waybar                                   # Highly customizable Wayland bar
@@ -54,7 +54,7 @@ AUR:matugen                              # Material You theme generator
 AUR:clipse                               # Clipboard manager
 AUR:clipse-gui                           # Clipboard manager (GUI binary)
 AUR:python-pywalfox                      # Pywal support for Firefox
-AUR:waypaper                             # GUI wallpaper setter (Frontend for swww)
+AUR:waypaper                             # GUI wallpaper setter (Frontend for awww)
 AUR:ddcutil-service                      # Monitor hardware brightness control service
 AUR:niriswitcher                         # Window switcher for Niri
 AUR:ttf-jetbrains-maple-mono-nf-xx-xx    # Maple Mono NF font
