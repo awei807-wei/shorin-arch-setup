@@ -1,12 +1,13 @@
 #!/bin/bash
 
 # ==============================================================================
-# 99-apps.sh - Common Applications (FZF Menu + Split Repo/AUR + Retry Logic)
+# 99-apps.sh - Common Applications (Repo/AUR/Flatpak/GitHub + Retry Logic)
 # ==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PARENT_DIR="$(dirname "$SCRIPT_DIR")"
 source "$SCRIPT_DIR/00-utils.sh"
+source "$SCRIPT_DIR/99-github-apps.sh"
 
 # --- [CONFIGURATION] ---
 # LazyVim 硬性依赖列表 (Moved from niri-setup)
@@ -52,6 +53,7 @@ LIST_FILE="$PARENT_DIR/$LIST_FILENAME"
 REPO_APPS=()
 AUR_APPS=()
 FLATPAK_APPS=()
+GITHUB_APPS=()
 FAILED_PACKAGES=()
 INSTALL_LAZYVIM=false
 
@@ -152,6 +154,16 @@ while IFS= read -r line; do
     if [[ "$raw_pkg" == flatpak:* ]]; then
         clean_name="${raw_pkg#flatpak:}"
         FLATPAK_APPS+=("$clean_name")
+    elif [[ "$raw_pkg" == GitHub:* ]]; then
+        clean_name="${raw_pkg#GitHub:}"
+        if github_deps=$(github_app_dependencies "$clean_name"); then
+            GITHUB_APPS+=("$clean_name")
+            read -r -a github_dep_array <<< "$github_deps"
+            REPO_APPS+=("${github_dep_array[@]}")
+        else
+            warn "Unsupported GitHub application in $LIST_FILENAME: $clean_name"
+            FAILED_PACKAGES+=("github:$clean_name")
+        fi
     elif [[ "$raw_pkg" == AUR:* ]]; then
         clean_name="${raw_pkg#AUR:}"
         AUR_APPS+=("$clean_name")
@@ -160,7 +172,7 @@ while IFS= read -r line; do
     fi
 done <<< "$SELECTED_RAW"
 
-info_kv "Scheduled" "Repo: ${#REPO_APPS[@]}" "AUR: ${#AUR_APPS[@]}" "Flatpak: ${#FLATPAK_APPS[@]}"
+info_kv "Scheduled" "Repo: ${#REPO_APPS[@]} | AUR: ${#AUR_APPS[@]} | Flatpak: ${#FLATPAK_APPS[@]} | GitHub: ${#GITHUB_APPS[@]}"
 
 # ------------------------------------------------------------------------------
 # [SETUP] GLOBAL SUDO CONFIGURATION
@@ -178,7 +190,7 @@ fi
 
 # --- A. Install Repo Apps (BATCH MODE) ---
 if [ ${#REPO_APPS[@]} -gt 0 ]; then
-    section "Step 1/3" "Official Repository Packages (Batch)"
+    section "Step 1/4" "Official Repository Packages (Batch)"
     
     REPO_QUEUE=()
     for pkg in "${REPO_APPS[@]}"; do
@@ -208,7 +220,7 @@ fi
 
 # --- B. Install AUR Apps (INDIVIDUAL MODE + RETRY) ---
 if [ ${#AUR_APPS[@]} -gt 0 ]; then
-    section "Step 2/3" "AUR Packages (Sequential + Retry)"
+    section "Step 2/4" "AUR Packages (Sequential + Retry)"
     
     for app in "${AUR_APPS[@]}"; do
         if pacman -Qi "$app" &>/dev/null; then
@@ -245,7 +257,7 @@ fi
 
 # --- C. Install Flatpak Apps (INDIVIDUAL MODE) ---
 if [ ${#FLATPAK_APPS[@]} -gt 0 ]; then
-    section "Step 3/3" "Flatpak Packages (Individual)"
+    section "Step 3/4" "Flatpak Packages (Individual)"
     
     for app in "${FLATPAK_APPS[@]}"; do
         if flatpak info "$app" &>/dev/null; then
@@ -259,6 +271,21 @@ if [ ${#FLATPAK_APPS[@]} -gt 0 ]; then
             FAILED_PACKAGES+=("flatpak:$app")
         else
             success "Installed $app"
+        fi
+    done
+fi
+
+# --- D. Build Custom GitHub Apps (INDIVIDUAL MODE) ---
+if [ ${#GITHUB_APPS[@]} -gt 0 ]; then
+    section "Step 4/4" "Custom GitHub Applications (Build from Source)"
+
+    for app in "${GITHUB_APPS[@]}"; do
+        log "Installing GitHub application: $app ..."
+        if install_github_app "$app"; then
+            success "Installed $app from GitHub."
+        else
+            error "Failed to install GitHub application: $app"
+            FAILED_PACKAGES+=("github:$app")
         fi
     done
 fi

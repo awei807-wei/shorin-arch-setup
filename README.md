@@ -27,3 +27,15 @@
 
 - 增加更多自定义桌面套件安装脚本
 
+## 应用列表来源
+
+`common-applist.txt` 支持以下来源前缀：
+
+- 无前缀：Arch 官方仓库软件包
+- `AUR:`：AUR 软件包
+- `flatpak:`：Flathub 应用
+- `GitHub:`：仓库内已登记的自建应用，克隆源码后以目标用户身份编译并安装
+
+当前 `GitHub:` 应用包括 `focus-shift` 和 `niri-clip`。源码保留在
+`~/.local/src/`，可执行文件安装到 `~/.local/bin/`；`niri-clip` 同时安装并启用
+用户级 systemd 服务。

@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "scope": "project-session",
+  "key": "/home/shiyi/Downloads/shorin-arch-setup::main::alias-1",
+  "cwd": "/home/shiyi/Downloads/shorin-arch-setup",
+  "branch": "main",
+  "workspace": "main",
+  "session": "alias-1",
+  "sessionMode": "alias-session",
+  "updatedAt": "2026-07-13T04:32:11.251Z",
+  "turn": {
+    "cwd": "/home/shiyi/Downloads/shorin-arch-setup",
+    "key": "/home/shiyi/Downloads/shorin-arch-setup::main::alias-1",
+    "scope": "project-session",
+    "updatedAt": "2026-07-13T04:32:11.237Z",
+    "kind": "complete",
+    "role": "main",
+    "phase": "",
+    "source": "manual",
+    "requiresDeliveryGate": false,
+    "reasonCategory": "",
+    "reason": ""
+  },
+  "route": null,
+  "artifacts": {},
+  "turnUpdatedAt": "2026-07-13T04:32:11.250Z"
+}
