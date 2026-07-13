@@ -6,13 +6,13 @@
   "branch": "main",
   "workspace": "main",
   "session": "alias-1",
-  "sessionMode": "alias-session",
-  "updatedAt": "2026-07-13T04:32:11.251Z",
+  "sessionMode": "active-session",
+  "updatedAt": "2026-07-13T04:37:43.365Z",
   "turn": {
     "cwd": "/home/shiyi/Downloads/shorin-arch-setup",
     "key": "/home/shiyi/Downloads/shorin-arch-setup::main::alias-1",
     "scope": "project-session",
-    "updatedAt": "2026-07-13T04:32:11.237Z",
+    "updatedAt": "2026-07-13T04:37:43.360Z",
     "kind": "complete",
     "role": "main",
     "phase": "",
@@ -23,5 +23,5 @@
   },
   "route": null,
   "artifacts": {},
-  "turnUpdatedAt": "2026-07-13T04:32:11.250Z"
+  "turnUpdatedAt": "2026-07-13T04:37:43.362Z"
 }
