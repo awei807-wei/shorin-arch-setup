@@ -12,18 +12,13 @@ SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." &&
 PARENT_DIR="${SHORIN_ROOT_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 source "$SCRIPT_DIR/lib/core.sh"
 source "$SCRIPT_DIR/modules/applications/github-apps.sh"
+source "$SCRIPT_DIR/modules/applications/targets.sh"
 
 # --- [CONFIGURATION] ---
 # LazyVim 硬性依赖列表 (Moved from niri-setup)
 LAZYVIM_DEPS=("neovim" "ripgrep" "fd" "ttf-jetbrains-mono-nerd" "git")
 
 check_root
-
-# Ensure FZF is installed
-if ! command -v fzf &> /dev/null; then
-    log "Installing dependency: fzf..."
-    ensure_package fzf
-fi
 
 trap 'echo -e "\n   ${H_YELLOW}>>> Operation cancelled by user.${NC}"; exit 130' INT
 
@@ -51,8 +46,7 @@ as_user() {
 # ------------------------------------------------------------------------------
 LIST_FILENAME="common-applist.txt"
 LIST_FILE="$PARENT_DIR/$LIST_FILENAME"
-PROFILE_DIR=${SHORIN_PROFILE_DIR:-/etc/shorin-arch-setup}
-APPLICATION_MANIFEST="$PROFILE_DIR/applications.list"
+PROFILE_DIR=$(dirname "$APPLICATION_MANIFEST")
 
 REPO_APPS=()
 AUR_APPS=()
@@ -75,8 +69,12 @@ if ! grep -q -vE "^\s*#|^\s*$" "$LIST_FILE"; then
 fi
 
 SELECTED_RAW=""
-if [ "${SHORIN_MODE:-install}" != install ] && [ -s "$APPLICATION_MANIFEST" ]; then
-    SELECTED_RAW=$(< "$APPLICATION_MANIFEST")
+if [ "${SHORIN_MODE:-install}" = repair ]; then
+    [ -s "$APPLICATION_MANIFEST" ] ||
+        die "Repair requires a declared application manifest."
+    if ! SELECTED_RAW=$(application_manifest_entries); then
+        die "Application manifest is not readable: $APPLICATION_MANIFEST"
+    fi
     log "Using declared application targets from $APPLICATION_MANIFEST"
 else
     if [ ! -t 0 ]; then
@@ -87,10 +85,18 @@ else
             warn "User skipped application installation."
             exit 20
         fi
-        SELECTED_RAW=$(grep -vE "^\s*#|^\s*$" "$LIST_FILE" | \
+        if ! command -v fzf >/dev/null 2>&1; then
+            log "Installing interactive selector: fzf..."
+            ensure_package fzf
+        fi
+        if ! SELECTED_RAW=$(grep -vE "^\s*#|^\s*$" "$LIST_FILE" | \
             sed -E 's/[[:space:]]+#/\t#/' | fzf --multi \
-            --layout=reverse --border --delimiter=$'\t' --with-nth=1 \
-            --bind 'load:select-all' --bind 'ctrl-a:select-all,ctrl-d:deselect-all')
+                --layout=reverse --border --delimiter=$'\t' --with-nth=1 \
+                --bind 'load:select-all' \
+                --bind 'ctrl-a:select-all,ctrl-d:deselect-all'); then
+            warn "Application selection was cancelled."
+            exit 20
+        fi
     fi
     [ -n "$SELECTED_RAW" ] || exit 20
     install -d -m 755 "$PROFILE_DIR"
@@ -99,7 +105,9 @@ else
         sort -u > "$MANIFEST_TMP"
     install_if_changed "$MANIFEST_TMP" "$APPLICATION_MANIFEST" 644
     rm -f "$MANIFEST_TMP"
-    SELECTED_RAW=$(< "$APPLICATION_MANIFEST")
+    if ! SELECTED_RAW=$(application_manifest_entries); then
+        die "Application manifest is not readable: $APPLICATION_MANIFEST"
+    fi
 fi
 
 # ------------------------------------------------------------------------------
@@ -110,6 +118,8 @@ log "Processing selection..."
 while IFS= read -r line; do
     raw_pkg=$(echo "$line" | cut -f1 -d$'\t' | xargs)
     [[ -z "$raw_pkg" ]] && continue
+    application_entry_is_valid "$raw_pkg" ||
+        die "Invalid application target: $raw_pkg"
 
     # Check for LazyVim explicitly (Case insensitive check)
     if [[ "${raw_pkg,,}" == "lazyvim" ]]; then

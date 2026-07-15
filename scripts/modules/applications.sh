@@ -6,64 +6,45 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 
 SHORIN_ROOT=${SHORIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 source "$SHORIN_ROOT/scripts/lib/verify.sh"
+source "$SHORIN_ROOT/scripts/modules/applications/targets.sh"
 
-APPLICATION_MANIFEST=${APPLICATION_MANIFEST:-${SHORIN_PROFILE_DIR:-/etc/shorin-arch-setup}/applications.list}
-LAZYVIM_PACKAGES=(neovim ripgrep fd ttf-jetbrains-mono-nerd git)
-
-application_manifest_entries() {
-    awk '
-        /^[[:space:]]*(#|$)/ { next }
-        {
-            sub(/[[:space:]]+#.*/, "")
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "")
-            if (length) print
-        }
-    ' "$APPLICATION_MANIFEST"
-}
-
-lazyvim_target_satisfied() {
-    local package
-
-    for package in "${LAZYVIM_PACKAGES[@]}"; do
-        state_package_present "$package" || return
-    done
-    [ -s "$HOME_DIR/.config/nvim/lua/config/lazy.lua" ]
-}
-
-application_entry_satisfied() {
-    local entry=$1 name
-    case "$entry" in
-        AUR:*) state_package_present "${entry#AUR:}" ;;
-        flatpak:*) state_flatpak_present "${entry#flatpak:}" ;;
-        GitHub:focus-shift) [ -x "$HOME_DIR/.local/bin/focus-shift" ] ;;
-        GitHub:niri-clip)
-            [ -x "$HOME_DIR/.local/bin/niri-clip" ] &&
-                state_user_unit_enabled "$TARGET_USER" niri-clip.service \
-                    graphical-session.target
-            ;;
-        GitHub:*) return 1 ;;
-        lazyvim) lazyvim_target_satisfied ;;
-        *) state_package_present "$entry" ;;
-    esac
-}
+APPLICATION_SOURCE_LIST=${APPLICATION_SOURCE_LIST:-$SHORIN_ROOT/common-applist.txt}
 
 applications_inspect() {
-    local phase=$1 entry
+    local phase=$1 entry manifest_entries
 
     if [ -z "${TARGET_USER:-}" ] || [ -z "${HOME_DIR:-}" ]; then
         module_inspection_failed target-user-context
         return
     fi
     if [ ! -s "$APPLICATION_MANIFEST" ]; then
-        if [ "$phase" = check ] && [ "${SHORIN_MODE:-install}" = install ]; then
+        if [ "$phase" = verify ]; then
+            module_skip application-targets-not-declared
+        elif [ "${SHORIN_MODE:-install}" = install ]; then
             module_drift application-manifest
         else
-            module_skip application-targets-not-declared
+            module_drift legacy-application-manifest
         fi
         return 0
     fi
+    if ! manifest_entries=$(application_manifest_entries); then
+        if [ "$phase" = check ]; then
+            module_inspection_failed application-manifest-unreadable
+        else
+            module_verify_failed application-manifest-unreadable
+        fi
+        return
+    fi
     while IFS= read -r entry; do
         [ -n "$entry" ] || continue
+        if ! application_entry_is_valid "$entry"; then
+            if [ "$phase" = check ]; then
+                module_inspection_failed "application-manifest-invalid:$entry"
+            else
+                module_verify_failed "application-manifest-invalid:$entry"
+            fi
+            return
+        fi
         if [ "$phase" = check ]; then
             module_check_state "application:$entry" \
                 application_entry_satisfied "$entry"
@@ -71,10 +52,10 @@ applications_inspect() {
         elif ! application_entry_satisfied "$entry"; then
             module_verify_failed "application:$entry"
         fi
-    done < <(application_manifest_entries)
+    done <<< "$manifest_entries"
 
     if [ "$MODULE_RESULT" -eq "$RC_OK" ] &&
-        application_manifest_entries | grep -Fqx 'GitHub:niri-clip' &&
+        grep -Fqx 'GitHub:niri-clip' <<< "$manifest_entries" &&
         [ ! -S "/run/user/$(id -u "$TARGET_USER")/bus" ]; then
         module_skip user-services-pending-login
     fi
@@ -83,7 +64,23 @@ applications_inspect() {
 applications_check() { applications_inspect check; }
 
 applications_apply() {
-    local status=0
+    local status=0 manifest_entries
+
+    if [ "${SHORIN_MODE:-install}" = repair ] &&
+        [ ! -s "$APPLICATION_MANIFEST" ]; then
+        log "Migrating legacy application targets from current installed state..."
+        migrate_legacy_application_manifest \
+            "$APPLICATION_SOURCE_LIST" "$APPLICATION_MANIFEST"
+    fi
+    if [ "${SHORIN_MODE:-install}" = repair ]; then
+        if ! manifest_entries=$(application_manifest_entries); then
+            die "Application manifest is not readable: $APPLICATION_MANIFEST"
+        fi
+        if [ -z "$manifest_entries" ]; then
+            log "No legacy application targets were detected; the empty target is declared."
+            return 0
+        fi
+    fi
 
     bash "$SHORIN_ROOT/scripts/modules/applications/apply.sh" || status=$?
     case "$status" in

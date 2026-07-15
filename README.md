@@ -98,6 +98,23 @@ sudo bash install.sh install \
 
 首次交互安装会把最终选择原子写入 profile。后续 `repair`、`audit` 和 `verify` 读取同一声明，避免把“用户没有选择”误判为“安装失败”。自定义 profile 路径必须在后续运行中保持一致。
 
+### 旧版本 Applications 迁移
+
+旧版 `99-apps.sh` 不保存用户当时的应用选择。升级后首次运行 `audit` 会把缺少 `applications.list` 报告为待迁移差异，但不会写入文件。首次运行 `repair` 时，applications 模块会根据当前系统中可确认的安装痕迹生成一次性清单：
+
+- Repo 与 AUR 应用通过已安装软件包识别，并保留原始 `AUR:` 来源。
+- Flatpak 通过系统级安装状态识别，并保留 `flatpak:` 来源。
+- GitHub 应用通过二进制、源码 checkout 或用户单元识别。
+- LazyVim 通过现有 Neovim 配置识别。
+
+迁移是保守的，不会因为清单缺失就默认安装 `common-applist.txt` 中的全部应用。无法从当前状态证明曾被选择、且目前已经完全移除的应用不会自动加入清单。没有检测到任何旧目标时也会写入显式空清单，后续运行不再重复迁移。
+
+生成位置默认是：
+
+```text
+/etc/shorin-arch-setup/applications.list
+```
+
 ### 指定模块
 
 选项后可以列出一个或多个模块：
