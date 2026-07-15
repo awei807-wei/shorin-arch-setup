@@ -24,6 +24,7 @@ FIREFOX_DEFAULT_SOURCE=${FIREFOX_DEFAULT_SOURCE:-$SHORIN_ROOT/resources/firefox}
 FOCUS_SHIFT_REPO_URL=https://github.com/awei807-wei/FocusShift.git
 NIRI_CLIP_REPO_URL=https://github.com/awei807-wei/niri-clip.git
 GITHUB_PROVENANCE_DIR=${GITHUB_PROVENANCE_DIR:-}
+source "$SHORIN_ROOT/scripts/modules/applications/vicinae-contract.sh"
 
 application_entries_from_file() {
     local file=$1
@@ -196,6 +197,7 @@ application_entry_config_satisfied() {
             steam_flatpak_locale_satisfied || return
             ;;
         firefox) firefox_defaults_satisfied || return ;;
+        AUR:vicinae|AUR:vicinae-bin) vicinae_settings_satisfied || return ;;
     esac
     application_nodisplay_satisfied "$entry"
 }

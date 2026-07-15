@@ -98,6 +98,8 @@ sudo bash install.sh install \
 
 首次交互安装会把最终选择原子写入 profile。后续 `repair`、`audit` 和 `verify` 读取同一声明，避免把“用户没有选择”误判为“安装失败”。自定义 profile 路径必须在后续运行中保持一致。
 
+`niri-packages.list` 只要存在且可读就是权威的可选包清单，包括零字节空清单。空清单表示不安装任何可选桌面包，但安装器维护的必需桌面目标仍会合并并验收。
+
 ### 旧版本 Applications 迁移
 
 旧版 `99-apps.sh` 不保存用户当时的应用选择。升级后首次运行 `audit` 会把缺少 `applications.list` 报告为待迁移差异，但不会写入文件。首次运行 `repair` 时，applications 模块会根据当前系统中可确认的安装痕迹生成一次性清单：
@@ -135,16 +137,20 @@ bash install.sh verify --user shorin grub
 | --- | --- | --- | --- |
 | `storage` | 必需 | 无 | Btrfs、Snapper 与安装安全检查点 |
 | `base` | 必需 | 无 | 软件源、基础包、用户、locale、音频、输入法、电源和 GPU |
-| `desktop-niri` | 必需 | `storage base` | Niri 桌面、配置、portal、自动登录和用户单元 |
+| `desktop-niri` | 必需 | `storage base` | Niri 桌面、QuickShell、portal、TTY1 会话和用户配置 |
 | `applications` | 可选 | `base` | Repo、AUR、Flatpak、GitHub 应用及应用配置 |
 | `virtualization` | 可选 | `applications` | QEMU/KVM、libvirt、用户组和默认网络 |
 | `nas-rime` | 可选 | `base` | NFS、Rime 同步和用户定时器 |
 | `vcp` | 可选 | `applications` | VCPChat 桌面入口和 NAS 备份定时器 |
-| `grub` | 动态 | `storage base` | 未安装时可跳过；检测到 GRUB 后升级为必需项，负责双启动、Btrfs 集成、主题及配置验收 |
+| `grub` | 必需 | `storage base` | 双启动、Btrfs 集成、主题及配置验收 |
 
 不适用或缺少外部前置的可选模块会被明确标记为跳过。例如 VCPChat 尚未部署时，`vcp` 不会冒充成功，整体结果为 `PARTIAL`。
 
-`desktop-niri` 的必需目标包含 QuickShell、Qt Wayland、主题生成、锁屏/空闲管理及桌面核心依赖。模块会把必需集合与 `niri-packages.list` 中的用户选择合并，并确保 Niri 配置中只有一个有效的 QuickShell 启动命令；已有带参数的 `spawn-sh-at-startup` 命令会被保留。旧 profile 中的 Waybar 及其两个扩展会被视为已由 QuickShell 取代，不再触发安装或修复，也不会主动卸载机器上已有的软件。
+`desktop-niri` 的必需目标包含 QuickShell、`qt6-wayland`、`qt6-multimedia`、`bluez-utils`、主题生成、锁屏/空闲管理及桌面核心依赖。模块会把必需集合与 `niri-packages.list` 中的用户选择合并，并确保 Niri 配置中只有一个有效的 QuickShell 启动命令；已有带参数的 `spawn-sh-at-startup` 命令会被保留。旧 profile 中的 Waybar 及其两个扩展会被视为已由 QuickShell 取代，不再触发安装或修复，也不会主动卸载机器上已有的软件。
+
+桌面修复还会收敛以下持久状态：Niri 的 `PATH` 包含目标用户 `~/.local/bin`；`Mod+Alt+V` 调用 `niri-clip toggle`；`Mod+ALT+C` 调用 `focus-shift`；Fish 仅在环境文件存在时执行 `source`；明确的旧 `swww` 命令迁移为 `awww`。Niri 配置修改后必须通过 `niri validate`，失败时会恢复原 `config.kdl` 和 `binds.kdl`。
+
+TTY1 会话由 `~/.bash_profile` 中的托管块启动 `niri-session`。旧版 `niri-autostart.service` 及 wants 链接会被清理；存在用户 bus 时同步执行 `daemon-reload` 和失败状态清理，避免后台重复启动一个没有 TTY 的 Niri 会话。
 
 ## 模块契约
 
@@ -220,8 +226,10 @@ tests/                           # 原语、runner、入口及真实模块合同
 
 当前 `GitHub:` 应用包括 `focus-shift` 和 `niri-clip`。源码位于目标用户的 `~/.local/src/`，可执行文件安装到 `~/.local/bin/`；`niri-clip` 同时部署并启用用户级 systemd 服务。
 
+声明 `AUR:vicinae-bin` 或兼容的旧 `AUR:vicinae` 目标时，applications 模块会管理 `~/.config/vicinae/settings.json` 的初始化与旧空壳迁移。缺失或仅含默认 schema 的配置会从可信模板原子部署，路径按目标用户 home 渲染，权限为 `600`；已存在的真实用户配置和符号链接不会覆盖。扩展、数据库、缓存、访问历史等运行数据不属于安装器管理范围。
+
 ## 重跑与外部条件
 
-软件包、服务、配置文件、用户单元、`fstab` 和 GRUB 都以当前状态为判断依据。Storage 会按挂载目标清理旧版本遗留的重复根分区、Home、EFI、包缓存和日志条目，同时保留同一 Btrfs 文件系统上的不同子卷；写回前必须通过 `findmnt --verify`。安装器管理的系统配置经校验后原子替换；用户可编辑的 dotfiles、Firefox 用户配置、壁纸、模板和 XDG 目录配置默认只在首次创建，重跑不会无条件覆盖。
+软件包、服务、配置文件、用户单元、`fstab` 和 GRUB 都以当前状态为判断依据。Storage 会按挂载目标清理旧版本遗留的重复根分区、Home、EFI、包缓存和日志条目，同时保留同一 Btrfs 文件系统上的不同子卷；写回前必须通过 `findmnt --verify`。安装器管理的系统配置经校验后原子替换；用户可编辑的 dotfiles、Firefox 用户配置、Vicinae 用户配置、壁纸、模板和 XDG 目录配置默认只在首次创建或明确识别为旧空壳时部署，重跑不会无条件覆盖。
 
 用户级 systemd 单元在存在用户 bus 时立即 reload/start；没有 bus 时只建立 wants 链接并记录待登录状态。NAS、VCPChat 或其他外部前置不可用时，对应可选模块会进入跳过或失败状态，并反映到最终 `PARTIAL` 结果中。

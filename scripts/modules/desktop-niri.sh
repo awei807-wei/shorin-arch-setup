@@ -20,10 +20,10 @@ desktop_niri_expect() {
 }
 
 desktop_niri_inspect() {
-    local phase=$1 entry source_file
+    local phase=$1 entry source_file niri_package_status=0
     local manifest=${SHORIN_PROFILE_DIR:-/etc/shorin-arch-setup}/niri-packages.list
 
-    if [ -s "$manifest" ]; then
+    if [ -f "$manifest" ] && [ -r "$manifest" ]; then
         source_file=$manifest
     else
         source_file="$SHORIN_ROOT/niri-applist.txt"
@@ -58,14 +58,38 @@ desktop_niri_inspect() {
         niri_optional_hardware_targets_match
     desktop_niri_expect "$phase" file:niri-config \
         state_file_nonempty "$HOME_DIR/.config/niri/config.kdl"
+    desktop_niri_expect "$phase" access:niri-session-files \
+        niri_session_files_accessible "$TARGET_USER"
     desktop_niri_expect "$phase" config:niri-quickshell-startup \
         niri_quickshell_startup_satisfied \
             "$HOME_DIR/.config/niri/config.kdl"
-    if grep -Fq -- "--autologin $TARGET_USER" \
-        /etc/systemd/system/getty@tty1.service.d/autologin.conf 2>/dev/null; then
-        desktop_niri_expect "$phase" unit:niri-autostart \
-            niri_autostart_unit_satisfied "$TARGET_USER" "$HOME_DIR"
+    desktop_niri_expect "$phase" config:niri-path niri_path_satisfied
+    desktop_niri_expect "$phase" config:niri-wallpaper-backend \
+        niri_wallpaper_backend_satisfied
+    desktop_niri_expect "$phase" config:quickshell-wallpaper-backend \
+        niri_quickshell_wallpaper_backend_satisfied
+    desktop_niri_expect "$phase" config:niri-bindings niri_bindings_satisfied
+    if command -v niri >/dev/null 2>&1; then
+        desktop_niri_expect "$phase" config:niri-valid \
+            niri_config_valid "$TARGET_USER"
+    else
+        state_package_present niri || niri_package_status=$?
+        if [ "$phase" = check ] && [ "$niri_package_status" -eq 1 ]; then
+            module_drift config:niri-validator-missing
+        elif [ "$phase" = check ]; then
+            module_inspection_failed config:niri-validator-missing
+        else
+            module_verify_failed config:niri-validator-missing
+        fi
     fi
+    desktop_niri_expect "$phase" config:fish-env-sources \
+        niri_fish_sources_satisfied
+    desktop_niri_expect "$phase" config:tty1-niri-session \
+        niri_bash_profile_satisfied
+    desktop_niri_expect "$phase" legacy:niri-autostart-absent \
+        niri_legacy_autostart_absent
+    desktop_niri_expect "$phase" config:tty1-autologin \
+        niri_autologin_state_satisfied
 }
 
 desktop_niri_check() { desktop_niri_inspect check; }

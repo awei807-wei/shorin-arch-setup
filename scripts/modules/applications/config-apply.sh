@@ -104,6 +104,64 @@ ensure_firefox_defaults_once() {
         "$HOME_DIR/.mozilla" "$TARGET_USER"
 }
 
+ensure_vicinae_config_directory() {
+    local directory target_group
+
+    directory=$(vicinae_config_directory_path)
+    target_group=$(id -gn "$TARGET_USER")
+    [ -L "$directory" ] && return 0
+    if [ -e "$directory" ] && [ ! -d "$directory" ]; then
+        die "Vicinae configuration path is not a directory: $directory"
+    fi
+    if [ ! -d "$directory" ]; then
+        install -d -o "$TARGET_USER" -g "$target_group" "$directory"
+    else
+        chown "$TARGET_USER:$target_group" "$directory"
+        chmod u+rwx "$directory"
+    fi
+    vicinae_config_directory_satisfied
+}
+
+ensure_vicinae_settings() {
+    local destination target_group temporary
+
+    destination=$(vicinae_settings_path)
+    target_group=$(id -gn "$TARGET_USER")
+    ensure_vicinae_config_directory
+    [ -L "$destination" ] && return 0
+    if [ -e "$destination" ]; then
+        [ -f "$destination" ] ||
+            die "Vicinae settings path is not a regular file: $destination"
+        chown "$TARGET_USER:$target_group" "$destination"
+        chmod u+r "$destination"
+        vicinae_settings_target_readable "$destination" ||
+            die "Vicinae settings are not readable by $TARGET_USER: $destination"
+        if vicinae_settings_matches_template "$destination"; then
+            chmod 600 "$destination"
+            vicinae_settings_satisfied
+            return
+        fi
+        if ! vicinae_settings_is_legacy_shell "$destination"; then
+            vicinae_settings_satisfied
+            return
+        fi
+    fi
+
+    temporary=$(mktemp)
+    if ! render_vicinae_settings > "$temporary"; then
+        rm -f "$temporary"
+        error "Cannot render the Vicinae settings template."
+        return 1
+    fi
+    if ! install_if_changed "$temporary" "$destination" 600; then
+        rm -f "$temporary"
+        return 1
+    fi
+    rm -f "$temporary"
+    chown "$TARGET_USER:$target_group" "$destination"
+    vicinae_settings_satisfied
+}
+
 ensure_application_entry_config() {
     local entry=$1
 
@@ -114,6 +172,7 @@ ensure_application_entry_config() {
         flatpak:com.valvesoftware.Steam) ensure_flatpak_steam_locale ;;
         lazyvim) ensure_lazyvim_config ;;
         firefox) ensure_firefox_defaults_once ;;
+        AUR:vicinae|AUR:vicinae-bin) ensure_vicinae_settings ;;
     esac
     ensure_application_nodisplay "$entry"
 }

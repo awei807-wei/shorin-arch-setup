@@ -19,7 +19,7 @@ select_desktop_packages() {
             sed 's/[[:space:]]*#.*//' | xargs -n1
     )
     if [ "${SHORIN_MODE:-install}" != install ]; then
-        if [ -s "$manifest" ]; then
+        if [ -f "$manifest" ] && [ -r "$manifest" ]; then
             mapfile -t selected < "$manifest"
         else
             selected=("${defaults[@]}")

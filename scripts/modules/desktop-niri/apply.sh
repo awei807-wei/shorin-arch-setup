@@ -38,17 +38,9 @@ desktop_niri_contract_init
 info_kv "Target" "$TARGET_USER"
 
 # DM Check
-KNOWN_DMS=("gdm" "sddm" "lightdm" "lxdm" "slim" "xorg-xdm" "ly" "greetd")
 SKIP_AUTOLOGIN=false
 DM_FOUND=""
-for dm in "${KNOWN_DMS[@]}"; do
-  if pacman -Q "$dm" &>/dev/null; then
-    DM_FOUND="$dm"
-    break
-  fi
-done
-
-if [ -n "$DM_FOUND" ]; then
+if DM_FOUND=$(niri_detect_display_manager); then
   info_kv "Conflict" "${H_RED}$DM_FOUND${NC}"
   SKIP_AUTOLOGIN=true
 else
@@ -113,7 +105,7 @@ log "Required and selected desktop packages converged."
 # ==============================================================================
 section "Step 5/9" "Dotfiles, Wallpapers, and Templates"
 bash "$SCRIPT_DIR/modules/desktop-niri/dotfiles-apply.sh"
-ensure_niri_quickshell_startup "$HOME_DIR/.config/niri/config.kdl" "$TARGET_USER"
+ensure_niri_session_config "$TARGET_USER"
 
 # ==============================================================================
 # STEP 8: Hardware Tools
@@ -133,39 +125,12 @@ success "Tools configured."
 # ==============================================================================
 section "Final" "Cleanup & Boot"
 
-SVC_DIR="$HOME_DIR/.config/systemd/user"
-SVC_FILE="$SVC_DIR/niri-autostart.service"
-LINK="$SVC_DIR/default.target.wants/niri-autostart.service"
-
 if [ "$SKIP_AUTOLOGIN" = true ]; then
   log "Auto-login skipped."
-  as_user rm -f "$LINK" "$SVC_FILE"
 else
   log "Configuring TTY Auto-login..."
-  mkdir -p "/etc/systemd/system/getty@tty1.service.d"
-  AUTOLOGIN_TMP=$(mktemp)
-  printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --noreset --noclear --autologin %s - ${TERM}\n' \
-    "$TARGET_USER" > "$AUTOLOGIN_TMP"
-  install_if_changed "$AUTOLOGIN_TMP" \
-    /etc/systemd/system/getty@tty1.service.d/autologin.conf 644
-  rm -f "$AUTOLOGIN_TMP"
-
-  SVC_TMP=$(mktemp)
-  cat <<EOT >"$SVC_TMP"
-[Unit]
-Description=Niri Session Autostart
-After=graphical-session-pre.target
-[Service]
-ExecStart=/usr/bin/niri-session
-Restart=on-failure
-[Install]
-WantedBy=default.target
-EOT
-  install_if_changed "$SVC_TMP" "$SVC_FILE" 644
-  rm -f "$SVC_TMP"
-  chown "$TARGET_USER:" "$SVC_FILE"
-  ensure_user_unit_enabled "$TARGET_USER" niri-autostart.service default.target
-  success "Enabled."
+  success "TTY1 auto-login enabled; .bash_profile starts niri-session."
 fi
+ensure_niri_autologin_state "$TARGET_USER" "$SKIP_AUTOLOGIN"
 
 log "Module 04 completed."

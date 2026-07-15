@@ -29,7 +29,7 @@ declare -A DEFAULT_POLICY=(
     [virtualization]=optional
     [nas-rime]=optional
     [vcp]=optional
-    [grub]=$(command -v grub-mkconfig >/dev/null 2>&1 && printf required || printf optional)
+    [grub]=required
 )
 
 declare -A MODULE_DEPENDS=(

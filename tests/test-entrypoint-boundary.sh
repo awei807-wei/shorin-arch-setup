@@ -56,9 +56,26 @@ assert_main_guard() {
         "$ENTRYPOINT" || fail 'install.sh must guard main with BASH_SOURCE[0] == $0'
 }
 
+assert_selected_grub_is_required() {
+    local result
+
+    result=$(ENTRYPOINT="$ENTRYPOINT" bash -Eeuo pipefail -c '
+        source "$ENTRYPOINT"
+        parse_args verify grub
+        reset_run_state
+        configure_modules
+        record_module_failure grub verify rc=1
+        derive_final_status
+        printf "%s:%s\n" "$(module_policy grub)" "$FINAL_STATUS"
+    ')
+    [ "$result" = required:FAILED ] ||
+        fail "a selected GRUB verification failure must be fatal (actual=$result)"
+}
+
 assert_entrypoint_size
 assert_no_implementation_commands
 assert_main_guard
 assert_source_safe
+assert_selected_grub_is_required
 
 printf 'PASS: entrypoint boundary contract\n'

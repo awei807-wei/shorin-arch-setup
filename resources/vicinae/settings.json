@@ -1,0 +1,70 @@
+{
+  "$schema": "https://vicinae.com/schemas/config.json",
+  "close_on_focus_loss": true,
+  "consider_preedit": true,
+  "pop_to_root_on_close": true,
+  "favicon_service": "google",
+  "search_files_in_root": false,
+  "theme": {
+    "dark": {
+      "name": "kanagawa"
+    }
+  },
+  "favorites": [],
+  "providers": {
+    "applications": {
+      "preferences": {
+        "paths": [
+          "__SHORIN_HOME_DIR__/.local/share/applications",
+          "/var/lib/flatpak/exports/share/applications",
+          "/usr/share/applications"
+        ]
+      }
+    },
+    "browser-extension": {
+      "enabled": false
+    },
+    "calculator": {
+      "enabled": false
+    },
+    "clipboard": {
+      "enabled": false,
+      "preferences": {
+        "monitoring": true
+      }
+    },
+    "core": {
+      "enabled": false
+    },
+    "developer": {
+      "enabled": false
+    },
+    "files": {
+      "enabled": false,
+      "preferences": {
+        "autoIndexing": false
+      }
+    },
+    "font": {
+      "enabled": false
+    },
+    "manage-shortcuts": {
+      "enabled": false
+    },
+    "power": {
+      "enabled": false
+    },
+    "raycast-compat": {
+      "enabled": false
+    },
+    "system": {
+      "enabled": false
+    },
+    "theme": {
+      "enabled": false
+    },
+    "wm": {
+      "enabled": false
+    }
+  }
+}
