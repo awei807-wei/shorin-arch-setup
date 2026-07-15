@@ -1,4 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+trap 'printf "ERROR: %s:%s: %s\n" \
+  "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 # ==============================================================================
 # 04-niri-setup.sh - Niri Desktop (Restored FZF & Robust AUR)
@@ -21,56 +25,8 @@ check_root
 # 2. Critical Failure Handler (The "Big Red Box")
 critical_failure_handler() {
   local failed_reason="$1"
-  trap - ERR
-
-  echo ""
-  echo -e "\033[0;31m################################################################\033[0m"
-  echo -e "\033[0;31m#                                                              #\033[0m"
-  echo -e "\033[0;31m#   CRITICAL INSTALLATION FAILURE DETECTED                     #\033[0m"
-  echo -e "\033[0;31m#                                                              #\033[0m"
-  echo -e "\033[0;31m#   Reason: $failed_reason\033[0m"
-  echo -e "\033[0;31m#                                                              #\033[0m"
-  echo -e "\033[0;31m#   OPTIONS:                                                   #\033[0m"
-  echo -e "\033[0;31m#   1. Restore snapshot (Undo changes & Exit)                  #\033[0m"
-  echo -e "\033[0;31m#   2. Retry / Re-run script                                   #\033[0m"
-  echo -e "\033[0;31m#   3. Abort (Exit immediately)                                #\033[0m"
-  echo -e "\033[0;31m#                                                              #\033[0m"
-  echo -e "\033[0;31m################################################################\033[0m"
-  echo ""
-
-  while true; do
-    read -p "Select an option [1-3]: " -r choice
-    case "$choice" in
-    1)
-      # Option 1: Restore Snapshot
-      if [ -f "$UNDO_SCRIPT" ]; then
-        warn "Executing recovery script..."
-        bash "$UNDO_SCRIPT"
-        exit 1
-      else
-        error "Recovery script missing! You are on your own."
-        exit 1
-      fi
-      ;;
-    2)
-      # Option 2: Re-run Script
-      warn "Restarting installation script..."
-      echo "-----------------------------------------------------"
-      sleep 1
-      exec "$0" "$@"
-      ;;
-    3)
-      # Option 3: Exit
-      warn "User chose to abort."
-      warn "Please fix the issue manually before re-running."
-      error "Installation aborted."
-      exit 1
-      ;;
-    *) 
-      echo "Invalid input. Please enter 1, 2, or 3." 
-      ;;
-    esac
-  done
+  error "$failed_reason"
+  return 1
 }
 
 # 3. Robust Package Installation with Retry Loop
@@ -103,7 +59,7 @@ ensure_package_installed() {
       warn "Attempt $attempt/$max_attempts failed for '$pkg'."
     fi
 
-    ((attempt++))
+    ((++attempt))
   done
 
   # 3. Final Verification
@@ -120,15 +76,16 @@ section "Phase 4" "Niri Desktop Environment"
 # STEP 0: Safety Checkpoint
 # ==============================================================================
 
-# Enable Trap
-trap 'critical_failure_handler "Script Error at Line $LINENO"' ERR
-
 # ==============================================================================
 # STEP 1: Identify User & DM Check
 # ==============================================================================
 log "Identifying user..."
-DETECTED_USER=$(awk -F: '$3 == 1000 {print $1}' /etc/passwd)
-TARGET_USER="${DETECTED_USER:-$(read -p "Target user: " u && echo $u)}"
+DETECTED_USER=$(awk -F: '$3 == 1000 {print $1; exit}' /etc/passwd)
+if [ -n "$DETECTED_USER" ]; then
+  TARGET_USER=$DETECTED_USER
+else
+  read -r -p "Target user: " TARGET_USER
+fi
 HOME_DIR="/home/$TARGET_USER"
 info_kv "Target" "$TARGET_USER"
 
@@ -155,20 +112,24 @@ fi
 # STEP 2: Core Components
 # ==============================================================================
 section "Step 1/9" "Core Components"
-PKGS="niri xdg-desktop-portal-gnome xdg-desktop-portal-gtk fuzzel kitty firefox libnotify polkit-gnome"
-exe pacman -S --noconfirm --needed $PKGS
+ensure_packages niri xdg-desktop-portal-gnome xdg-desktop-portal-gtk \
+  fuzzel kitty firefox libnotify polkit-gnome
 
 log "Configuring Firefox Policies..."
 POL_DIR="/etc/firefox/policies"
 exe mkdir -p "$POL_DIR"
-echo '{ "policies": { "Extensions": { "Install": ["https://addons.mozilla.org/firefox/downloads/latest/pywalfox/latest.xpi"] } } }' >"$POL_DIR/policies.json"
-exe chmod 755 "$POL_DIR" && exe chmod 644 "$POL_DIR/policies.json"
+POLICY_TMP=$(mktemp)
+printf '%s\n' '{ "policies": { "Extensions": { "Install": ["https://addons.mozilla.org/firefox/downloads/latest/pywalfox/latest.xpi"] } } }' > "$POLICY_TMP"
+install_if_changed "$POLICY_TMP" "$POL_DIR/policies.json" 644
+rm -f "$POLICY_TMP"
+exe chmod 755 "$POL_DIR"
 
 # ==============================================================================
 # STEP 3: File Manager
 # ==============================================================================
 section "Step 2/9" "File Manager"
-exe pacman -S --noconfirm --needed ffmpegthumbnailer gvfs-smb nautilus-open-any-terminal file-roller gnome-keyring gst-plugins-base gst-plugins-good gst-libav nautilus
+ensure_packages ffmpegthumbnailer gvfs-smb nautilus-open-any-terminal \
+  file-roller gnome-keyring gst-plugins-base gst-plugins-good gst-libav nautilus
 
 if [ ! -f /usr/bin/gnome-terminal ] || [ -L /usr/bin/gnome-terminal ]; then
   exe ln -sf /usr/bin/kitty /usr/bin/gnome-terminal
@@ -177,8 +138,8 @@ fi
 # Nautilus Nvidia/Input Fix
 DESKTOP_FILE="/usr/share/applications/org.gnome.Nautilus.desktop"
 if [ -f "$DESKTOP_FILE" ]; then
-  GPU_COUNT=$(lspci | grep -E -i "vga|3d" | wc -l)
-  HAS_NVIDIA=$(lspci | grep -E -i "nvidia" | wc -l)
+  GPU_COUNT=$(lspci | awk 'BEGIN { IGNORECASE=1 } /vga|3d/ { count++ } END { print count + 0 }')
+  HAS_NVIDIA=$(lspci | awk 'BEGIN { IGNORECASE=1 } /nvidia/ { count++ } END { print count + 0 }')
   ENV_VARS="env GTK_IM_MODULE=fcitx"
   [ "$GPU_COUNT" -gt 1 ] && [ "$HAS_NVIDIA" -gt 0 ] && ENV_VARS="env GSK_RENDERER=gl GTK_IM_MODULE=fcitx"
 
@@ -190,8 +151,14 @@ fi
 section "Step 3/9" "Temp sudo file"
 
 SUDO_TEMP_FILE="/etc/sudoers.d/99_shorin_installer_temp"
-echo "$TARGET_USER ALL=(ALL) NOPASSWD: ALL" >"$SUDO_TEMP_FILE"
-chmod 440 "$SUDO_TEMP_FILE"
+SUDO_TEMP_SOURCE=$(mktemp)
+printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$TARGET_USER" > "$SUDO_TEMP_SOURCE"
+install_sudoers_file "$SUDO_TEMP_SOURCE" "$SUDO_TEMP_FILE"
+rm -f "$SUDO_TEMP_SOURCE"
+cleanup_temp_sudoers() {
+  [ ! -f "$SUDO_TEMP_FILE" ] || rm -f "$SUDO_TEMP_FILE"
+}
+trap cleanup_temp_sudoers EXIT
 log "Temp sudo file created..."
 # ==============================================================================
 # STEP 5: Dependencies (RESTORED FZF)
@@ -200,10 +167,10 @@ section "Step 4/9" "Dependencies"
 LIST_FILE="$PARENT_DIR/niri-applist.txt"
 
 # Ensure tools
-command -v fzf &>/dev/null || pacman -S --noconfirm fzf >/dev/null 2>&1
+command -v fzf &>/dev/null || ensure_package fzf
 
 if [ -f "$LIST_FILE" ]; then
-  mapfile -t DEFAULT_LIST < <(grep -vE "^\s*#|^\s*$" "$LIST_FILE" | sed 's/#.*//; s/AUR://g' | xargs -n1)
+  mapfile -t DEFAULT_LIST < <(grep -vE "^\s*#|^\s*$" "$LIST_FILE" | sed 's/[[:space:]]*#.*//' | xargs -n1)
 
   if [ ${#DEFAULT_LIST[@]} -eq 0 ]; then
     warn "App list is empty. Skipping."
@@ -250,8 +217,7 @@ if [ -f "$LIST_FILE" ]; then
         PACKAGE_ARRAY=()
         while IFS= read -r line; do
           raw_pkg=$(echo "$line" | cut -f1 -d$'\t' | xargs)
-          clean_pkg="${raw_pkg#AUR:}"
-          [ -n "$clean_pkg" ] && PACKAGE_ARRAY+=("$clean_pkg")
+          [ -n "$raw_pkg" ] && PACKAGE_ARRAY+=("$raw_pkg")
         done <<<"$SELECTED_LINES"
       fi
       # -----------------------------------------------
@@ -263,38 +229,23 @@ if [ -f "$LIST_FILE" ]; then
 
   # --- Installation Loop ---
   if [ ${#PACKAGE_ARRAY[@]} -gt 0 ]; then
-    BATCH_LIST=()
-    AUR_LIST=()
     info_kv "Target" "${#PACKAGE_ARRAY[@]} packages scheduled."
 
-    for pkg in "${PACKAGE_ARRAY[@]}"; do
-      [ "$pkg" == "imagemagic" ] && pkg="imagemagick"
-      [[ "$pkg" == "AUR:"* ]] && AUR_LIST+=("${pkg#AUR:}") || BATCH_LIST+=("$pkg")
+    mapfile -t PACKAGE_ARRAY < <(printf '%s\n' "${PACKAGE_ARRAY[@]}" | sort -u)
+    for entry in "${PACKAGE_ARRAY[@]}"; do
+      case "$entry" in
+        AUR:*) ensure_package_installed "${entry#AUR:}" AUR ;;
+        flatpak:*) ensure_flatpak "${entry#flatpak:}" ;;
+        GitHub:*) critical_failure_handler "GitHub entry is unsupported in niri-applist: $entry" ;;
+        imagemagic) ensure_package_installed imagemagick Repo ;;
+        *) ensure_package_installed "$entry" Repo ;;
+      esac
     done
-
-    # 1. Batch Install Repo Packages
-    if [ ${#BATCH_LIST[@]} -gt 0 ]; then
-      log "Phase 1: Batch Installing Repo Packages..."
-      as_user yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None "${BATCH_LIST[@]}" || true
-
-      # Verify Each
-      for pkg in "${BATCH_LIST[@]}"; do
-        ensure_package_installed "$pkg" "Repo"
-      done
-    fi
-
-    # 2. Sequential AUR Install
-    if [ ${#AUR_LIST[@]} -gt 0 ]; then
-      log "Phase 2: Installing AUR Packages (Sequential)..."
-      for pkg in "${AUR_LIST[@]}"; do
-        ensure_package_installed "$pkg" "AUR"
-      done
-    fi
 
     # Waybar fallback
     if ! command -v waybar &>/dev/null; then
       warn "Waybar missing. Installing stock..."
-      exe pacman -S --noconfirm --needed waybar
+      ensure_package waybar
     fi
   else
     warn "No packages selected."
@@ -311,51 +262,36 @@ section "Step 5/9" "Deploying Dotfiles"
 REPO_GITHUB="https://github.com/awei807-wei/ShorinArchExperience-ArchlinuxGuide.git"
 REPO_GITEE="https://gitee.com/shorinkiwata/ShorinArchExperience-ArchlinuxGuide.git"
 TEMP_DIR="/tmp/shorin-repo"
-rm -rf "$TEMP_DIR"
 
-log "Cloning configuration..."
-if ! as_user git clone "$REPO_GITHUB" "$TEMP_DIR"; then
-  warn "GitHub failed. Trying Gitee..."
-  rm -rf "$TEMP_DIR"
-  if ! as_user git clone "$REPO_GITEE" "$TEMP_DIR"; then
-    critical_failure_handler "Failed to clone dotfiles from any source."
+log "Converging configuration source checkout..."
+if ! ensure_git_checkout "$TARGET_USER" "$REPO_GITHUB" main "$TEMP_DIR"; then
+  if [ -e "$TEMP_DIR" ] || ! ensure_git_checkout "$TARGET_USER" "$REPO_GITEE" main "$TEMP_DIR"; then
+    critical_failure_handler "Failed to update the verified dotfiles checkout."
   fi
 fi
 
 if [ -d "$TEMP_DIR/dotfiles" ]; then
-  # Filter Exclusions
+  log "Installing missing user-editable dotfiles without overwriting existing files..."
   if [ "$TARGET_USER" != "shorin" ]; then
-    EXCLUDE_FILE="$PARENT_DIR/exclude-dotfiles.txt"
-    if [ -f "$EXCLUDE_FILE" ]; then
-      log "Processing exclusions..."
-      while IFS= read -r item; do
-        item=$(echo "$item" | tr -d '\r' | xargs)
-        [ -n "$item" ] && [[ ! "$item" =~ ^# ]] && rm -rf "$TEMP_DIR/dotfiles/.config/$item"
-      done <"$EXCLUDE_FILE"
+    SOURCE_BOOKMARKS="$TEMP_DIR/dotfiles/.config/gtk-3.0/bookmarks"
+    if [ -f "$SOURCE_BOOKMARKS" ]; then
+      BOOKMARKS_TMP=$(mktemp)
+      sed "s/shorin/$TARGET_USER/g" "$SOURCE_BOOKMARKS" > "$BOOKMARKS_TMP"
+      install_user_file_once "$BOOKMARKS_TMP" \
+        "$HOME_DIR/.config/gtk-3.0/bookmarks" 644 "$TARGET_USER"
+      rm -f "$BOOKMARKS_TMP"
     fi
   fi
-
-  # Backup & Apply
-  log "Backing up & Applying..."
-  as_user tar -czf "$HOME_DIR/config_backup_$(date +%s).tar.gz" -C "$HOME_DIR" .config
-  as_user cp -rf "$TEMP_DIR/dotfiles/." "$HOME_DIR/"
-
-# Post-Process
-  if [ "$TARGET_USER" != "shorin" ]; then
-    as_user truncate -s 0 "$HOME_DIR/.config/niri/output.kdl" 2>/dev/null
-    
-    # 定义书签文件路径
-    BOOKMARKS_FILE="$HOME_DIR/.config/gtk-3.0/bookmarks"
-    
-    # 如果文件存在，则执行替换操作
-    if [ -f "$BOOKMARKS_FILE" ]; then
-        # 使用 sed 将文件中的 "shorin" 全部替换为当前目标用户名
-        # 使用 as_user 确保文件权限不会变成 root
-        as_user sed -i "s/shorin/$TARGET_USER/g" "$BOOKMARKS_FILE"
-        log "Updated GTK bookmarks path from 'shorin' to '$TARGET_USER'."
-    fi
-    # --- 修改结束 ---
+  SOURCE_NIRI_CONFIG="$TEMP_DIR/dotfiles/.config/niri/config.kdl"
+  if [ -f "$SOURCE_NIRI_CONFIG" ]; then
+    NIRI_TMP=$(mktemp)
+    sed 's/\& \/usr\/lib\/xdg-desktop-portal-gnome//' \
+      "$SOURCE_NIRI_CONFIG" > "$NIRI_TMP"
+    install_user_file_once "$NIRI_TMP" "$HOME_DIR/.config/niri/config.kdl" \
+      644 "$TARGET_USER"
+    rm -f "$NIRI_TMP"
   fi
+  deploy_user_tree_once "$TEMP_DIR/dotfiles" "$HOME_DIR" "$TARGET_USER"
 
   # Fix Symlinks & Permissions
   GTK4="$HOME_DIR/.config/gtk-4.0"
@@ -375,18 +311,15 @@ if [ -d "$TEMP_DIR/dotfiles" ]; then
   section "Portal Fix" "Configuring Priority"
   PORTAL_CONF_DIR="$HOME_DIR/.config/xdg-desktop-portal"
   as_user mkdir -p "$PORTAL_CONF_DIR"
-  as_user printf "[preferred]\ndefault=gtk\n" > "$PORTAL_CONF_DIR/portals.conf"
-
-  # Sanitize Niri config pulled from repo to prevent conflict
-  NIRI_CONFIG="$HOME_DIR/.config/niri/config.kdl"
-  if [ -f "$NIRI_CONFIG" ]; then
-    as_user sed -i "s/\& \/usr\/lib\/xdg-desktop-portal-gnome//" "$NIRI_CONFIG"
-    success "Niri config sanitized."
-  fi
+  PORTAL_TMP=$(mktemp)
+  printf '[preferred]\ndefault=gtk\n' > "$PORTAL_TMP"
+  install_if_changed "$PORTAL_TMP" "$PORTAL_CONF_DIR/portals.conf" 644
+  rm -f "$PORTAL_TMP"
+  chown "$TARGET_USER:$TARGET_USER" "$PORTAL_CONF_DIR/portals.conf"
 
   success "Dotfiles Applied."
 else
-  warn "Dotfiles missing in temp directory."
+  critical_failure_handler "Dotfiles missing in the verified checkout."
 fi
 
 
@@ -395,14 +328,15 @@ fi
 # ==============================================================================
 section "Step 6/9" "Wallpapers"
 if [ -d "$TEMP_DIR/wallpapers" ]; then
-  as_user mkdir -p "$HOME_DIR/Pictures/Wallpapers"
-  as_user cp -rf "$TEMP_DIR/wallpapers/." "$HOME_DIR/Pictures/Wallpapers/"
+  deploy_user_tree_once "$TEMP_DIR/wallpapers" \
+    "$HOME_DIR/Pictures/Wallpapers" "$TARGET_USER"
   as_user touch "$HOME_DIR/Templates/new"
-  as_user touch "$HOME_DIR/Templates/new.sh"
-  as_user echo "#!/bin/bash" >> "$HOME_DIR/Templates/new.sh"
+  TEMPLATE_TMP=$(mktemp)
+  printf '#!/usr/bin/env bash\n' > "$TEMPLATE_TMP"
+  install_user_file_once "$TEMPLATE_TMP" "$HOME_DIR/Templates/new.sh" 755 "$TARGET_USER"
+  rm -f "$TEMPLATE_TMP"
   success "Installed."
 fi
-rm -rf "$TEMP_DIR"
 
 # ==============================================================================
 # STEP 8: Hardware Tools
@@ -410,10 +344,10 @@ rm -rf "$TEMP_DIR"
 section "Step 7/9" "Hardware"
 if pacman -Q ddcutil &>/dev/null; then
   gpasswd -a "$TARGET_USER" i2c
-  lsmod | grep -q i2c_dev || echo "i2c-dev" >/etc/modules-load.d/i2c-dev.conf
+  lsmod | grep -q i2c_dev || ensure_line /etc/modules-load.d/i2c-dev.conf i2c-dev
 fi
 if pacman -Q swayosd &>/dev/null; then
-  systemctl enable --now swayosd-libinput-backend.service >/dev/null 2>&1
+  ensure_service_started swayosd-libinput-backend.service
 fi
 success "Tools configured."
 
@@ -430,13 +364,19 @@ LINK="$SVC_DIR/default.target.wants/niri-autostart.service"
 if [ "$SKIP_AUTOLOGIN" = true ]; then
   log "Auto-login skipped."
   as_user rm -f "$LINK" "$SVC_FILE"
+  rm -f /tmp/shorin_niri_user_unit_required
 else
   log "Configuring TTY Auto-login..."
   mkdir -p "/etc/systemd/system/getty@tty1.service.d"
-  echo -e "[Service]\nExecStart=\nExecStart=-/sbin/agetty --noreset --noclear --autologin $TARGET_USER - \${TERM}" >"/etc/systemd/system/getty@tty1.service.d/autologin.conf"
+  AUTOLOGIN_TMP=$(mktemp)
+  printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --noreset --noclear --autologin %s - ${TERM}\n' \
+    "$TARGET_USER" > "$AUTOLOGIN_TMP"
+  install_if_changed "$AUTOLOGIN_TMP" \
+    /etc/systemd/system/getty@tty1.service.d/autologin.conf 644
+  rm -f "$AUTOLOGIN_TMP"
 
-  as_user mkdir -p "$(dirname "$LINK")"
-  cat <<EOT >"$SVC_FILE"
+  SVC_TMP=$(mktemp)
+  cat <<EOT >"$SVC_TMP"
 [Unit]
 Description=Niri Session Autostart
 After=graphical-session-pre.target
@@ -446,10 +386,12 @@ Restart=on-failure
 [Install]
 WantedBy=default.target
 EOT
-  as_user ln -sf "../niri-autostart.service" "$LINK"
-  chown -R "$TARGET_USER" "$SVC_DIR"
+  install_if_changed "$SVC_TMP" "$SVC_FILE" 644
+  rm -f "$SVC_TMP"
+  chown "$TARGET_USER:$TARGET_USER" "$SVC_FILE"
+  ensure_user_unit_enabled "$TARGET_USER" niri-autostart.service default.target
+  printf '%s\n' "$TARGET_USER" > /tmp/shorin_niri_user_unit_required
   success "Enabled."
 fi
 
-trap - ERR
 log "Module 04 completed."

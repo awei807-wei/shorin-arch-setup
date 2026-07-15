@@ -1,4 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+trap 'printf "ERROR: %s:%s: %s\n" \
+  "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 # ==============================================================================
 # 00-utils.sh - The "TUI" Visual Engine (v4.0)
@@ -18,6 +22,7 @@ export H_GREEN='\033[1;32m'
 export H_YELLOW='\033[1;33m'
 export H_BLUE='\033[1;34m'
 export H_PURPLE='\033[1;35m'
+export H_MAGENTA='\033[1;35m'
 export H_CYAN='\033[1;36m'
 export H_WHITE='\033[1;37m'
 export H_GRAY='\033[1;90m'
@@ -27,11 +32,11 @@ export BG_BLUE='\033[44m'
 export BG_PURPLE='\033[45m'
 
 # 符号定义
-export TICK="${H_GREEN}✔${NC}"
-export CROSS="${H_RED}✘${NC}"
-export INFO="${H_BLUE}ℹ${NC}"
-export WARN="${H_YELLOW}⚠${NC}"
-export ARROW="${H_CYAN}➜${NC}"
+export TICK="${H_GREEN}[OK]${NC}"
+export CROSS="${H_RED}[X]${NC}"
+export INFO="${H_BLUE}[i]${NC}"
+export WARN="${H_YELLOW}[!]${NC}"
+export ARROW="${H_CYAN}->${NC}"
 
 # 日志文件
 export TEMP_LOG_FILE="/tmp/log-shorin-arch-setup.txt"
@@ -45,10 +50,10 @@ check_root() {
         exit 1
     fi
 }
-
 write_log() {
     # Strip ANSI colors for log file
-    local clean_msg=$(echo -e "$2" | sed 's/\x1b\[[0-9;]*m//g')
+    local clean_msg
+    clean_msg=$(printf '%b' "$2" | sed 's/\x1b\[[0-9;]*m//g')
     echo "[$(date '+%H:%M:%S')] [$1] $clean_msg" >> "$TEMP_LOG_FILE"
 }
 
@@ -75,7 +80,7 @@ section() {
 info_kv() {
     local key="$1"
     local val="$2"
-    local extra="$3"
+    local extra="${3:-}"
     printf "   ${H_BLUE}●${NC} %-15s : ${BOLD}%s${NC} ${DIM}%s${NC}\n" "$key" "$val" "$extra"
     write_log "INFO" "$key=$val"
 }
@@ -118,16 +123,14 @@ exe() {
     
     write_log "EXEC" "$full_command"
     
-    # Run the command
-    "$@" 
-    local status=$?
-    
-    if [ $status -eq 0 ]; then
+    local status
+    if "$@"; then
         echo -e "   ${H_GRAY}└──────────────────────────────────────────────────────── ${H_GREEN}OK${H_GRAY} ─┘${NC}"
     else
+        status=$?
         echo -e "   ${H_GRAY}└────────────────────────────────────────────────────── ${H_RED}FAIL${H_GRAY} ─┘${NC}"
         write_log "FAIL" "Exit Code: $status"
-        return $status
+        return "$status"
     fi
 }
 
@@ -230,8 +233,9 @@ select_flathub_mirror() {
     # --- 4. 用户交互 ---
     local choice
     # 提示符
-    read -t 60 -p "$(echo -e "   ${H_YELLOW}Enter choice [1-${#names[@]}]: ${NC}")" choice
-    if [ $? -ne 0 ]; then echo ""; fi
+    if ! read -r -t 60 -p "$(echo -e "   ${H_YELLOW}Enter choice [1-${#names[@]}]: ${NC}")" choice; then
+        echo ""
+    fi
     choice=${choice:-1}
     
     if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "${#names[@]}" ]; then
@@ -246,7 +250,7 @@ select_flathub_mirror() {
     log "Setting Flathub mirror to: ${H_GREEN}$selected_name${NC}"
     
     # 执行修改 (仅修改 flathub，不涉及 github)
-    if exe flatpak remote-modify flathub --url="$selected_url"; then
+    if exe flatpak remote-modify --system flathub --url="$selected_url"; then
         success "Mirror updated."
     else
         error "Failed to update mirror."
@@ -254,10 +258,14 @@ select_flathub_mirror() {
 }
 
 as_user() {
-  runuser -u "$TARGET_USER" -- "$@"
+    runuser -u "$TARGET_USER" -- "$@"
 }
 
-# --- 6. Soft-Failure Infrastructure (shared across scripts) ---
+# --- 6. Desired-state primitives ---
+STATE_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-state.sh"
+source "$STATE_LIB"
+
+# --- 7. Soft-Failure Infrastructure (shared across scripts) ---
 WARN_COUNT=0
 WARN_SUMMARY=()
 
@@ -268,7 +276,7 @@ ask_continue() {
 
     local reason="$1"
     local choice=""
-    ((WARN_COUNT++))
+    ((++WARN_COUNT))
     WARN_SUMMARY+=("$reason")
     if [ -t 0 ]; then
         warn "$reason"

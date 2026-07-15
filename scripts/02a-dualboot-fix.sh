@@ -1,4 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+trap 'printf "ERROR: %s:%s: %s\n" \
+  "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 # ==============================================================================
 # Script: 02a-dualboot-fix.sh
@@ -23,18 +27,19 @@ set_grub_value() {
     local key="$1"
     local value="$2"
     local conf_file="/etc/default/grub"
-    
-    local escaped_value
-    escaped_value=$(printf '%s\n' "$value" | sed 's,[\/&],\\&,g')
 
-    if grep -q -E "^#\s*$key=" "$conf_file"; then
-        exe sed -i -E "s,^#\s*$key=.*,$key=\"$escaped_value\"," "$conf_file"
-    elif grep -q -E "^$key=" "$conf_file"; then
-        exe sed -i -E "s,^$key=.*,$key=\"$escaped_value\"," "$conf_file"
-    else
-        log "Appending new key: $key"
-        echo "$key=\"$escaped_value\"" >> "$conf_file"
-    fi
+    ensure_key_value "$conf_file" "$key" "\"$value\""
+}
+
+regenerate_grub() {
+    local output=/boot/grub/grub.cfg
+    local tmp
+
+    tmp=$(mktemp /boot/grub/grub.cfg.XXXXXX)
+    grub-mkconfig -o "$tmp"
+    grub-script-check "$tmp"
+    install_if_changed "$tmp" "$output" 600
+    rm -f "$tmp"
 }
 
 # --- Main Script ---
@@ -47,7 +52,7 @@ section "Phase 2A" "Dual-Boot Configuration (Windows)"
 section "Step 1/2" "System Analysis"
 
 log "Installing dual-boot detection tools (os-prober, exfat-utils)..."
-exe pacman -S --noconfirm --needed os-prober exfat-utils
+ensure_packages os-prober exfat-utils
 
 log "Scanning for Windows installation..."
 WINDOWS_DETECTED=$(os-prober | grep -qi "windows" && echo "true" || echo "false")
@@ -82,10 +87,11 @@ set_grub_value "GRUB_DISABLE_OS_PROBER" "false"
 success "Dual-boot settings updated."
 
 log "Regenerating GRUB configuration..."
-if exe grub-mkconfig -o /boot/grub/grub.cfg; then
+if regenerate_grub; then
     success "GRUB configuration regenerated successfully."
 else
     error "Failed to regenerate GRUB configuration."
+    exit 1
 fi
 
 log "Module 02a completed."

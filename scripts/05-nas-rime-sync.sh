@@ -1,6 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+trap 'printf "ERROR: %s:%s: %s\n" \
+  "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 # 05-nas-rime-sync.sh - Industrial NAS Mount & Rime Sync Automation
-# (v5.0 - Self-Contained Retry/Skip, always exits 0 for parent)
+# (v6.0 - Desired-state convergence with explicit optional status)
 
 ORIGINAL_ARGS=("$@")
 
@@ -24,12 +28,12 @@ _05_retry_or_skip() {
             read -p "$(echo -e " ${H_CYAN}Retry entire NAS/Rime setup? [y/N]: ${NC}")" choice
             case "${choice:-N}" in
                 [Yy]*) warn "Restarting 05..."; exec "$0" "${ORIGINAL_ARGS[@]}" ;;
-                [Nn]*|"") warn "Skipping NAS/Rime setup."; exit 0 ;;
+                [Nn]*|"") warn "NAS/Rime setup remains incomplete."; exit 1 ;;
                 *) echo "Invalid input." ;;
             esac
         done
     else
-        warn "Non-interactive. Continuing with warnings."; exit 0
+        warn "Non-interactive NAS/Rime setup failed."; exit 1
     fi
 }
 
@@ -38,6 +42,7 @@ _on_abort() { _05_retry_or_skip; }
 # --- [STATE GATES] ---
 USER_OK=1
 NAS_AVAILABLE=0
+MODULE_PENDING=0
 
 # --- [STEP 1: Identify Target User] ---
 # Priority: Argument > logname > UID 1000
@@ -52,7 +57,7 @@ fi
 section "NAS" "Persistent NFS Mounting"
 
 log "Installing nfs-utils..."
-if ! exe pacman -S --noconfirm --needed nfs-utils; then
+if ! ensure_package nfs-utils; then
     ask_continue "Failed to install nfs-utils"
 fi
 
@@ -63,26 +68,12 @@ NAS_LOCAL_PATH="${NAS_LOCAL_PATH:-/mnt/nas}"
 NAS_LINE="${NAS_IP}:${NAS_REMOTE_PATH} ${NAS_LOCAL_PATH} nfs defaults,_netdev,nofail 0 0"
 RIME_SYNC_DIR="${NAS_LOCAL_PATH}/rime_sync"
 
-FSTAB_JUST_WRITTEN=0
-if ! grep -v '^[[:space:]]*#' /etc/fstab | grep -qF "${NAS_IP}:${NAS_REMOTE_PATH}"; then
-    if ! mkdir -p "${NAS_LOCAL_PATH}"; then
-        ask_continue "Failed to create mount point ${NAS_LOCAL_PATH}"
-    fi
-    FSTAB_BACKUP="/etc/fstab.bak_$(date +%s)"
-    if cp /etc/fstab "$FSTAB_BACKUP"; then
-        if echo "$NAS_LINE" >> /etc/fstab; then
-            FSTAB_JUST_WRITTEN=1
-            success "NFS entry added to fstab."
-        else
-            warn "fstab write failed. Rolling back..."
-            cp "$FSTAB_BACKUP" /etc/fstab
-            ask_continue "Failed to write NFS entry to fstab (rolled back)"
-        fi
-    else
-        ask_continue "Failed to backup fstab before modification"
-    fi
+mkdir -p "${NAS_LOCAL_PATH}"
+if ! ensure_fstab_entry "${NAS_IP}:${NAS_REMOTE_PATH}" "$NAS_LOCAL_PATH" \
+    nfs 'defaults,_netdev,nofail'; then
+    ask_continue "Failed to converge or validate the NAS fstab entry"
 else
-    log "NFS entry already exists in fstab."
+    success "NFS entry converged and validated."
 fi
 
 # Handle Stale File Handle before mounting
@@ -103,10 +94,6 @@ elif timeout 30 mount "${NAS_LOCAL_PATH}" 2>/dev/null && timeout 3 ls "${NAS_LOC
     NAS_AVAILABLE=1
     success "NAS mounted and accessible at ${NAS_LOCAL_PATH}."
 else
-    if [ "$FSTAB_JUST_WRITTEN" -eq 1 ] && [ -n "$FSTAB_BACKUP" ]; then
-        warn "Mount failed after fstab write. Rolling back fstab entry."
-        cp "$FSTAB_BACKUP" /etc/fstab
-    fi
     ask_continue "NAS mount failed or not accessible at ${NAS_LOCAL_PATH}"
 fi
 
@@ -127,30 +114,15 @@ if ! chown "$TARGET_USER:$TARGET_USER" "$RIME_DIR" 2>/dev/null; then
 fi
 
 # Robustly set installation_id and sync_dir
-if [ ! -f "$INSTALL_YAML" ]; then
-    cat > "$INSTALL_YAML" <<EOF
-installation_id: "shiyi_arch"
-sync_dir: "$RIME_SYNC_DIR"
-EOF
-else
-    # Atomic update using temp file
-    TEMP_YAML=$(mktemp) || { ask_continue "mktemp failed for installation.yaml update"; TEMP_YAML=""; }
-    if [ -n "$TEMP_YAML" ]; then
-        if ! cp "$INSTALL_YAML" "$TEMP_YAML"; then
-            rm -f "$TEMP_YAML"
-            ask_continue "Failed to copy installation.yaml to temp file"
-        else
-            sed -i 's|^installation_id:.*|installation_id: "shiyi_arch"|' "$TEMP_YAML"
-            if ! grep -q "installation_id:" "$TEMP_YAML"; then echo 'installation_id: "shiyi_arch"' >> "$TEMP_YAML"; fi
-            sed -i "s|^sync_dir:.*|sync_dir: \"$RIME_SYNC_DIR\"|" "$TEMP_YAML"
-            if ! grep -q "sync_dir:" "$TEMP_YAML"; then echo "sync_dir: \"$RIME_SYNC_DIR\"" >> "$TEMP_YAML"; fi
-            if ! mv "$TEMP_YAML" "$INSTALL_YAML"; then
-                rm -f "$TEMP_YAML"
-                ask_continue "Failed to move temp file to installation.yaml"
-            fi
-        fi
-    fi
+TEMP_YAML=$(mktemp)
+if [ -f "$INSTALL_YAML" ]; then
+    awk '$1 != "installation_id:" && $1 != "sync_dir:" { print }' \
+        "$INSTALL_YAML" > "$TEMP_YAML"
 fi
+printf 'installation_id: "shiyi_arch"\nsync_dir: "%s"\n' \
+    "$RIME_SYNC_DIR" >> "$TEMP_YAML"
+install_if_changed "$TEMP_YAML" "$INSTALL_YAML" 644
+rm -f "$TEMP_YAML"
 
 if ! chown "$TARGET_USER:$TARGET_USER" "$INSTALL_YAML" 2>/dev/null; then
     ask_continue "Failed to set ownership on $INSTALL_YAML"
@@ -165,8 +137,11 @@ fi
 if [ "$NAS_AVAILABLE" -eq 1 ] && command -v rime_dict_manager &>/dev/null; then
     if [ -d "$RIME_SYNC_DIR" ]; then
         log "Triggering initial Rime sync to restore user dictionary..."
-        runuser -u "$TARGET_USER" -- rime_dict_manager -s || warn "Initial sync returned non-zero, check logs."
-        success "Initial sync triggered."
+        if runuser -u "$TARGET_USER" -- rime_dict_manager -s; then
+            success "Initial sync completed."
+        else
+            ask_continue "Initial Rime sync failed"
+        fi
     else
         warn "NAS sync directory $RIME_SYNC_DIR not found. Dictionary restore skipped."
     fi
@@ -186,6 +161,7 @@ TIMER_DIR_OK=1
 if ! command -v rime_dict_manager &>/dev/null; then
     warn "rime_dict_manager not found. Skipping systemd timer (install fcitx5-rime first, then re-run)."
     TIMER_DIR_OK=0
+    MODULE_PENDING=1
 fi
 
 if [ "$TIMER_DIR_OK" -eq 1 ] && ! mkdir -p "$TIMER_DIR" 2>/dev/null; then
@@ -194,8 +170,9 @@ if [ "$TIMER_DIR_OK" -eq 1 ] && ! mkdir -p "$TIMER_DIR" 2>/dev/null; then
 fi
 
 if [ "$TIMER_DIR_OK" -eq 1 ]; then
-# [FIX] Added ExecStartPre mount check and improved service unit
-cat > "$TIMER_DIR/rime-sync.service" <<SERVICE
+SERVICE_TMP=$(mktemp)
+TIMER_TMP=$(mktemp)
+cat > "$SERVICE_TMP" <<SERVICE
 [Unit]
 Description=Rime Dictionary Sync
 After=network-online.target
@@ -213,7 +190,7 @@ WorkingDirectory=$RIME_DIR
 WantedBy=default.target
 SERVICE
 
-cat > "$TIMER_DIR/rime-sync.timer" <<TIMER
+cat > "$TIMER_TMP" <<TIMER
 [Unit]
 Description=Hourly Rime Sync Timer
 
@@ -225,6 +202,12 @@ Persistent=true
 WantedBy=timers.target
 TIMER
 
+install_if_changed "$SERVICE_TMP" "$TIMER_DIR/rime-sync.service" 644
+install_if_changed "$TIMER_TMP" "$TIMER_DIR/rime-sync.timer" 644
+rm -f "$SERVICE_TMP" "$TIMER_TMP"
+chown "$TARGET_USER:$TARGET_USER" \
+    "$TIMER_DIR/rime-sync.service" "$TIMER_DIR/rime-sync.timer"
+
 # Verify systemd units were written (content check, not just size)
 if [ ! -s "$TIMER_DIR/rime-sync.service" ] || ! grep -q "ExecStart" "$TIMER_DIR/rime-sync.service"; then
     ask_continue "rime-sync.service content verification failed"
@@ -234,21 +217,21 @@ if [ ! -s "$TIMER_DIR/rime-sync.timer" ] || ! grep -q "OnCalendar" "$TIMER_DIR/r
 fi
 fi  # end TIMER_DIR_OK gate
 
-if ! chown -R "$TARGET_USER:$TARGET_USER" "$TIMER_DIR" 2>/dev/null; then
-    ask_continue "Failed to set ownership on $TIMER_DIR"
-fi
-
-# Enable linger and timer (persistent side-effects, soft-failure)
+# Enable linger when available, but always create the offline wants link.
 if [ -z "${CHROOT_ACTIVE:-}" ]; then
     log "Enabling linger for $TARGET_USER (persistent side-effect)..."
     if ! loginctl enable-linger "$TARGET_USER" 2>/dev/null; then
         ask_continue "Failed to enable linger for $TARGET_USER"
     fi
+fi
+if [ "$TIMER_DIR_OK" -eq 1 ]; then
     log "Enabling rime-sync.timer for $TARGET_USER..."
-    if ! runuser -u "$TARGET_USER" -- env XDG_RUNTIME_DIR="/run/user/$(id -u "$TARGET_USER")" systemctl --user enable --now rime-sync.timer 2>/dev/null; then
-        ask_continue "Timer not auto-enabled (no active session). Manual: systemctl --user enable --now rime-sync.timer"
-    else
-        success "Timer enabled and started."
+    ensure_user_unit_enabled "$TARGET_USER" rime-sync.timer timers.target
+    verify_file "$TIMER_DIR/rime-sync.service"
+    verify_file "$TIMER_DIR/rime-sync.timer"
+    verify_user_unit "$TARGET_USER" rime-sync.timer timers.target
+    if [ ! -S "/run/user/$(id -u "$TARGET_USER")/bus" ]; then
+        MODULE_PENDING=1
     fi
 fi
 
@@ -259,6 +242,9 @@ fi  # end USER_OK gate
 # --- [FINAL DECISION] ---
 if [ "$WARN_COUNT" -gt 0 ]; then
     _05_retry_or_skip
+elif [ "$MODULE_PENDING" -eq 1 ]; then
+    warn "NAS/Rime targets are installed but pending an external prerequisite or user login."
+    exit 20
 else
     success "NAS & Rime Sync setup completed successfully."
 fi

@@ -1,4 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+trap 'printf "ERROR: %s:%s: %s\n" \
+  "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 # ==============================================================================
 # 03c-snapshot-before-desktop.sh
@@ -24,11 +28,18 @@ section "Phase 3c" "System Snapshot"
 
 create_checkpoint() {
     local MARKER="Before Desktop Environments"
+    local root_fstype
+
+    root_fstype=$(findmnt -n -o FSTYPE /)
+    if [ "$root_fstype" != btrfs ]; then
+        log "Root is not Btrfs; the snapshot target is not applicable."
+        return 0
+    fi
     
     # 0. 检查 snapper 是否安装
     if ! command -v snapper &>/dev/null; then
-        warn "Snapper tool not found. Skipping snapshot creation."
-        return
+        error "Snapper tool not found; desktop safety checkpoint is required."
+        return 1
     fi
 
     # 1. Root 分区快照
@@ -44,7 +55,8 @@ create_checkpoint() {
             success "Root snapshot created."
         fi
     else
-        warn "Snapper 'root' config not configured. Skipping root snapshot."
+        error "Snapper root config is missing; cannot create the required checkpoint."
+        return 1
     fi
 
     # 2. Home 分区快照 (如果存在 home 配置)

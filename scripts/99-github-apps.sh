@@ -1,4 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+trap 'printf "ERROR: %s:%s: %s\n" \
+  "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 # ==============================================================================
 # 99-github-apps.sh - Build and install custom GitHub applications
@@ -49,7 +53,8 @@ _sync_github_app_repo() {
         fi
 
         log "Updating GitHub source: $source_name ..."
-        if ! as_user env HOME="$HOME_DIR" git -C "$source_dir" pull --ff-only origin main; then
+        if ! as_user env HOME="$HOME_DIR" git -C "$source_dir" fetch origin main ||
+            ! as_user env HOME="$HOME_DIR" git -C "$source_dir" merge --ff-only origin/main; then
             error "Failed to update $source_name from GitHub."
             return 1
         fi
@@ -68,20 +73,29 @@ _build_and_install_cargo_binary() {
     local source_dir="$1"
     local binary_name="$2"
     local destination="$HOME_DIR/.local/bin/$binary_name"
+    local build_dir
 
     log "Building $binary_name from source ..."
+    as_user mkdir -p "$HOME_DIR/.cache"
+    build_dir=$(as_user mktemp -d "$HOME_DIR/.cache/shorin-build.XXXXXX")
     if ! as_user env HOME="$HOME_DIR" cargo build \
         --manifest-path "$source_dir/Cargo.toml" \
+        --target-dir "$build_dir" \
         --release \
         --locked; then
+        rm -rf "$build_dir"
         error "Cargo build failed for $binary_name."
         return 1
     fi
 
-    if ! as_user install -Dm755 "$source_dir/target/release/$binary_name" "$destination"; then
+    if ! install_if_changed "$build_dir/release/$binary_name" "$destination" 755; then
+        rm -rf "$build_dir"
         error "Failed to install $binary_name to $destination."
         return 1
     fi
+    chown "$TARGET_USER:$TARGET_USER" "$destination"
+    rm -rf "$build_dir"
+    [ -x "$destination" ]
 }
 
 _install_focus_shift() {
@@ -101,35 +115,14 @@ _install_niri_clip() {
 
     local user_service_dir="$HOME_DIR/.config/systemd/user"
     local service_file="$user_service_dir/niri-clip.service"
-    local wants_dir="$user_service_dir/graphical-session.target.wants"
-    local user_id
-    local runtime_dir
-
-    if ! as_user install -Dm644 \
-        "$GITHUB_APP_SOURCE_DIR/systemd/niri-clip.service" \
-        "$service_file"; then
+    if ! install_if_changed \
+        "$GITHUB_APP_SOURCE_DIR/systemd/niri-clip.service" "$service_file" 644; then
         error "Failed to install the niri-clip user service."
         return 1
     fi
-
-    as_user mkdir -p "$wants_dir"
-    if ! as_user ln -sfn "../niri-clip.service" "$wants_dir/niri-clip.service"; then
-        error "Failed to enable the niri-clip user service."
-        return 1
-    fi
-
-    user_id=$(id -u "$TARGET_USER")
-    runtime_dir="/run/user/$user_id"
-    if [ -S "$runtime_dir/bus" ]; then
-        if ! as_user env \
-            XDG_RUNTIME_DIR="$runtime_dir" \
-            DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime_dir/bus" \
-            systemctl --user daemon-reload; then
-            warn "niri-clip was installed, but the active user service manager could not reload."
-        fi
-    else
-        log "niri-clip is enabled and will start with the next graphical session."
-    fi
+    chown "$TARGET_USER:$TARGET_USER" "$service_file"
+    ensure_user_unit_enabled "$TARGET_USER" niri-clip.service graphical-session.target
+    verify_user_unit "$TARGET_USER" niri-clip.service graphical-session.target
 }
 
 install_github_app() {

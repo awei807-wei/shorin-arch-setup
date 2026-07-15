@@ -1,4 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+trap 'printf "ERROR: %s:%s: %s\n" \
+  "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 # ==============================================================================
 # 03-user.sh - User Creation & Configuration (Visual Fix)
@@ -30,7 +34,7 @@ else
         echo ""
         # 使用 echo -n 打印普通提示，避免 read -p 的兼容性问题
         echo -ne "   Please enter new username: "
-        read INPUT_USER
+        read -r INPUT_USER
         
         # 去除可能误输入的空格
         INPUT_USER=$(echo "$INPUT_USER" | xargs)
@@ -42,7 +46,7 @@ else
 
         # [FIX] 分离打印和读取，确保变量和颜色正确显示
         echo -ne "   Create user '${BOLD}${INPUT_USER}${NC}'? [Y/n] "
-        read CONFIRM
+        read -r CONFIRM
         
         CONFIRM=${CONFIRM:-Y}
         
@@ -56,7 +60,9 @@ else
 fi
 
 # Export username for next scripts
-echo "$MY_USERNAME" > /tmp/shorin_install_user
+printf '%s\n' "$MY_USERNAME" > /tmp/shorin_install_user.new
+chmod 600 /tmp/shorin_install_user.new
+mv -f /tmp/shorin_install_user.new /tmp/shorin_install_user
 
 # ------------------------------------------------------------------------------
 # 2. Create User & Sudo
@@ -73,14 +79,13 @@ if [ "$SKIP_CREATION" = true ]; then
     fi
 else
     log "Creating new user..."
-    exe useradd -m -g wheel "$MY_USERNAME"
+    exe useradd -m -G wheel "$MY_USERNAME"
     
     log "Setting password for $MY_USERNAME..."
     # passwd 需要交互，直接运行
-    passwd "$MY_USERNAME"
-    if [ $? -eq 0 ]; then 
+    if passwd "$MY_USERNAME"; then
         success "Password set."
-    else 
+    else
         error "Failed to set password."
         exit 1
     fi
@@ -88,23 +93,18 @@ fi
 
 # Configure Sudoers
 log "Configuring sudoers..."
-if grep -q "^# %wheel ALL=(ALL:ALL) ALL" /etc/sudoers; then
-    exe sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
-    success "Uncommented %wheel in /etc/sudoers."
-elif grep -q "^%wheel ALL=(ALL:ALL) ALL" /etc/sudoers; then
-    success "Sudo access already enabled."
-else
-    log "Appending %wheel rule..."
-    echo "%wheel ALL=(ALL:ALL) ALL" >> /etc/sudoers
-    success "Sudo access configured."
-fi
+SUDOERS_TMP=$(mktemp)
+printf '%%wheel ALL=(ALL:ALL) ALL\n' > "$SUDOERS_TMP"
+install_sudoers_file "$SUDOERS_TMP" /etc/sudoers.d/10-shorin-wheel
+rm -f "$SUDOERS_TMP"
+success "Sudo access converged and validated."
 
 # ------------------------------------------------------------------------------
 # 3. Generate User Directories
 # ------------------------------------------------------------------------------
 section "Step 3/3" "User Directories"
 
-exe pacman -Syu --noconfirm --needed xdg-user-dirs
+ensure_package xdg-user-dirs
 
 log "Generating directories (Downloads, Documents...)..."
 
@@ -116,7 +116,8 @@ REAL_HOME=$(getent passwd "$MY_USERNAME" | cut -d: -f6)
 if exe runuser -u "$MY_USERNAME" -- env LANG=en_US.UTF-8 HOME="$REAL_HOME" xdg-user-dirs-update --force; then
     success "Directories created in $REAL_HOME."
 else
-    warn "Failed to generate directories."
+    error "Failed to generate directories."
+    exit 1
 fi
 
 log "Module 03 completed."

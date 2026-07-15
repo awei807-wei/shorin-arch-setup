@@ -1,4 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+trap 'printf "ERROR: %s:%s: %s\n" \
+  "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 # ==============================================================================
 # Script: niri-undochange.sh
 # Purpose: Emergency rollback to 'Before Niri Setup' checkpoint

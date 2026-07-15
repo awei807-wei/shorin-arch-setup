@@ -1,4 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+trap 'printf "ERROR: %s:%s: %s\n" \
+  "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 # ==============================================================================
 # 03b-gpu-driver.sh GPU Driver Installer 参考了cachyos的chwd脚本
@@ -23,7 +27,7 @@ section "Phase 2b" "GPU Driver Setup"
 log "Detecting GPU Hardware..."
 
 # 核心变量：存放 lspci 信息
-GPU_INFO=$(lspci -mm | grep -E -i "VGA|3D|Display")
+GPU_INFO=$(lspci -mm | grep -E -i "VGA|3D|Display" || true)
 log "GPU Info Detected:\n$GPU_INFO"
 
 # 状态变量初始化
@@ -61,7 +65,7 @@ if echo "$GPU_INFO" | grep -q -i "NVIDIA"; then
 fi
 
 # --- 多显卡检测 ---
-GPU_COUNT=$(echo "$GPU_INFO" | grep -c .)
+GPU_COUNT=$(awk 'NF { count++ } END { print count + 0 }' <<< "$GPU_INFO")
 
 if [ "$GPU_COUNT" -ge 2 ]; then
     info_kv "GPU Layout" "Dual/Multi-GPU Detected (Count: $GPU_COUNT)"
@@ -71,9 +75,7 @@ if [ "$GPU_COUNT" -ge 2 ]; then
     if [[ $HAS_NVIDIA == true ]]; then 
     PKGS+=("nvidia-prime" "switcheroo-control")
         # fix gtk4 issue with nvidia dual gpu
-        if grep -q "GSK_RENDERER" "/etc/environment"; then
-            echo 'GSK_RENDERER=gl' >> /etc/environment
-        fi
+        ensure_key_value /etc/environment GSK_RENDERER gl
     fi
 fi
 # ==============================================================================
@@ -143,7 +145,8 @@ if [ "$HAS_NVIDIA" = true ]; then
         log "   -> NVIDIA: Scanning installed kernels for headers..."
         
         # 1. 获取所有以 linux 开头的候选包
-        CANDIDATES=$(pacman -Qq | grep "^linux" | grep -vE "headers|firmware|api|docs|tools|utils|qq")
+        CANDIDATES=$(pacman -Qq | grep "^linux" | \
+            grep -vE "headers|firmware|api|docs|tools|utils|qq" || true)
 
         for kernel in $CANDIDATES; do
             # 2. 验证：只有在 /boot 下存在对应 vmlinuz 文件的才算是真内核
@@ -162,13 +165,19 @@ fi
 
 
 
-DETECTED_USER=$(awk -F: '$3 == 1000 {print $1}' /etc/passwd)
-TARGET_USER="${DETECTED_USER:-$(read -p "Target user: " u && echo $u)}"
+DETECTED_USER=$(awk -F: '$3 == 1000 {print $1; exit}' /etc/passwd)
+if [ -n "$DETECTED_USER" ]; then
+    TARGET_USER=$DETECTED_USER
+else
+    read -r -p "Target user: " TARGET_USER
+fi
 
 #--------------sudo temp file--------------------#
 SUDO_TEMP_FILE="/etc/sudoers.d/99_shorin_installer_temp"
-echo "$TARGET_USER ALL=(ALL) NOPASSWD: ALL" >"$SUDO_TEMP_FILE"
-chmod 440 "$SUDO_TEMP_FILE"
+SUDO_TEMP_SOURCE=$(mktemp)
+printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$TARGET_USER" > "$SUDO_TEMP_SOURCE"
+install_sudoers_file "$SUDO_TEMP_SOURCE" "$SUDO_TEMP_FILE"
+rm -f "$SUDO_TEMP_SOURCE"
 log "Temp sudo file created..."
 
 # 定义清理函数：无论脚本是成功结束还是意外中断(Ctrl+C)，都确保删除免密文件
@@ -183,17 +192,22 @@ trap cleanup_sudo EXIT INT TERM
 
 if [ ${#PKGS[@]} -gt 0 ]; then
     # 数组去重
-    UNIQUE_PKGS=($(printf "%s\n" "${PKGS[@]}" | sort -u))
+    mapfile -t UNIQUE_PKGS < <(printf "%s\n" "${PKGS[@]}" | sort -u)
     
     section "Installation" "Installing Packages"
     log "Target Packages: ${UNIQUE_PKGS[*]}"
     
-    # 执行安装
-    exe runuser -u "$TARGET_USER" -- yay -S --noconfirm --needed --answerdiff=None --answerclean=None "${UNIQUE_PKGS[@]}"
+    for package in "${UNIQUE_PKGS[@]}"; do
+        ensure_aur_package "$package" "$TARGET_USER"
+    done
     
     log "Enabling services (if supported)..."
-    systemctl enable --now nvidia-powerd &>/dev/null || true
-    systemctl enable switcheroo-control.service &>/dev/null || true
+    if systemctl list-unit-files nvidia-powerd.service >/dev/null 2>&1; then
+        ensure_service_started nvidia-powerd.service
+    fi
+    if systemctl list-unit-files switcheroo-control.service >/dev/null 2>&1; then
+        ensure_service_enabled switcheroo-control.service
+    fi
     success "GPU Drivers processed successfully."
 else
     warn "No GPU drivers matched or needed."

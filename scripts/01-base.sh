@@ -1,4 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+trap 'printf "ERROR: %s:%s: %s\n" \
+  "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 # ==============================================================================
 # 01-base.sh - Base System Configuration
@@ -31,15 +35,8 @@ else
     fi
 fi
 
-log "Setting EDITOR=$TARGET_EDITOR in /etc/environment..."
-
-if grep -q "^EDITOR=" /etc/environment; then
-    exe sed -i "s/^EDITOR=.*/EDITOR=${TARGET_EDITOR}/" /etc/environment
-else
-    # exe handles simple commands, for redirection we wrap in bash -c or just run it
-    # For simplicity in logging, we just run it and log success
-    echo "EDITOR=${TARGET_EDITOR}" >> /etc/environment
-fi
+log "Ensuring EDITOR=$TARGET_EDITOR in /etc/environment..."
+ensure_key_value /etc/environment EDITOR "$TARGET_EDITOR"
 success "Global EDITOR set to: ${TARGET_EDITOR}"
 
 # ------------------------------------------------------------------------------
@@ -47,17 +44,11 @@ success "Global EDITOR set to: ${TARGET_EDITOR}"
 # ------------------------------------------------------------------------------
 section "Step 2/6" "Multilib Repository"
 
-if grep -q "^\[multilib\]" /etc/pacman.conf; then
-    success "[multilib] is already enabled."
-else
-    log "Uncommenting [multilib]..."
-    # Uncomment [multilib] and the following Include line
-    exe sed -i "/\[multilib\]/,/Include/"'s/^#//' /etc/pacman.conf
-    
-    log "Refreshing database..."
-    exe pacman -Syu
-    success "[multilib] enabled."
-fi
+ensure_pacman_section /etc/pacman.conf multilib \
+    'Include = /etc/pacman.d/mirrorlist'
+log "Refreshing database after converging multilib..."
+exe pacman -Syu --noconfirm
+success "[multilib] converged."
 
 # ------------------------------------------------------------------------------
 # 3. Install Base Fonts
@@ -65,22 +56,19 @@ fi
 section "Step 3/6" "Base Fonts"
 
 log "Installing adobe-source-han-serif-cn-fonts adobe-source-han-sans-cn-fonts noto-fonts-cjk, noto-fonts, emoji..."
-exe pacman -S --noconfirm --needed adobe-source-han-serif-cn-fonts adobe-source-han-sans-cn-fonts noto-fonts-cjk noto-fonts noto-fonts-emoji ttf-jetbrains-mono-nerd
+ensure_packages adobe-source-han-serif-cn-fonts adobe-source-han-sans-cn-fonts \
+    noto-fonts-cjk noto-fonts noto-fonts-emoji ttf-jetbrains-mono-nerd
 log "Base fonts installed."
 
 log "Installing terminus-font..."
 # 安装 terminus-font 包
-exe pacman -S --noconfirm --needed terminus-font
+ensure_package terminus-font
 
 log "Setting font for current session..."
 exe setfont ter-v28n
 
 log "Configuring permanent vconsole font..."
-if [ -f /etc/vconsole.conf ] && grep -q "^FONT=" /etc/vconsole.conf; then
-    exe sed -i 's/^FONT=.*/FONT=ter-v28n/' /etc/vconsole.conf
-else
-    echo "FONT=ter-v28n" >> /etc/vconsole.conf
-fi
+ensure_key_value /etc/vconsole.conf FONT ter-v28n
 
 log "Restarting systemd-vconsole-setup..."
 exe systemctl restart systemd-vconsole-setup
@@ -91,20 +79,12 @@ success "TTY font configured (ter-v24n)."
 # ------------------------------------------------------------------------------
 section "Step 4/6" "ArchLinuxCN Repository"
 
-if grep -q "\[archlinuxcn\]" /etc/pacman.conf; then
-    success "archlinuxcn repository already exists."
-else
-    log "Adding archlinuxcn mirrors to pacman.conf..."
-    cat <<EOT >> /etc/pacman.conf
-
-[archlinuxcn]
-Server = https://mirrors.ustc.edu.cn/archlinuxcn/\$arch
-Server = https://mirrors.tuna.tsinghua.edu.cn/archlinuxcn/\$arch
-Server = https://mirrors.hit.edu.cn/archlinuxcn/\$arch
-Server = https://repo.huaweicloud.com/archlinuxcn/\$arch
-EOT
-    success "Mirrors added."
-fi
+ARCHLINUXCN_BODY='Server = https://mirrors.ustc.edu.cn/archlinuxcn/$arch
+Server = https://mirrors.tuna.tsinghua.edu.cn/archlinuxcn/$arch
+Server = https://mirrors.hit.edu.cn/archlinuxcn/$arch
+Server = https://repo.huaweicloud.com/archlinuxcn/$arch'
+ensure_pacman_section /etc/pacman.conf archlinuxcn "$ARCHLINUXCN_BODY"
+success "ArchLinuxCN repository converged."
 
 log "Installing archlinuxcn-keyring..."
 # Keyring installation often needs -Sy specifically, but -Syu is safe too
@@ -117,8 +97,7 @@ success "ArchLinuxCN configured."
 section "Step 5/6" "AUR Helpers"
 
 log "Installing yay and paru..."
-exe pacman -S --noconfirm --needed base-devel yay paru
+ensure_packages base-devel yay paru
 success "Helpers installed."
 
 log "Module 01 completed."
-

@@ -1,4 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+trap 'printf "ERROR: %s:%s: %s\n" \
+  "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 # ==============================================================================
 # 07-grub-theme.sh - GRUB Theming & Advanced Configuration
@@ -17,7 +21,7 @@ if ! command -v grub-mkconfig >/dev/null 2>&1; then
     echo ""
     warn "GRUB (grub-mkconfig) not found on this system."
     log "Skipping GRUB theme installation."
-    exit 0
+    exit 20
 fi
 
 section "Phase 7" "GRUB Customization & Theming"
@@ -28,17 +32,7 @@ set_grub_value() {
     local key="$1"
     local value="$2"
     local conf_file="/etc/default/grub"
-    local escaped_value
-    escaped_value=$(printf '%s\n' "$value" | sed 's,[\/&],\\&,g')
-
-    if grep -q -E "^#\s*$key=" "$conf_file"; then
-        exe sed -i -E "s,^#\s*$key=.*,$key=\"$escaped_value\"," "$conf_file"
-    elif grep -q -E "^$key=" "$conf_file"; then
-        exe sed -i -E "s,^$key=.*,$key=\"$escaped_value\"," "$conf_file"
-    else
-        log "Appending new key: $key"
-        echo "$key=\"$escaped_value\"" >> "$conf_file"
-    fi
+    ensure_key_value "$conf_file" "$key" "\"$value\""
 }
 
 manage_kernel_param() {
@@ -46,7 +40,7 @@ manage_kernel_param() {
     local param="$2"
     local conf_file="/etc/default/grub"
     local line
-    line=$(grep "^GRUB_CMDLINE_LINUX_DEFAULT=" "$conf_file")
+    line=$(grep "^GRUB_CMDLINE_LINUX_DEFAULT=" "$conf_file" || true)
     local params
     params=$(echo "$line" | sed -e 's/GRUB_CMDLINE_LINUX_DEFAULT=//' -e 's/"//g')
     local param_key
@@ -56,7 +50,7 @@ manage_kernel_param() {
     if [ "$action" == "add" ]; then params="$params $param"; fi
 
     params=$(echo "$params" | tr -s ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    exe sed -i "s,^GRUB_CMDLINE_LINUX_DEFAULT=.*,GRUB_CMDLINE_LINUX_DEFAULT=\"$params\"," "$conf_file"
+    ensure_key_value "$conf_file" GRUB_CMDLINE_LINUX_DEFAULT "\"$params\""
 }
 
 # ------------------------------------------------------------------------------
@@ -75,7 +69,7 @@ manage_kernel_param "add" "loglevel=5"
 manage_kernel_param "add" "nowatchdog"
 
 # CPU Watchdog Logic
-CPU_VENDOR=$(LC_ALL=C lscpu | grep "Vendor ID:" | awk '{print $3}')
+CPU_VENDOR=$(LC_ALL=C lscpu | awk -F: '/Vendor ID/ { gsub(/^[[:space:]]+/, "", $2); print $2 }')
 if [ "$CPU_VENDOR" == "GenuineIntel" ]; then
     log "Intel CPU detected. Disabling iTCO_wdt watchdog."
     manage_kernel_param "add" "modprobe.blacklist=iTCO_wdt"
@@ -97,7 +91,7 @@ DEST_DIR="/boot/grub/themes"
 
 if [ ! -d "$SOURCE_BASE" ]; then
     warn "Directory 'grub-themes' not found in repo."
-    exit 0
+    exit 20
 fi
 
 mapfile -t FOUND_DIRS < <(find "$SOURCE_BASE" -mindepth 1 -maxdepth 1 -type d | sort)
@@ -113,7 +107,7 @@ done
 
 if [ ${#THEME_NAMES[@]} -eq 0 ]; then
     warn "No valid theme folders found."
-    exit 0
+    exit 20
 fi
 
 # ------------------------------------------------------------------------------
@@ -161,7 +155,9 @@ else
     echo -e "${H_PURPLE}╰${LINE_STR}╯${NC}\n"
 
     echo -ne "   ${H_YELLOW}Enter choice [1-${#THEME_NAMES[@]}]: ${NC}"
-    read -t 60 USER_CHOICE
+    if ! read -r -t 60 USER_CHOICE; then
+        USER_CHOICE=1
+    fi
     if [ -z "$USER_CHOICE" ]; then echo ""; fi
     USER_CHOICE=${USER_CHOICE:-1}
 
@@ -182,15 +178,19 @@ info_kv "Selected" "$THEME_NAME"
 # ------------------------------------------------------------------------------
 section "Step 4/5" "Theme Installation"
 
-if [ ! -d "$DEST_DIR" ]; then exe mkdir -p "$DEST_DIR"; fi
-if [ -d "$DEST_DIR/$THEME_NAME" ]; then
-    log "Removing existing version..."
-    exe rm -rf "$DEST_DIR/$THEME_NAME"
+mkdir -p "$DEST_DIR"
+THEME_HASH=$(find "$THEME_SOURCE" -type f -print0 | sort -z | \
+    xargs -0 sha256sum | sha256sum | cut -c1-12)
+THEME_INSTALL_NAME="${THEME_NAME}-${THEME_HASH}"
+THEME_STAGED=$(mktemp -d "$DEST_DIR/.${THEME_NAME}.XXXXXX")
+cp -a "$THEME_SOURCE/." "$THEME_STAGED/"
+if [ ! -d "$DEST_DIR/$THEME_INSTALL_NAME" ]; then
+    mv "$THEME_STAGED" "$DEST_DIR/$THEME_INSTALL_NAME"
+else
+    rm -rf "$THEME_STAGED"
 fi
 
-exe cp -r "$THEME_SOURCE" "$DEST_DIR/"
-
-if [ -f "$DEST_DIR/$THEME_NAME/theme.txt" ]; then
+if [ -f "$DEST_DIR/$THEME_INSTALL_NAME/theme.txt" ]; then
     success "Theme installed."
 else
     error "Failed to copy theme files."
@@ -198,23 +198,12 @@ else
 fi
 
 GRUB_CONF="/etc/default/grub"
-THEME_PATH="$DEST_DIR/$THEME_NAME/theme.txt"
+THEME_PATH="$DEST_DIR/$THEME_INSTALL_NAME/theme.txt"
 
 if [ -f "$GRUB_CONF" ]; then
-    if grep -q "^GRUB_THEME=" "$GRUB_CONF"; then
-        exe sed -i "s|^GRUB_THEME=.*|GRUB_THEME=\"$THEME_PATH\"|" "$GRUB_CONF"
-    elif grep -q "^#GRUB_THEME=" "$GRUB_CONF"; then
-        exe sed -i "s|^#GRUB_THEME=.*|GRUB_THEME=\"$THEME_PATH\"|" "$GRUB_CONF"
-    else
-        echo "GRUB_THEME=\"$THEME_PATH\"" >> "$GRUB_CONF"
-    fi
-    
-    if grep -q "^GRUB_TERMINAL_OUTPUT=\"console\"" "$GRUB_CONF"; then
-        exe sed -i 's/^GRUB_TERMINAL_OUTPUT="console"/#GRUB_TERMINAL_OUTPUT="console"/' "$GRUB_CONF"
-    fi
-    if ! grep -q "^GRUB_GFXMODE=" "$GRUB_CONF"; then
-        echo 'GRUB_GFXMODE=auto' >> "$GRUB_CONF"
-    fi
+    set_grub_value GRUB_THEME "$THEME_PATH"
+    set_grub_value GRUB_TERMINAL_OUTPUT gfxterm
+    set_grub_value GRUB_GFXMODE auto
     success "Configured GRUB to use theme."
 else
     error "$GRUB_CONF not found."
@@ -227,9 +216,15 @@ fi
 section "Step 5/5" "Menu Entries & Apply"
 log "Adding Power Options to GRUB menu..."
 
-cp /etc/grub.d/40_custom /etc/grub.d/99_custom
-echo 'menuentry "Reboot"' {reboot} >> /etc/grub.d/99_custom
-echo 'menuentry "Shutdown"' {halt} >> /etc/grub.d/99_custom
+CUSTOM_TMP=$(mktemp)
+cat > "$CUSTOM_TMP" <<'EOF'
+#!/bin/sh
+exec tail -n +3 $0
+menuentry "Reboot" { reboot }
+menuentry "Shutdown" { halt }
+EOF
+install_if_changed "$CUSTOM_TMP" /etc/grub.d/99_custom 755
+rm -f "$CUSTOM_TMP"
 
 # 赋予执行权限
 success "Added grub menuentry 99-shutdown"
@@ -238,11 +233,15 @@ success "Added grub menuentry 99-shutdown"
 # ------------------------------------------------------------------------------
 log "Generating new GRUB configuration..."
 
-if exe grub-mkconfig -o /boot/grub/grub.cfg; then
+GRUB_TMP=$(mktemp /boot/grub/grub.cfg.XXXXXX)
+if grub-mkconfig -o "$GRUB_TMP" && grub-script-check "$GRUB_TMP"; then
+    install_if_changed "$GRUB_TMP" /boot/grub/grub.cfg 600
+    rm -f "$GRUB_TMP"
     success "GRUB updated successfully."
 else
+    rm -f "$GRUB_TMP"
     error "Failed to update GRUB."
-    warn "You may need to run 'grub-mkconfig' manually."
+    exit 1
 fi
 
 log "Module 07 completed."

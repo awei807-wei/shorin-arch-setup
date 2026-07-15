@@ -1,4 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+trap 'printf "ERROR: %s:%s: %s\n" \
+  "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 # ==============================================================================
 # 99-apps.sh - Common Applications (Repo/AUR/Flatpak/GitHub + Retry Logic)
@@ -18,10 +22,10 @@ check_root
 # Ensure FZF is installed
 if ! command -v fzf &> /dev/null; then
     log "Installing dependency: fzf..."
-    pacman -S --noconfirm fzf >/dev/null 2>&1
+    ensure_package fzf
 fi
 
-trap 'echo -e "\n   ${H_YELLOW}>>> Operation cancelled by user (Ctrl+C). Skipping...${NC}"' INT
+trap 'echo -e "\n   ${H_YELLOW}>>> Operation cancelled by user.${NC}"; exit 130' INT
 
 # ------------------------------------------------------------------------------
 # 0. Identify Target User & Helper
@@ -56,17 +60,18 @@ FLATPAK_APPS=()
 GITHUB_APPS=()
 FAILED_PACKAGES=()
 INSTALL_LAZYVIM=false
+SUDO_TEMP_FILE=""
 
 if [ ! -f "$LIST_FILE" ]; then
     warn "File $LIST_FILENAME not found. Skipping."
     trap - INT
-    exit 0
+    exit 20
 fi
 
 if ! grep -q -vE "^\s*#|^\s*$" "$LIST_FILE"; then
     warn "App list is empty. Skipping."
     trap - INT
-    exit 0
+    exit 20
 fi
 
 echo ""
@@ -77,8 +82,11 @@ echo -e "   ${H_CYAN}    [N]     = Skip installation${NC}"
 echo -e "   ${H_YELLOW}    [Timeout 60s] = Auto-install ALL default packages (No FZF)${NC}"
 echo ""
 
-read -t 60 -p "   Please select [Y/n]: " choice
-READ_STATUS=$?
+if read -r -t 60 -p "   Please select [Y/n]: " choice; then
+    READ_STATUS=0
+else
+    READ_STATUS=$?
+fi
 
 SELECTED_RAW=""
 
@@ -94,7 +102,7 @@ else
     if [[ "$choice" =~ ^[nN]$ ]]; then
         warn "User skipped application installation."
         trap - INT
-        exit 0
+        exit 20
     else
         clear
         echo -e "\n  Loading application list..."
@@ -129,7 +137,7 @@ else
         if [ -z "$SELECTED_RAW" ]; then
             log "Skipping application installation (User cancelled selection)."
             trap - INT
-            exit 0
+            exit 20
         fi
     fi
 fi
@@ -180,42 +188,29 @@ info_kv "Scheduled" "Repo: ${#REPO_APPS[@]} | AUR: ${#AUR_APPS[@]} | Flatpak: ${
 if [ ${#REPO_APPS[@]} -gt 0 ] || [ ${#AUR_APPS[@]} -gt 0 ]; then
     log "Configuring temporary NOPASSWD for installation..."
     SUDO_TEMP_FILE="/etc/sudoers.d/99_shorin_installer_apps"
-    echo "$TARGET_USER ALL=(ALL) NOPASSWD: ALL" > "$SUDO_TEMP_FILE"
-    chmod 440 "$SUDO_TEMP_FILE"
+    SUDO_TEMP_SOURCE=$(mktemp)
+    printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$TARGET_USER" > "$SUDO_TEMP_SOURCE"
+    install_sudoers_file "$SUDO_TEMP_SOURCE" "$SUDO_TEMP_FILE"
+    rm -f "$SUDO_TEMP_SOURCE"
+    cleanup_temp_sudoers() {
+        [ ! -f "$SUDO_TEMP_FILE" ] || rm -f "$SUDO_TEMP_FILE"
+    }
+    trap cleanup_temp_sudoers EXIT
 fi
 
 # ------------------------------------------------------------------------------
 # 3. Install Applications
 # ------------------------------------------------------------------------------
 
-# --- A. Install Repo Apps (BATCH MODE) ---
+# --- A. Install Repo Apps (individual convergence) ---
 if [ ${#REPO_APPS[@]} -gt 0 ]; then
-    section "Step 1/4" "Official Repository Packages (Batch)"
-    
-    REPO_QUEUE=()
+    section "Step 1/4" "Official Repository Packages"
+    mapfile -t REPO_APPS < <(printf '%s\n' "${REPO_APPS[@]}" | sort -u)
     for pkg in "${REPO_APPS[@]}"; do
-        if pacman -Qi "$pkg" &>/dev/null; then
-            log "Skipping '$pkg' (Already installed)."
-        else
-            REPO_QUEUE+=("$pkg")
+        if ! ensure_package "$pkg"; then
+            FAILED_PACKAGES+=("repo:$pkg")
         fi
     done
-
-    if [ ${#REPO_QUEUE[@]} -gt 0 ]; then
-        BATCH_LIST="${REPO_QUEUE[*]}"
-        info_kv "Installing" "${#REPO_QUEUE[@]} packages via Pacman/Yay"
-        
-        if ! exe as_user yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None $BATCH_LIST; then
-            error "Batch installation failed. Some repo packages might be missing."
-            for pkg in "${REPO_QUEUE[@]}"; do
-                FAILED_PACKAGES+=("repo:$pkg")
-            done
-        else
-            success "Repo batch installation completed."
-        fi
-    else
-        log "All Repo packages are already installed."
-    fi
 fi
 
 # --- B. Install AUR Apps (INDIVIDUAL MODE + RETRY) ---
@@ -239,7 +234,7 @@ if [ ${#AUR_APPS[@]} -gt 0 ]; then
                 sleep 3
             fi
             
-            if as_user yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None "$app"; then
+            if ensure_aur_package "$app" "$TARGET_USER"; then
                 install_success=true
                 success "Installed $app"
                 break
@@ -260,13 +255,13 @@ if [ ${#FLATPAK_APPS[@]} -gt 0 ]; then
     section "Step 3/4" "Flatpak Packages (Individual)"
     
     for app in "${FLATPAK_APPS[@]}"; do
-        if flatpak info "$app" &>/dev/null; then
+        if flatpak info --system "$app" &>/dev/null; then
             log "Skipping '$app' (Already installed)."
             continue
         fi
 
         log "Installing Flatpak: $app ..."
-        if ! exe flatpak install -y flathub "$app"; then
+        if ! ensure_flatpak "$app"; then
             error "Failed to install: $app"
             FAILED_PACKAGES+=("flatpak:$app")
         else
@@ -291,219 +286,14 @@ if [ ${#GITHUB_APPS[@]} -gt 0 ]; then
 fi
 
 # ------------------------------------------------------------------------------
-# 4. Environment & Additional Configs (Virt/Wine/Steam/LazyVim)
+# 4. Converge application-specific configuration
 # ------------------------------------------------------------------------------
-section "Post-Install" "System & App Tweaks"
-
-# --- [NEW] Virtualization Configuration (Virt-Manager) ---
-if pacman -Qi virt-manager &>/dev/null; then
-  info_kv "Config" "Virt-Manager detected"
-  
-  # 1. 安装完整依赖
-  # iptables-nft 和 dnsmasq 是默认 NAT 网络必须的
-  log "Installing QEMU/KVM dependencies..."
-  pacman -S --noconfirm --needed qemu-full virt-manager swtpm dnsmasq 
-
-  # 2. 添加用户组 (需要重新登录生效)
-  log "Adding $TARGET_USER to libvirt group..."
-  usermod -a -G libvirt "$TARGET_USER"
-  # 同时添加 kvm 和 input 组以防万一
-  usermod -a -G kvm,input "$TARGET_USER"
-
-  # 3. 开启服务
-  log "Enabling libvirtd service..."
-  systemctl enable --now libvirtd
-
-  # 4. [修复] 强制设置 virt-manager 默认连接为 QEMU/KVM
-  # 解决第一次打开显示 LXC 或无法连接的问题
-  log "Setting default URI to qemu:///system..."
-  
-  # 编译 glib schemas (防止 gsettings 报错)
-  glib-compile-schemas /usr/share/glib-2.0/schemas/
-
-  # 强制写入 Dconf 配置
-  # uris: 连接列表
-  # autoconnect: 自动连接的列表
-  as_user gsettings set org.virt-manager.virt-manager.connections uris "['qemu:///system']"
-  as_user gsettings set org.virt-manager.virt-manager.connections autoconnect "['qemu:///system']"
-
-  # 5. 配置网络 (Default NAT)
-  log "Starting default network..."
-  sleep 3
-  virsh net-start default >/dev/null 2>&1 || warn "Default network might be already active."
-  virsh net-autostart default >/dev/null 2>&1 || true
-  
-  # 修复虚拟机安装后的dns问题
-    if systemd-detect-virt -q; then
-        log "Virtual Machine environment detected."
-        
-        # 1. 检测是否在中国 
-        if [[ $(readlink -f /etc/localtime) == *"Shanghai"* ]]; then
-            # 中国：只加国内 DNS
-            log "Region: China. Prepending DNS..."
-            echo "nameserver 223.5.5.5" >> /etc/resolv.conf
-            echo "nameserver 119.29.29.29" >> /etc/resolv.conf
-        else
-            # 非中国：加 Google DNS
-            log "Region: Global. Appending Google DNS..."
-            echo "nameserver 8.8.8.8" >> /etc/resolv.conf
-            echo "nameserver 1.1.1.1" >> /etc/resolv.conf
-        fi
-    fi
-  success "Virtualization (KVM) configured."
-fi
-
-# --- [NEW] Wine Configuration & Fonts ---
-if command -v wine &>/dev/null; then
-  info_kv "Config" "Wine detected"
-  
-  # 1. 安装 Gecko 和 Mono
-  log "Ensuring Wine Gecko/Mono are installed..."
-  pacman -S --noconfirm --needed wine wine-gecko wine-mono 
-
-  # 2. 初始化 Wine (使用 wineboot -u 在后台运行，不弹窗)
-  WINE_PREFIX="$HOME_DIR/.wine"
-  if [ ! -d "$WINE_PREFIX" ]; then
-    log "Initializing wine prefix (This may take a minute)..."
-    # WINEDLLOVERRIDES prohibits popups
-    as_user env WINEDLLOVERRIDES="mscoree,mshtml=" wineboot -u
-    # Wait for completion
-    as_user wineserver -w
-  else
-    log "Wine prefix already exists."
-  fi
-
-  # 3. 复制字体
-  FONT_SRC="$PARENT_DIR/resources/windows-sim-fonts"
-  FONT_DEST="$WINE_PREFIX/drive_c/windows/Fonts"
-
-  if [ -d "$FONT_SRC" ]; then
-    log "Copying Windows fonts from resources..."
-    
-    # 1. 确保目标目录存在 (以用户身份创建)
-    if [ ! -d "$FONT_DEST" ]; then
-        as_user mkdir -p "$FONT_DEST"
-    fi
-
-    # 2. 执行复制 (关键修改：直接以目标用户身份复制，而不是 Root 复制后再 Chown)
-    # 使用 cp -rT 确保目录内容合并，而不是把源目录本身拷进去
-    # 注意：这里假设 as_user 能够接受命令参数。如果 as_user 只是简单的 su/sudo 封装：
-    if sudo -u "$TARGET_USER" cp -rf "$FONT_SRC"/. "$FONT_DEST/"; then
-        success "Fonts copied successfully."
-    else
-        error "Failed to copy fonts."
-    fi
-
-    # 3. 强制刷新 Wine 字体缓存 (非常重要！)
-    # 字体文件放进去了，但 Wine 不一定会立刻重修构建 fntdata.dat
-    # 杀死 wineserver 会强制 Wine 下次启动时重新扫描系统和本地配置
-    log "Refreshing Wine font cache..."
-    if command -v wineserver &> /dev/null; then
-        # 必须以目标用户身份执行 wineserver -k
-        as_user env WINEPREFIX="$WINE_PREFIX" wineserver -k
-    fi
-    
-    success "Wine fonts installed and cache refresh triggered."
-  else
-    warn "Resources font directory not found at: $FONT_SRC"
-  fi
-fi
-
-if command -v lutris &> /dev/null; then 
-    log "Lutris detected. Installing 32-bit gaming dependencies..."
-    pacman -S --noconfirm --needed alsa-plugins giflib glfw gst-plugins-base-libs lib32-alsa-plugins lib32-giflib lib32-gst-plugins-base-libs lib32-gtk3 lib32-libjpeg-turbo lib32-libva lib32-mpg123  lib32-openal libjpeg-turbo libva libxslt mpg123 openal ttf-liberation
-fi
-# --- Steam Locale Fix ---
-STEAM_desktop_modified=false
-NATIVE_DESKTOP="/usr/share/applications/steam.desktop"
-if [ -f "$NATIVE_DESKTOP" ]; then
-    log "Checking Native Steam..."
-    if ! grep -q "env LANG=zh_CN.UTF-8" "$NATIVE_DESKTOP"; then
-        exe sed -i 's|^Exec=/usr/bin/steam|Exec=env LANG=zh_CN.UTF-8 /usr/bin/steam|' "$NATIVE_DESKTOP"
-        exe sed -i 's|^Exec=steam|Exec=env LANG=zh_CN.UTF-8 steam|' "$NATIVE_DESKTOP"
-        success "Patched Native Steam .desktop."
-        STEAM_desktop_modified=true
-    else
-        log "Native Steam already patched."
-    fi
-fi
-
-if flatpak list | grep -q "com.valvesoftware.Steam"; then
-    log "Checking Flatpak Steam..."
-    exe flatpak override --env=LANG=zh_CN.UTF-8 com.valvesoftware.Steam
-    success "Applied Flatpak Steam override."
-    STEAM_desktop_modified=true
-fi
-
-# --- [MOVED] LazyVim Configuration ---
-if [ "$INSTALL_LAZYVIM" = true ]; then
-  section "Config" "Applying LazyVim Overrides"
-  NVIM_CFG="$HOME_DIR/.config/nvim"
-
-  if [ -d "$NVIM_CFG" ]; then
-    BACKUP_PATH="$HOME_DIR/.config/nvim.old.apps.$(date +%s)"
-    warn "Collision detected. Moving existing nvim config to $BACKUP_PATH"
-    mv "$NVIM_CFG" "$BACKUP_PATH"
-  fi
-
-  log "Cloning LazyVim starter..."
-  if as_user git clone https://github.com/LazyVim/starter "$NVIM_CFG"; then
-    rm -rf "$NVIM_CFG/.git"
-    success "LazyVim installed (Override)."
-  else
-    error "Failed to clone LazyVim."
-  fi
-fi
-
-# --- hide desktop ---
-hide_desktop_file() {
-
-  local file="$1"
-
-  if [[ -f "$file" ]] && ! grep -q "^NoDisplay=true$" "$file"; then
-
-    echo "NoDisplay=true" >> "$file"
-
-  fi
-
-}
-section "Config" "Hiding useless .desktop files"
-log "Hiding useless .desktop files"
-hide_desktop_file "/usr/share/applications/avahi-discover.desktop"
-hide_desktop_file "/usr/share/applications/qv4l2.desktop"
-hide_desktop_file "/usr/share/applications/qvidcap.desktop"
-hide_desktop_file "/usr/share/applications/bssh.desktop"
-hide_desktop_file "/usr/share/applications/org.fcitx.Fcitx5.desktop"
-hide_desktop_file "/usr/share/applications/org.fcitx.fcitx5-migrator.desktop"
-hide_desktop_file "/usr/share/applications/xgps.desktop"
-hide_desktop_file "/usr/share/applications/xgpsspeed.desktop"
-hide_desktop_file "/usr/share/applications/gvim.desktop"
-hide_desktop_file "/usr/share/applications/kbd-layout-viewer5.desktop"
-hide_desktop_file "/usr/share/applications/bvnc.desktop"
-hide_desktop_file "/usr/share/applications/yazi.desktop"
-hide_desktop_file "/usr/share/applications/btop.desktop"
-hide_desktop_file "/usr/share/applications/vim.desktop"
-hide_desktop_file "/usr/share/applications/nvim.desktop"
-hide_desktop_file "/usr/share/applications/nvtop.desktop"
-hide_desktop_file "/usr/share/applications/mpv.desktop"
-hide_desktop_file "/usr/share/applications/org.gnome.Settings.desktop"
-
-# --- Post-Dotfiles Configuration: Firefox ---
-section "Config" "Firefox UI Customization"
-
-if [ -d "$HOME_DIR/.mozilla" ]; then 
-    log "Backing up existing .mozilla directory..."
-    mv "$HOME_DIR/.mozilla" "$HOME_DIR/.mozilla.bak.$(date +%s)"
-fi
-    
-mkdir -p "$HOME_DIR/.mozilla"
-cp -rf "$PARENT_DIR/resources/firefox" "$HOME_DIR/.mozilla/"
-chown -R "$TARGET_USER:$TARGET_USER" "$HOME_DIR/.mozilla"
+source "$SCRIPT_DIR/99-app-config.sh"
 
 # ------------------------------------------------------------------------------
 # [FIX] CLEANUP GLOBAL SUDO CONFIGURATION
 # ------------------------------------------------------------------------------
-if [ -f "$SUDO_TEMP_FILE" ]; then
+if [ -n "$SUDO_TEMP_FILE" ] && [ -f "$SUDO_TEMP_FILE" ]; then
     log "Revoking temporary NOPASSWD..."
     rm -f "$SUDO_TEMP_FILE"
 fi
@@ -517,19 +307,25 @@ if [ ${#FAILED_PACKAGES[@]} -gt 0 ]; then
     
     if [ ! -d "$DOCS_DIR" ]; then as_user mkdir -p "$DOCS_DIR"; fi
     
-    echo -e "\n========================================================" >> "$REPORT_FILE"
-    echo -e " Installation Failure Report - $(date)" >> "$REPORT_FILE"
-    echo -e "========================================================" >> "$REPORT_FILE"
-    printf "%s\n" "${FAILED_PACKAGES[@]}" >> "$REPORT_FILE"
-    
+    REPORT_TMP=$(mktemp)
+    printf 'Installation Failure Report - %s\n\n' "$(date)" > "$REPORT_TMP"
+    printf "%s\n" "${FAILED_PACKAGES[@]}" >> "$REPORT_TMP"
+    install_if_changed "$REPORT_TMP" "$REPORT_FILE" 600
+    rm -f "$REPORT_TMP"
     chown "$TARGET_USER:$TARGET_USER" "$REPORT_FILE"
     
     echo ""
     warn "Some applications failed to install."
     warn "A report has been saved to:"
     echo -e "   ${BOLD}$REPORT_FILE${NC}"
+    exit 1
 else
     success "All scheduled applications processed successfully."
+fi
+
+if [ "${#USER_UNIT_PENDING[@]}" -gt 0 ]; then
+    warn "User services are enabled but pending login: ${USER_UNIT_PENDING[*]}"
+    exit 20
 fi
 
 # Reset Trap

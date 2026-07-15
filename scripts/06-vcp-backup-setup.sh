@@ -1,4 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+trap 'printf "ERROR: %s:%s: %s\n" \
+  "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 # 06-vcp-backup-setup.sh - VCPChat NAS Backup Automation Installer
 # (v1.0 - Hot-plug Mount, Whitelist Sync, 16:00 Timer)
 
@@ -18,16 +22,18 @@ section "VCP Backup" "Sudoers & Systemd Timer Setup"
 # 1. Check if Python script exists
 if [ ! -f "$VCP_SYNC_PY" ]; then
   warn "Python backup script not found at $VCP_SYNC_PY"
-  log "Skipping setup. Please ensure VCPChat is installed first."
-  exit 0
+  log "Skipping setup until VCPChat is deployed."
+  exit 20
 fi
 
 # 2. Sudoers Management (Scripted)
 log "Configuring sudoers for passwordless mount/umount..."
-cat >"$SUDOERS_FILE" <<EOF
+SUDOERS_TMP=$(mktemp)
+cat >"$SUDOERS_TMP" <<EOF
 $TARGET_USER ALL=(ALL) NOPASSWD: /usr/bin/mount, /usr/bin/umount, /usr/bin/mkdir
 EOF
-chmod 440 "$SUDOERS_FILE"
+install_sudoers_file "$SUDOERS_TMP" "$SUDOERS_FILE"
+rm -f "$SUDOERS_TMP"
 success "Sudoers entry created at $SUDOERS_FILE"
 
 # 3. Systemd User Timer Setup
@@ -36,7 +42,9 @@ TIMER_DIR="$HOME_DIR/.config/systemd/user"
 as_user mkdir -p "$TIMER_DIR"
 
 # Create Service Unit
-cat >"$TIMER_DIR/vcp-backup.service" <<EOF
+SERVICE_TMP=$(mktemp)
+TIMER_TMP=$(mktemp)
+cat >"$SERVICE_TMP" <<EOF
 [Unit]
 Description=VCPChat NAS Daily Backup (Hot-plug Mode)
 After=network-online.target
@@ -53,7 +61,7 @@ WantedBy=default.target
 EOF
 
 # Create Timer Unit (16:00)
-cat >"$TIMER_DIR/vcp-backup.timer" <<EOF
+cat >"$TIMER_TMP" <<EOF
 [Unit]
 Description=Run VCPChat Backup at 16:00 Daily
 
@@ -66,15 +74,22 @@ Unit=vcp-backup.service
 WantedBy=timers.target
 EOF
 
-chown -R "$TARGET_USER:$TARGET_USER" "$TIMER_DIR"
+install_if_changed "$SERVICE_TMP" "$TIMER_DIR/vcp-backup.service" 644
+install_if_changed "$TIMER_TMP" "$TIMER_DIR/vcp-backup.timer" 644
+rm -f "$SERVICE_TMP" "$TIMER_TMP"
+chown "$TARGET_USER:$TARGET_USER" \
+  "$TIMER_DIR/vcp-backup.service" "$TIMER_DIR/vcp-backup.timer"
+ensure_user_unit_enabled "$TARGET_USER" vcp-backup.timer timers.target
+verify_file "$TIMER_DIR/vcp-backup.service"
+verify_file "$TIMER_DIR/vcp-backup.timer"
+verify_user_unit "$TARGET_USER" vcp-backup.timer timers.target
 
 # 4. Enable Timer
-if [ -z "${CHROOT_ACTIVE:-}" ]; then
-  log "Enabling and starting vcp-backup.timer..."
-  as_user env XDG_RUNTIME_DIR="/run/user/$(id -u "$TARGET_USER")" systemctl --user daemon-reload
-  as_user env XDG_RUNTIME_DIR="/run/user/$(id -u "$TARGET_USER")" systemctl --user enable --now vcp-backup.timer
+if [ -S "/run/user/$(id -u "$TARGET_USER")/bus" ]; then
   success "Timer is active and scheduled for 16:00."
+else
+  warn "Timer is enabled and pending the next user login."
+  exit 20
 fi
 
 success "VCP Backup automation setup complete!"
-

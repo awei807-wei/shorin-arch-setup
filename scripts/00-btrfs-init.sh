@@ -1,4 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+trap 'printf "ERROR: %s:%s: %s\n" \
+  "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 # ==============================================================================
 # 00-btrfs-init.sh - Pre-install Snapshot Safety Net (Root & Home)
@@ -20,37 +24,35 @@ ROOT_FSTYPE=$(findmnt -n -o FSTYPE /)
 if [ "$ROOT_FSTYPE" == "btrfs" ]; then
     log "Root is Btrfs. Installing Snapper..."
     # Minimal install for snapshot capability
-    exe pacman -Syu --noconfirm --needed snapper less
+    ensure_packages snapper less
     
     log "Configuring Snapper for Root..."
     if ! snapper list-configs | grep -q "^root "; then
         # Cleanup existing dir to allow subvolume creation
         if [ -d "/.snapshots" ]; then
-            exe_silent umount /.snapshots
-            exe_silent rm -rf /.snapshots
+            error "Refusing to remove existing /.snapshots without a Snapper config."
+            exit 1
         fi
         
         if exe snapper -c root create-config /; then
             success "Config 'root' created."
             
-            # Apply Retention Policy
-            exe snapper -c root set-config \
-                ALLOW_GROUPS="wheel" \
-                TIMELINE_CREATE="no" \
-                TIMELINE_CLEANUP="yes" \
-                NUMBER_LIMIT="20" \
-                NUMBER_LIMIT_IMPORTANT="5" \
-                TIMELINE_LIMIT_HOURLY="5" \
-                TIMELINE_LIMIT_DAILY="7" \
-                TIMELINE_LIMIT_WEEKLY="0" \
-                TIMELINE_LIMIT_MONTHLY="0" \
-                TIMELINE_LIMIT_YEARLY="0"
         fi
     else
         log "Config 'root' already exists."
     fi
+    snapper -c root get-config >/dev/null
 else
     warn "Root is not Btrfs. Skipping Root snapshot."
+fi
+
+if snapper list-configs | grep -q "^root "; then
+    exe snapper -c root set-config \
+        ALLOW_GROUPS="wheel" TIMELINE_CREATE="no" TIMELINE_CLEANUP="yes" \
+        NUMBER_LIMIT="20" NUMBER_LIMIT_IMPORTANT="5" \
+        TIMELINE_LIMIT_HOURLY="5" TIMELINE_LIMIT_DAILY="7" \
+        TIMELINE_LIMIT_WEEKLY="0" TIMELINE_LIMIT_MONTHLY="0" \
+        TIMELINE_LIMIT_YEARLY="0"
 fi
 
 # ------------------------------------------------------------------------------
@@ -65,31 +67,28 @@ if findmnt -n -o FSTYPE /home | grep -q "btrfs"; then
     if ! snapper list-configs | grep -q "^home "; then
         # Cleanup .snapshots in home if exists
         if [ -d "/home/.snapshots" ]; then
-            exe_silent umount /home/.snapshots
-            exe_silent rm -rf /home/.snapshots
+            error "Refusing to remove existing /home/.snapshots without a Snapper config."
+            exit 1
         fi
         
         if exe snapper -c home create-config /home; then
             success "Config 'home' created."
             
-            # Apply same policy to home
-            exe snapper -c home set-config \
-                ALLOW_GROUPS="wheel" \
-                TIMELINE_CREATE="no" \
-                TIMELINE_CLEANUP="yes" \
-                NUMBER_LIMIT="20" \
-                NUMBER_LIMIT_IMPORTANT="5" \
-                TIMELINE_LIMIT_HOURLY="5" \
-                TIMELINE_LIMIT_DAILY="7" \
-                TIMELINE_LIMIT_WEEKLY="0" \
-                TIMELINE_LIMIT_MONTHLY="0" \
-                TIMELINE_LIMIT_YEARLY="0"
         fi
     else
         log "Config 'home' already exists."
     fi
 else
     log "/home is not a separate Btrfs volume. Skipping."
+fi
+
+if snapper list-configs | grep -q "^home "; then
+    exe snapper -c home set-config \
+        ALLOW_GROUPS="wheel" TIMELINE_CREATE="no" TIMELINE_CLEANUP="yes" \
+        NUMBER_LIMIT="20" NUMBER_LIMIT_IMPORTANT="5" \
+        TIMELINE_LIMIT_HOURLY="5" TIMELINE_LIMIT_DAILY="7" \
+        TIMELINE_LIMIT_WEEKLY="0" TIMELINE_LIMIT_MONTHLY="0" \
+        TIMELINE_LIMIT_YEARLY="0"
 fi
 
 # ------------------------------------------------------------------------------

@@ -1,4 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+trap 'printf "ERROR: %s:%s: %s\n" \
+  "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 # ==============================================================================
 # 02-musthave.sh - Essential Software, Drivers & Locale
@@ -19,27 +23,29 @@ ROOT_FSTYPE=$(findmnt -n -o FSTYPE /)
 
 if [ "$ROOT_FSTYPE" == "btrfs" ]; then
     log "Btrfs filesystem detected."
-    exe pacman -S --noconfirm --needed snapper snap-pac btrfs-assistant
+    ensure_packages snapper snap-pac btrfs-assistant
     success "Snapper tools installed."
 
     log "Initializing Snapper 'root' configuration..."
     if ! snapper list-configs | grep -q "^root "; then
         if [ -d "/.snapshots" ]; then
-            warn "Removing existing /.snapshots..."
-            exe_silent umount /.snapshots
-            exe_silent rm -rf /.snapshots
+            error "Refusing to remove existing /.snapshots without a Snapper config."
+            return 1 2>/dev/null || exit 1
         fi
         if exe snapper -c root create-config /; then
             success "Snapper config created."
-            log "Applying retention policy..."
-            exe snapper -c root set-config ALLOW_GROUPS="wheel" TIMELINE_CREATE="no" TIMELINE_CLEANUP="yes" NUMBER_LIMIT="10" NUMBER_LIMIT_IMPORTANT="5" TIMELINE_LIMIT_HOURLY="5" TIMELINE_LIMIT_DAILY="7" TIMELINE_LIMIT_WEEKLY="0" TIMELINE_LIMIT_MONTHLY="0" TIMELINE_LIMIT_YEARLY="0"
-            success "Policy applied."
         fi
     else
         log "Config exists."
     fi
     
-    exe systemctl enable --now snapper-timeline.timer snapper-cleanup.timer
+    exe snapper -c root set-config ALLOW_GROUPS="wheel" TIMELINE_CREATE="no" \
+        TIMELINE_CLEANUP="yes" NUMBER_LIMIT="20" NUMBER_LIMIT_IMPORTANT="5" \
+        TIMELINE_LIMIT_HOURLY="5" TIMELINE_LIMIT_DAILY="7" \
+        TIMELINE_LIMIT_WEEKLY="0" TIMELINE_LIMIT_MONTHLY="0" \
+        TIMELINE_LIMIT_YEARLY="0"
+    ensure_service_started snapper-timeline.timer
+    ensure_service_started snapper-cleanup.timer
 
     # GRUB Integration
 if [ -f "/etc/default/grub" ] && command -v grub-mkconfig >/dev/null 2>&1; then
@@ -53,7 +59,7 @@ if [ -f "/etc/default/grub" ] && command -v grub-mkconfig >/dev/null 2>&1; then
         # -o TARGET: 只输出挂载点路径
         # -t vfat: 限制文件系统类型
         # sort -r: 反向排序，这样 /boot/efi 会排在 /boot 之前（如果同时存在），优先匹配深层路径
-        VFAT_MOUNTS=$(findmnt -n -l -o TARGET -t vfat)
+        VFAT_MOUNTS=$(findmnt -n -l -o TARGET -t vfat || true)
 
         if [ -n "$VFAT_MOUNTS" ]; then
             # 2. 遍历这些 vfat 分区，寻找 grub 目录
@@ -85,8 +91,8 @@ if [ -f "/etc/default/grub" ] && command -v grub-mkconfig >/dev/null 2>&1; then
         fi
         # --- 核心修改结束 ---
 
-        exe pacman -Syu --noconfirm --needed grub-btrfs inotify-tools
-        exe systemctl enable --now grub-btrfsd
+        ensure_packages grub-btrfs inotify-tools
+        ensure_service_started grub-btrfsd.service
 
         if ! grep -q "grub-btrfs-overlayfs" /etc/mkinitcpio.conf; then
             log "Adding overlayfs hook to mkinitcpio..."
@@ -107,10 +113,10 @@ fi
 section "Step 2/8" "Audio & Video"
 
 log "Installing firmware..."
-exe pacman -S --noconfirm --needed sof-firmware alsa-ucm-conf alsa-firmware
+ensure_packages sof-firmware alsa-ucm-conf alsa-firmware
 
 log "Installing Pipewire stack..."
-exe pacman -S --noconfirm --needed pipewire wireplumber pipewire-pulse pipewire-alsa pipewire-jack pavucontrol
+ensure_packages pipewire wireplumber pipewire-pulse pipewire-alsa pipewire-jack pavucontrol
 
 exe systemctl --global enable pipewire pipewire-pulse wireplumber
 success "Audio setup complete."
@@ -137,7 +143,7 @@ fi
 # ------------------------------------------------------------------------------
 section "Step 4/8" "Input Method (Fcitx5)"
 
-exe pacman -S --noconfirm --needed fcitx5-im fcitx5-chinese-addons fcitx5-rime fcitx5-mozc
+ensure_packages fcitx5-im fcitx5-chinese-addons fcitx5-rime fcitx5-mozc
 
 success "Fcitx5 installed."
 
@@ -148,7 +154,7 @@ section "Step 5/8" "Bluetooth"
 
 # Ensure detection tools are present
 log "Detecting Bluetooth hardware..."
-exe pacman -S --noconfirm --needed usbutils pciutils
+ensure_packages usbutils pciutils
 
 BT_FOUND=false
 
@@ -163,9 +169,9 @@ if [ "$BT_FOUND" = true ]; then
     info_kv "Hardware" "Detected"
 
     log "Installing Bluez "
-    exe pacman -S --noconfirm --needed bluez
+    ensure_package bluez
 
-    exe systemctl enable --now bluetooth
+    ensure_service_started bluetooth.service
     success "Bluetooth service enabled."
 else
     info_kv "Hardware" "Not Found"
@@ -177,8 +183,8 @@ fi
 # ------------------------------------------------------------------------------
 section "Step 6/8" "Power Management"
 
-exe pacman -S --noconfirm --needed power-profiles-daemon
-exe systemctl enable --now power-profiles-daemon
+ensure_package power-profiles-daemon
+ensure_service_started power-profiles-daemon.service
 success "Power profiles daemon enabled."
 
 # ------------------------------------------------------------------------------
@@ -186,7 +192,7 @@ success "Power profiles daemon enabled."
 # ------------------------------------------------------------------------------
 section "Step 7/8" "Fastfetch"
 
-exe pacman -S --noconfirm --needed fastfetch
+ensure_package fastfetch
 success "Fastfetch installed."
 
 log "Module 02 completed."
@@ -195,12 +201,12 @@ log "Module 02 completed."
 # 9. flatpak
 # ------------------------------------------------------------------------------
 
-exe pacman -S --noconfirm --needed flatpak
-exe flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+ensure_package flatpak
+exe flatpak remote-add --system --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
 CURRENT_TZ=$(readlink -f /etc/localtime)
 IS_CN_ENV=false
-if [[ "$CURRENT_TZ" == *"Shanghai"* ]] || [ "$CN_MIRROR" == "1" ] || [ "$DEBUG" == "1" ]; then
+if [[ "$CURRENT_TZ" == *"Shanghai"* ]] || [ "${CN_MIRROR:-0}" == "1" ] || [ "${DEBUG:-0}" == "1" ]; then
   IS_CN_ENV=true
   info_kv "Region" "China Optimization Active"
 fi
