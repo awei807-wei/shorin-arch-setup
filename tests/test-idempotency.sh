@@ -5,7 +5,7 @@ trap 'printf "ERROR: %s:%s: %s\n" \
   "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-source "$ROOT_DIR/scripts/00-utils.sh"
+source "$ROOT_DIR/scripts/lib/core.sh"
 
 TEST_DIR=$(mktemp -d)
 cleanup() {
@@ -110,6 +110,22 @@ test_fstab_unique_keys() {
         'fstab convergence must leave one target record'
 }
 
+test_pacman_section_convergence() {
+    local config="$TEST_DIR/pacman.conf"
+    local body='Server = https://mirror.example/$arch'
+    printf '[options]\nColor\n\n[custom]\nServer = old\n' > "$config"
+    pacman-conf() {
+        [ "$1" = --config ] && [ -s "$2" ]
+    }
+
+    ensure_pacman_section "$config" custom "$body"
+    ensure_pacman_section "$config" custom "$body"
+
+    pacman_section_matches "$config" custom "$body"
+    assert_equal 1 "$(grep -c '^\[custom\]$' "$config")" \
+        'pacman convergence must leave one named section'
+}
+
 test_script_contract() {
     local script
     while IFS= read -r script; do
@@ -125,6 +141,7 @@ test_atomic_text_convergence
 test_package_convergence
 test_service_convergence
 test_fstab_unique_keys
+test_pacman_section_convergence
 test_script_contract
 
 printf 'PASS: idempotency and strict-mode contract\n'

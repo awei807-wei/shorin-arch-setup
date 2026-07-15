@@ -8,14 +8,8 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 # 03b-gpu-driver.sh GPU Driver Installer 参考了cachyos的chwd脚本
 # ==============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# 引用工具库
-if [ -f "$SCRIPT_DIR/00-utils.sh" ]; then
-    source "$SCRIPT_DIR/00-utils.sh"
-else
-    echo "Error: 00-utils.sh not found."
-    exit 1
-fi
+SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+source "$SCRIPT_DIR/lib/core.sh"
 
 check_root
 
@@ -165,7 +159,7 @@ fi
 
 
 
-DETECTED_USER=$(awk -F: '$3 == 1000 {print $1; exit}' /etc/passwd)
+DETECTED_USER=${TARGET_USER:-$(awk -F: '$3 == 1000 {print $1; exit}' /etc/passwd)}
 if [ -n "$DETECTED_USER" ]; then
     TARGET_USER=$DETECTED_USER
 else

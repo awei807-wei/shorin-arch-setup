@@ -8,10 +8,10 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 # 99-apps.sh - Common Applications (Repo/AUR/Flatpak/GitHub + Retry Logic)
 # ==============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PARENT_DIR="$(dirname "$SCRIPT_DIR")"
-source "$SCRIPT_DIR/00-utils.sh"
-source "$SCRIPT_DIR/99-github-apps.sh"
+SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+PARENT_DIR="${SHORIN_ROOT_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+source "$SCRIPT_DIR/lib/core.sh"
+source "$SCRIPT_DIR/modules/applications/github-apps.sh"
 
 # --- [CONFIGURATION] ---
 # LazyVim 硬性依赖列表 (Moved from niri-setup)
@@ -33,14 +33,12 @@ trap 'echo -e "\n   ${H_YELLOW}>>> Operation cancelled by user.${NC}"; exit 130'
 section "Phase 5" "Common Applications"
 
 log "Identifying target user..."
-DETECTED_USER=$(awk -F: '$3 == 1000 {print $1}' /etc/passwd)
-
-if [ -n "$DETECTED_USER" ]; then
-    TARGET_USER="$DETECTED_USER"
-else
-    read -p "   Please enter the target username: " TARGET_USER
+if [ -z "${TARGET_USER:-}" ]; then
+    TARGET_USER=$(awk -F: '$3 == 1000 {print $1; exit}' /etc/passwd)
 fi
-HOME_DIR="/home/$TARGET_USER"
+[ -n "$TARGET_USER" ] || read -r -p "   Please enter the target username: " TARGET_USER
+HOME_DIR=$(getent passwd "$TARGET_USER" | cut -d: -f6)
+[ -n "$HOME_DIR" ] || die "Cannot resolve home for $TARGET_USER"
 info_kv "Target" "$TARGET_USER"
 
 # Helper function for user commands
@@ -53,6 +51,8 @@ as_user() {
 # ------------------------------------------------------------------------------
 LIST_FILENAME="common-applist.txt"
 LIST_FILE="$PARENT_DIR/$LIST_FILENAME"
+PROFILE_DIR=${SHORIN_PROFILE_DIR:-/etc/shorin-arch-setup}
+APPLICATION_MANIFEST="$PROFILE_DIR/applications.list"
 
 REPO_APPS=()
 AUR_APPS=()
@@ -74,72 +74,32 @@ if ! grep -q -vE "^\s*#|^\s*$" "$LIST_FILE"; then
     exit 20
 fi
 
-echo ""
-echo -e "   Selected List: ${BOLD}$LIST_FILENAME${NC}"
-echo -e "   ${H_YELLOW}>>> Do you want to install common applications?${NC}"
-echo -e "   ${H_CYAN}    [ENTER] = Select packages${NC}"
-echo -e "   ${H_CYAN}    [N]     = Skip installation${NC}"
-echo -e "   ${H_YELLOW}    [Timeout 60s] = Auto-install ALL default packages (No FZF)${NC}"
-echo ""
-
-if read -r -t 60 -p "   Please select [Y/n]: " choice; then
-    READ_STATUS=0
-else
-    READ_STATUS=$?
-fi
-
 SELECTED_RAW=""
-
-# Case 1: Timeout (Auto Install ALL)
-if [ $READ_STATUS -ne 0 ]; then
-    echo "" 
-    warn "Timeout reached (60s). Auto-installing ALL applications from list..."
-    SELECTED_RAW=$(grep -vE "^\s*#|^\s*$" "$LIST_FILE" | sed -E 's/[[:space:]]+#/\t#/')
-
-# Case 2: User Input
+if [ "${SHORIN_MODE:-install}" != install ] && [ -s "$APPLICATION_MANIFEST" ]; then
+    SELECTED_RAW=$(< "$APPLICATION_MANIFEST")
+    log "Using declared application targets from $APPLICATION_MANIFEST"
 else
-    choice=${choice:-Y}
-    if [[ "$choice" =~ ^[nN]$ ]]; then
-        warn "User skipped application installation."
-        trap - INT
-        exit 20
+    if [ ! -t 0 ]; then
+        SELECTED_RAW=$(grep -vE "^\s*#|^\s*$" "$LIST_FILE" | sed -E 's/[[:space:]]+#/\t#/')
     else
-        clear
-        echo -e "\n  Loading application list..."
-        
-        SELECTED_RAW=$(grep -vE "^\s*#|^\s*$" "$LIST_FILE" | \
-            sed -E 's/[[:space:]]+#/\t#/' | \
-            fzf --multi \
-                --layout=reverse \
-                --border \
-                --margin=1,2 \
-                --prompt="Search App > " \
-                --pointer=">>" \
-                --marker="* " \
-                --delimiter=$'\t' \
-                --with-nth=1 \
-                --bind 'load:select-all' \
-                --bind 'ctrl-a:select-all,ctrl-d:deselect-all' \
-                --info=inline \
-                --header="[TAB] TOGGLE | [ENTER] INSTALL | [CTRL-D] DE-ALL | [CTRL-A] SE-ALL" \
-                --preview "echo {} | cut -f2 -d$'\t' | sed 's/^# //'" \
-                --preview-window=right:45%:wrap:border-left \
-                --color=dark \
-                --color=fg+:white,bg+:black \
-                --color=hl:blue,hl+:blue:bold \
-                --color=header:yellow:bold \
-                --color=info:magenta \
-                --color=prompt:cyan,pointer:cyan:bold,marker:green:bold \
-                --color=spinner:yellow)
-        
-        clear
-        
-        if [ -z "$SELECTED_RAW" ]; then
-            log "Skipping application installation (User cancelled selection)."
-            trap - INT
+        read -r -t 60 -p "Install common applications? [Y/n]: " choice || choice=Y
+        if [[ "${choice:-Y}" =~ ^[Nn]$ ]]; then
+            warn "User skipped application installation."
             exit 20
         fi
+        SELECTED_RAW=$(grep -vE "^\s*#|^\s*$" "$LIST_FILE" | \
+            sed -E 's/[[:space:]]+#/\t#/' | fzf --multi \
+            --layout=reverse --border --delimiter=$'\t' --with-nth=1 \
+            --bind 'load:select-all' --bind 'ctrl-a:select-all,ctrl-d:deselect-all')
     fi
+    [ -n "$SELECTED_RAW" ] || exit 20
+    install -d -m 755 "$PROFILE_DIR"
+    MANIFEST_TMP=$(mktemp)
+    cut -f1 -d$'\t' <<< "$SELECTED_RAW" | sed '/^[[:space:]]*$/d' | \
+        sort -u > "$MANIFEST_TMP"
+    install_if_changed "$MANIFEST_TMP" "$APPLICATION_MANIFEST" 644
+    rm -f "$MANIFEST_TMP"
+    SELECTED_RAW=$(< "$APPLICATION_MANIFEST")
 fi
 
 # ------------------------------------------------------------------------------
@@ -288,7 +248,7 @@ fi
 # ------------------------------------------------------------------------------
 # 4. Converge application-specific configuration
 # ------------------------------------------------------------------------------
-source "$SCRIPT_DIR/99-app-config.sh"
+source "$SCRIPT_DIR/modules/applications/config-apply.sh"
 
 # ------------------------------------------------------------------------------
 # [FIX] CLEANUP GLOBAL SUDO CONFIGURATION

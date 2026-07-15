@@ -8,8 +8,8 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 # 03-user.sh - User Creation & Configuration (Visual Fix)
 # ==============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/00-utils.sh"
+SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+source "$SCRIPT_DIR/lib/core.sh"
 
 check_root
 
@@ -18,19 +18,23 @@ check_root
 # ------------------------------------------------------------------------------
 section "Phase 3" "User Account Setup"
 
-EXISTING_USER=$(awk -F: '$3 == 1000 {print $1}' /etc/passwd)
+EXISTING_USER=${TARGET_USER:-$(awk -F: '$3 == 1000 {print $1; exit}' /etc/passwd)}
 MY_USERNAME=""
 SKIP_CREATION=false
 
-if [ -n "$EXISTING_USER" ]; then
-    info_kv "Detected User" "$EXISTING_USER" "(UID 1000)"
+if [ -n "$EXISTING_USER" ] && getent passwd "$EXISTING_USER" >/dev/null; then
+    info_kv "Detected User" "$EXISTING_USER"
     log "Using existing user configuration."
     MY_USERNAME="$EXISTING_USER"
     SKIP_CREATION=true
 else
     warn "No standard user found (UID 1000)."
-    
-    while true; do
+    if [ -n "${TARGET_USER:-}" ]; then
+        MY_USERNAME=$TARGET_USER
+    elif [ "${SHORIN_MODE:-install}" != install ]; then
+        die 'Repair requires an existing target user.'
+    else
+      while true; do
         echo ""
         # 使用 echo -n 打印普通提示，避免 read -p 的兼容性问题
         echo -ne "   Please enter new username: "
@@ -56,13 +60,9 @@ else
         else
             log "Cancelled. Please re-enter."
         fi
-    done
+      done
+    fi
 fi
-
-# Export username for next scripts
-printf '%s\n' "$MY_USERNAME" > /tmp/shorin_install_user.new
-chmod 600 /tmp/shorin_install_user.new
-mv -f /tmp/shorin_install_user.new /tmp/shorin_install_user
 
 # ------------------------------------------------------------------------------
 # 2. Create User & Sudo

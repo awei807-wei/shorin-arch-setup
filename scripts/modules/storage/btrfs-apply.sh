@@ -8,8 +8,8 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 # 00-btrfs-init.sh - Pre-install Snapshot Safety Net (Root & Home)
 # ==============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/00-utils.sh"
+SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+source "$SCRIPT_DIR/lib/core.sh"
 
 check_root
 

@@ -8,9 +8,9 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 # 07-grub-theme.sh - GRUB Theming & Advanced Configuration
 # ==============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PARENT_DIR="$(dirname "$SCRIPT_DIR")"
-source "$SCRIPT_DIR/00-utils.sh"
+SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+PARENT_DIR="${SHORIN_ROOT_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+source "$SCRIPT_DIR/lib/core.sh"
 
 check_root
 
@@ -115,7 +115,19 @@ fi
 # ------------------------------------------------------------------------------
 section "Step 3/5" "Theme Selection"
 
-if [ ${#THEME_NAMES[@]} -eq 1 ]; then
+if [ "${SHORIN_MODE:-install}" != install ]; then
+    CURRENT_THEME=$(awk -F= '$1 == "GRUB_THEME" { gsub(/"/, "", $2); print $2 }' \
+        /etc/default/grub | tail -n 1)
+    CURRENT_THEME_DIR=$(basename "$(dirname "${CURRENT_THEME:-/nonexistent/theme.txt}")")
+    SELECTED_INDEX=0
+    for i in "${!THEME_NAMES[@]}"; do
+        if [[ "$CURRENT_THEME_DIR" == "${THEME_NAMES[$i]}"-* ]] ||
+            [ "$CURRENT_THEME_DIR" = "${THEME_NAMES[$i]}" ]; then
+            SELECTED_INDEX=$i
+            break
+        fi
+    done
+elif [ ${#THEME_NAMES[@]} -eq 1 ]; then
     SELECTED_INDEX=0
     log "Only one theme detected. Auto-selecting: ${THEME_NAMES[0]}"
 else

@@ -6,8 +6,8 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 # 08-vcp-desktop-entry.sh - VCPChat Desktop Entry Integration
 # (v1.0 - Automatic Path Detection & Database Refresh)
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/00-utils.sh"
+SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+source "$SCRIPT_DIR/lib/core.sh"
 
 check_root
 

@@ -8,8 +8,8 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 # 01-base.sh - Base System Configuration
 # ==============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/00-utils.sh"
+SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+source "$SCRIPT_DIR/lib/core.sh"
 
 check_root
 
@@ -20,19 +20,14 @@ log "Starting Phase 1: Base System Configuration..."
 # ------------------------------------------------------------------------------
 section "Step 1/6" "Global Default Editor"
 
-TARGET_EDITOR="vim"
-
-if command -v nvim &> /dev/null; then
-    TARGET_EDITOR="nvim"
-    log "Neovim detected."
-elif command -v nano &> /dev/null; then
-    TARGET_EDITOR="nano"
-    log "Nano detected."
-else
-    log "Neovim or Nano not found. Installing Vim..."
-    if ! command -v vim &> /dev/null; then
-        exe pacman -Syu --noconfirm gvim
-    fi
+TARGET_EDITOR=${BASE_EDITOR:-vim}
+if ! command -v "$TARGET_EDITOR" >/dev/null 2>&1; then
+    case "$TARGET_EDITOR" in
+        vim) ensure_package gvim ;;
+        nvim) ensure_package neovim ;;
+        nano) ensure_package nano ;;
+        *) die "Unsupported BASE_EDITOR: $TARGET_EDITOR" ;;
+    esac
 fi
 
 log "Ensuring EDITOR=$TARGET_EDITOR in /etc/environment..."
@@ -44,10 +39,12 @@ success "Global EDITOR set to: ${TARGET_EDITOR}"
 # ------------------------------------------------------------------------------
 section "Step 2/6" "Multilib Repository"
 
-ensure_pacman_section /etc/pacman.conf multilib \
-    'Include = /etc/pacman.d/mirrorlist'
-log "Refreshing database after converging multilib..."
-exe pacman -Syu --noconfirm
+MULTILIB_BODY='Include = /etc/pacman.d/mirrorlist'
+if ! pacman_section_matches /etc/pacman.conf multilib "$MULTILIB_BODY"; then
+    ensure_pacman_section /etc/pacman.conf multilib "$MULTILIB_BODY"
+    log "Refreshing database after changing multilib..."
+    exe pacman -Syu --noconfirm
+fi
 success "[multilib] converged."
 
 # ------------------------------------------------------------------------------
@@ -68,10 +65,11 @@ log "Setting font for current session..."
 exe setfont ter-v28n
 
 log "Configuring permanent vconsole font..."
-ensure_key_value /etc/vconsole.conf FONT ter-v28n
-
-log "Restarting systemd-vconsole-setup..."
-exe systemctl restart systemd-vconsole-setup
+if ! key_value_matches /etc/vconsole.conf FONT ter-v28n; then
+    ensure_key_value /etc/vconsole.conf FONT ter-v28n
+    log "Restarting systemd-vconsole-setup after configuration change..."
+    exe systemctl restart systemd-vconsole-setup
+fi
 
 success "TTY font configured (ter-v24n)."
 # ------------------------------------------------------------------------------
@@ -83,12 +81,19 @@ ARCHLINUXCN_BODY='Server = https://mirrors.ustc.edu.cn/archlinuxcn/$arch
 Server = https://mirrors.tuna.tsinghua.edu.cn/archlinuxcn/$arch
 Server = https://mirrors.hit.edu.cn/archlinuxcn/$arch
 Server = https://repo.huaweicloud.com/archlinuxcn/$arch'
-ensure_pacman_section /etc/pacman.conf archlinuxcn "$ARCHLINUXCN_BODY"
+ARCHLINUXCN_CHANGED=false
+if ! pacman_section_matches /etc/pacman.conf archlinuxcn "$ARCHLINUXCN_BODY"; then
+    ensure_pacman_section /etc/pacman.conf archlinuxcn "$ARCHLINUXCN_BODY"
+    ARCHLINUXCN_CHANGED=true
+fi
 success "ArchLinuxCN repository converged."
 
 log "Installing archlinuxcn-keyring..."
-# Keyring installation often needs -Sy specifically, but -Syu is safe too
-exe pacman -Syu --noconfirm archlinuxcn-keyring
+if [ "$ARCHLINUXCN_CHANGED" = true ]; then
+    exe pacman -Syu --noconfirm archlinuxcn-keyring
+else
+    ensure_package archlinuxcn-keyring
+fi
 success "ArchLinuxCN configured."
 
 # ------------------------------------------------------------------------------

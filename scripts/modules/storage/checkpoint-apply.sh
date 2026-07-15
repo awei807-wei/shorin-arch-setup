@@ -9,15 +9,8 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 # Creates a system snapshot before installing major Desktop Environments.
 # ==============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# 1. 引用工具库
-if [ -f "$SCRIPT_DIR/00-utils.sh" ]; then
-    source "$SCRIPT_DIR/00-utils.sh"
-else
-    echo "Error: 00-utils.sh not found."
-    exit 1
-fi
+SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+source "$SCRIPT_DIR/lib/core.sh"
 
 # 2. 权限检查
 check_root
