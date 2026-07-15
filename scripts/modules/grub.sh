@@ -6,77 +6,134 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 
 SHORIN_ROOT=${SHORIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 source "$SHORIN_ROOT/scripts/lib/verify.sh"
+source "$SHORIN_ROOT/scripts/modules/grub/contract.sh"
 
-grub_is_applicable() {
-    command -v grub-mkconfig >/dev/null 2>&1 && [ -f /etc/default/grub ]
+grub_contract_init
+
+grub_expect() {
+    local phase=$1 label=$2
+    shift 2
+
+    if [ "$phase" = check ]; then
+        module_check_state "$label" "$@"
+    elif ! "$@"; then
+        module_verify_failed "$label"
+    fi
 }
 
-grub_theme_is_available() {
-    find "$SHORIN_ROOT/grub-themes" -mindepth 2 -maxdepth 2 \
-        -type f -name theme.txt -print -quit 2>/dev/null | grep -q .
+grub_prerequisite_failed() {
+    local phase=$1 reason=$2
+
+    if [ "$phase" = check ]; then
+        module_inspection_failed "$reason"
+    else
+        module_verify_failed "$reason"
+    fi
 }
 
-grub_service_enabled() {
-    local status=0
+grub_inspect_btrfs() {
+    local phase=$1 root_status=0
 
-    state_service_enabled "$1" || status=$?
-    case "$status" in
-        0) return 0 ;;
-        2) return 2 ;;
-        *) return 1 ;;
+    grub_root_is_btrfs || root_status=$?
+    case "$root_status" in
+        0)
+            grub_expect "$phase" package:grub-btrfs \
+                state_package_present grub-btrfs
+            grub_expect "$phase" package:inotify-tools \
+                state_package_present inotify-tools
+            grub_expect "$phase" service:grub-btrfsd-enabled \
+                state_service_enabled grub-btrfsd.service
+            grub_expect "$phase" service:grub-btrfsd-active \
+                state_service_active grub-btrfsd.service
+            grub_expect "$phase" mkinitcpio:grub-btrfs-overlayfs \
+                grub_overlay_hook_present
+            ;;
+        1) ;;
+        *) grub_prerequisite_failed "$phase" root-filesystem-inspection-failed ;;
     esac
 }
 
-grub_mark_theme_unavailable() {
-    if [ "$MODULE_RESULT" -eq "$RC_OK" ] && ! grub_theme_is_available; then
+grub_inspect_theme() {
+    local phase=$1
+
+    if grub_theme_is_available; then
+        grub_expect "$phase" grub:default \
+            grub_key_matches GRUB_DEFAULT '"saved"'
+        grub_expect "$phase" grub:savedefault \
+            grub_key_matches GRUB_SAVEDEFAULT '"true"'
+        grub_expect "$phase" grub:terminal \
+            grub_key_matches GRUB_TERMINAL_OUTPUT '"gfxterm"'
+        grub_expect "$phase" grub:gfxmode \
+            grub_key_matches GRUB_GFXMODE '"auto"'
+        grub_expect "$phase" grub:param-loglevel \
+            grub_kernel_param_present loglevel=5
+        grub_expect "$phase" grub:param-nowatchdog \
+            grub_kernel_param_present nowatchdog
+        grub_expect "$phase" grub:param-quiet-absent \
+            grub_kernel_param_absent quiet
+        grub_expect "$phase" grub:param-splash-absent \
+            grub_kernel_param_absent splash
+        grub_expect "$phase" grub:param-watchdog \
+            grub_watchdog_param_matches
+        grub_expect "$phase" grub:theme grub_theme_target_matches
+        grub_expect "$phase" grub:custom-menu grub_custom_matches
+    elif [ "$MODULE_RESULT" -eq "$RC_OK" ]; then
         module_skip grub-theme-assets-missing
     fi
 }
 
-grub_check() {
-    grub_is_applicable || { module_skip grub-not-installed; return; }
-    module_check_state grub:config state_grub_config_valid /boot/grub/grub.cfg
-    [ "$MODULE_RESULT" -ne "$RC_FAILED" ] || return
-    if grub_theme_is_available; then
-        module_check_state grub:theme-key \
-            grep -q '^GRUB_THEME=' /etc/default/grub
-        [ "$MODULE_RESULT" -ne "$RC_FAILED" ] || return
-    fi
-    if [ "$(findmnt -n -o FSTYPE / 2>/dev/null)" = btrfs ]; then
-        module_check_state package:grub-btrfs state_package_present grub-btrfs
-        [ "$MODULE_RESULT" -ne "$RC_FAILED" ] || return
-        module_check_state service:grub-btrfsd \
-            grub_service_enabled grub-btrfsd.service
-    fi
-    grub_mark_theme_unavailable
+grub_inspect() {
+    local phase=$1 installation_status=0
+
+    grub_installation_state || installation_status=$?
+    case "$installation_status" in
+        0) ;;
+        1) module_skip grub-not-installed; return ;;
+        *) grub_prerequisite_failed "$phase" grub-default-config-missing; return ;;
+    esac
+
+    grub_expect "$phase" grub:config state_grub_config_valid "$GRUB_CONFIG_FILE"
+    grub_expect "$phase" package:os-prober state_package_present os-prober
+    grub_expect "$phase" package:exfatprogs state_package_present exfatprogs
+    grub_expect "$phase" grub:os-prober \
+        grub_key_matches GRUB_DISABLE_OS_PROBER '"false"'
+    grub_inspect_btrfs "$phase"
+    grub_inspect_theme "$phase"
 }
+
+grub_check() { grub_inspect check; }
 
 grub_apply() {
     local status=0
+    local -a contract_env=(
+        "GRUB_DEFAULT_FILE=$GRUB_DEFAULT_FILE"
+        "GRUB_CONFIG_FILE=$GRUB_CONFIG_FILE"
+        "GRUB_CUSTOM_FILE=$GRUB_CUSTOM_FILE"
+        "GRUB_MKINITCPIO_FILE=$GRUB_MKINITCPIO_FILE"
+        "GRUB_THEME_SOURCE_ROOT=$GRUB_THEME_SOURCE_ROOT"
+        "GRUB_THEME_DEST_ROOT=$GRUB_THEME_DEST_ROOT"
+    )
 
-    grub_is_applicable || { module_skip grub-not-installed; return; }
-    bash "$SHORIN_ROOT/scripts/modules/grub/btrfs-apply.sh" || return
-    bash "$SHORIN_ROOT/scripts/modules/grub/dualboot-apply.sh" || return
-    bash "$SHORIN_ROOT/scripts/modules/grub/theme-apply.sh" || status=$?
+    grub_installation_state || status=$?
+    case "$status" in
+        0) ;;
+        1) module_skip grub-not-installed; return ;;
+        *) die "GRUB is installed but $GRUB_DEFAULT_FILE is missing." ;;
+    esac
+
+    env "${contract_env[@]}" \
+        bash "$SHORIN_ROOT/scripts/modules/grub/btrfs-apply.sh"
+    env "${contract_env[@]}" \
+        bash "$SHORIN_ROOT/scripts/modules/grub/dualboot-apply.sh"
+    status=0
+    env "${contract_env[@]}" \
+        bash "$SHORIN_ROOT/scripts/modules/grub/theme-apply.sh" || status=$?
     case "$status" in
         0|20) return 0 ;;
         *) return "$status" ;;
     esac
 }
 
-grub_verify() {
-    grub_is_applicable || { module_skip grub-not-installed; return; }
-    verify_grub /boot/grub/grub.cfg || module_verify_failed grub:config
-    if grub_theme_is_available; then
-        grep -q '^GRUB_THEME=' /etc/default/grub ||
-            module_verify_failed grub:theme-key
-    fi
-    if [ "$(findmnt -n -o FSTYPE / 2>/dev/null)" = btrfs ]; then
-        verify_package grub-btrfs || module_verify_failed package:grub-btrfs
-        verify_service grub-btrfsd.service ||
-            module_verify_failed service:grub-btrfsd
-    fi
-    grub_mark_theme_unavailable
-}
+grub_verify() { grub_inspect verify; }
 
 module_main grub "$@"

@@ -60,6 +60,155 @@ test_package_convergence() {
         'package convergence must install only once'
 }
 
+test_package_trust_recovery() {
+    local package_log="$TEST_DIR/package-trust.log"
+    PACMAN_INSTALLED=0
+    PACMAN_INSTALLS=0
+    PACMAN_RECOVERIES=0
+    PACMAN_TRUST_RECOVERY_ATTEMPTED=0
+    PACMAN_TRUST_STAMP="$TEST_DIR/pacman-trust-recovered"
+    pacman() {
+        case "$1" in
+            -Q) [ "$PACMAN_INSTALLED" -eq 1 ] ;;
+            -S)
+                if [ "${*: -1}" = archlinux-keyring ]; then
+                    PACMAN_RECOVERIES=$((PACMAN_RECOVERIES + 1))
+                    return 0
+                fi
+                PACMAN_INSTALLS=$((PACMAN_INSTALLS + 1))
+                if [ "$PACMAN_INSTALLS" -eq 1 ]; then
+                    printf '%s\n' \
+                        'error: dependency: signature from "Packager" is unknown trust' >&2
+                    return 1
+                fi
+                PACMAN_INSTALLED=1
+                ;;
+            *) return 1 ;;
+        esac
+    }
+    pacman-key() {
+        [ "$1" = --populate ] && [ "$2" = archlinux ] || return 1
+        PACMAN_RECOVERIES=$((PACMAN_RECOVERIES + 1))
+    }
+
+    ensure_package signed-example >"$package_log" 2>&1
+    assert_equal 2 "$PACMAN_INSTALLS" \
+        'signature failure must retry the original package once'
+    assert_equal 2 "$PACMAN_RECOVERIES" \
+        'signature recovery must update and populate the official keyring'
+    assert_equal 1 "$PACMAN_TRUST_RECOVERY_ATTEMPTED" \
+        'signature recovery must be bounded to one attempt'
+    assert_equal succeeded "$(< "$PACMAN_TRUST_STAMP")" \
+        'successful trust recovery must be shared across module processes'
+}
+
+test_failed_package_trust_recovery_is_not_retried() {
+    PACMAN_TRUST_RECOVERY_ATTEMPTED=0
+    PACMAN_TRUST_STAMP="$TEST_DIR/pacman-trust-failed"
+    PACMAN_RECOVERIES=0
+    pacman() {
+        case "$1" in
+            -Q) return 1 ;;
+            -S)
+                if [ "${*: -1}" = archlinux-keyring ]; then
+                    PACMAN_RECOVERIES=$((PACMAN_RECOVERIES + 1))
+                    return 1
+                fi
+                printf '%s\n' \
+                    'error: dependency: signature from "Packager" is unknown trust' >&2
+                return 1
+                ;;
+            *) return 1 ;;
+        esac
+    }
+
+    ensure_package signed-example >/dev/null 2>&1 || true
+    PACMAN_TRUST_RECOVERY_ATTEMPTED=0
+    ensure_package another-signed-example >/dev/null 2>&1 || true
+    assert_equal 1 "$PACMAN_RECOVERIES" \
+        'failed trust recovery must not repeat later in the same installer run'
+    assert_equal attempted "$(< "$PACMAN_TRUST_STAMP")" \
+        'failed recovery must retain a shared attempted marker'
+}
+
+test_package_non_trust_failure_does_not_recover() {
+    PACMAN_TRUST_RECOVERY_ATTEMPTED=0
+    PACMAN_RECOVERIES=0
+    PACMAN_TRUST_STAMP="$TEST_DIR/non-trust-recovery"
+    pacman() {
+        case "$1" in
+            -Q) return 1 ;;
+            -S) printf 'error: target not found\n' >&2; return 1 ;;
+            *) return 1 ;;
+        esac
+    }
+
+    if ensure_package missing-example >/dev/null 2>&1; then
+        printf 'FAIL: non-signature package failure must propagate\n' >&2
+        return 1
+    fi
+    assert_equal 0 "$PACMAN_RECOVERIES" \
+        'non-signature failure must not trigger trust recovery'
+}
+
+test_corrupt_signature_without_trust_error_does_not_recover() {
+    PACMAN_TRUST_RECOVERY_ATTEMPTED=0
+    PACMAN_RECOVERIES=0
+    PACMAN_TRUST_STAMP="$TEST_DIR/corrupt-signature-recovery"
+    pacman() {
+        case "$1" in
+            -Q) return 1 ;;
+            -S)
+                printf '%s\n' \
+                    'error: invalid or corrupted package (PGP signature)' >&2
+                return 1
+                ;;
+            *) return 1 ;;
+        esac
+    }
+
+    if ensure_package corrupt-example >/dev/null 2>&1; then
+        printf 'FAIL: corrupted package failure must propagate\n' >&2
+        return 1
+    fi
+    assert_equal 0 "$PACMAN_TRUST_RECOVERY_ATTEMPTED" \
+        'cache corruption alone must not consume the keyring recovery attempt'
+}
+
+test_package_retry_failure_propagates() {
+    PACMAN_INSTALLED=0
+    PACMAN_INSTALLS=0
+    PACMAN_TRUST_RECOVERY_ATTEMPTED=0
+    PACMAN_TRUST_STAMP="$TEST_DIR/retry-failure-recovery"
+    pacman() {
+        case "$1" in
+            -Q) return 1 ;;
+            -S)
+                if [ "${*: -1}" = archlinux-keyring ]; then
+                    return 0
+                fi
+                PACMAN_INSTALLS=$((PACMAN_INSTALLS + 1))
+                if [ "$PACMAN_INSTALLS" -eq 1 ]; then
+                    printf '%s\n' \
+                        'error: signature from "Packager" is unknown trust' >&2
+                else
+                    printf '%s\n' 'error: dependency conflict' >&2
+                fi
+                return 1
+                ;;
+            *) return 1 ;;
+        esac
+    }
+    pacman-key() { return 0; }
+
+    if ensure_package signed-example >/dev/null 2>&1; then
+        printf 'FAIL: a failed post-recovery retry must propagate\n' >&2
+        return 1
+    fi
+    assert_equal 2 "$PACMAN_INSTALLS" \
+        'trust recovery must retry the original package exactly once'
+}
+
 test_service_convergence() {
     SERVICE_ENABLED=0
     SERVICE_ACTIVE=0
@@ -110,6 +259,29 @@ test_fstab_unique_keys() {
         'fstab convergence must leave one target record'
 }
 
+test_fstab_target_deduplication_preserves_btrfs_subvolumes() {
+    local fstab="$TEST_DIR/fstab-duplicates"
+    printf '%s\n' \
+        'UUID=root / btrfs subvol=/@ 0 1' \
+        'UUID=root /home btrfs subvol=/@home 0 0' \
+        'UUID=old /boot vfat defaults 0 2' \
+        'UUID=root / btrfs subvol=/@ 0 1' \
+        'UUID=new /boot vfat defaults 0 2' > "$fstab"
+    findmnt() { [ "$1" = --verify ]; }
+
+    ensure_fstab_targets_unique "$fstab" / /home /boot
+    ensure_fstab_targets_unique "$fstab" / /home /boot
+
+    assert_equal 1 "$(awk '$2 == "/" { count++ } END { print count + 0 }' "$fstab")" \
+        'fstab target convergence must remove duplicate root entries'
+    assert_equal 1 "$(awk '$2 == "/boot" { count++ } END { print count + 0 }' "$fstab")" \
+        'fstab target convergence must remove duplicate EFI entries'
+    assert_equal 1 "$(awk '$2 == "/home" { count++ } END { print count + 0 }' "$fstab")" \
+        'shared Btrfs sources on distinct targets must be preserved'
+    grep -Fqx 'UUID=new /boot vfat defaults 0 2' "$fstab" ||
+        { printf 'FAIL: the last declared target entry must win\n' >&2; return 1; }
+}
+
 test_pacman_section_convergence() {
     local config="$TEST_DIR/pacman.conf"
     local body='Server = https://mirror.example/$arch'
@@ -139,8 +311,14 @@ test_script_contract() {
 
 test_atomic_text_convergence
 test_package_convergence
+test_package_trust_recovery
+test_failed_package_trust_recovery_is_not_retried
+test_package_non_trust_failure_does_not_recover
+test_corrupt_signature_without_trust_error_does_not_recover
+test_package_retry_failure_propagates
 test_service_convergence
 test_fstab_unique_keys
+test_fstab_target_deduplication_preserves_btrfs_subvolumes
 test_pacman_section_convergence
 test_script_contract
 

@@ -7,20 +7,7 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 SHORIN_ROOT=${SHORIN_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}
 source "$SCRIPT_DIR/lib/core.sh"
-
-ensure_desktop_package() {
-    local package=$1 source=$2 attempt
-
-    state_package_present "$package" && return 0
-    for attempt in 1 2 3; do
-        [ "$attempt" -eq 1 ] || sleep 3
-        if ensure_aur_package "$package" "$TARGET_USER" "$HOME_DIR"; then
-            return 0
-        fi
-        warn "Failed to install $package from $source (attempt $attempt/3)."
-    done
-    die "Failed to install $package after three attempts."
-}
+source "$SCRIPT_DIR/modules/desktop-niri/targets.sh"
 
 select_desktop_packages() {
     local list_file=$1 manifest=$2 selected_lines line raw_package
@@ -76,16 +63,10 @@ main() {
         rm -f "$manifest_tmp"
     fi
 
+    mapfile -t packages < <(niri_all_package_targets "$manifest" "$list_file")
     for entry in "${packages[@]}"; do
-        case "$entry" in
-            AUR:*) ensure_desktop_package "${entry#AUR:}" AUR ;;
-            flatpak:*) ensure_flatpak "${entry#flatpak:}" ;;
-            GitHub:*) die "Unsupported GitHub desktop entry: $entry" ;;
-            imagemagic) ensure_desktop_package imagemagick repo ;;
-            *) ensure_desktop_package "$entry" repo ;;
-        esac
+        ensure_niri_package_target "$entry"
     done
-    command -v waybar >/dev/null 2>&1 || ensure_package waybar
 }
 
 main "$@"

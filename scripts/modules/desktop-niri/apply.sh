@@ -10,6 +10,7 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 
 SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "$SCRIPT_DIR/lib/core.sh"
+source "$SCRIPT_DIR/modules/desktop-niri/targets.sh"
 
 DEBUG=${DEBUG:-0}
 CN_MIRROR=${CN_MIRROR:-0}
@@ -33,6 +34,7 @@ fi
 [ -n "$TARGET_USER" ] || read -r -p "Target user: " TARGET_USER
 HOME_DIR=$(getent passwd "$TARGET_USER" | cut -d: -f6)
 [ -n "$HOME_DIR" ] || die "Cannot resolve home for $TARGET_USER"
+desktop_niri_contract_init
 info_kv "Target" "$TARGET_USER"
 
 # DM Check
@@ -65,65 +67,53 @@ fi
 # STEP 2: Core Components
 # ==============================================================================
 section "Step 1/9" "Core Components"
-ensure_packages niri xdg-desktop-portal-gnome xdg-desktop-portal-gtk \
-  fuzzel kitty firefox libnotify polkit-gnome
+bash "$SCRIPT_DIR/modules/desktop-niri/packages-apply.sh"
 
 log "Configuring Firefox Policies..."
-POL_DIR="/etc/firefox/policies"
+POL_DIR=$(dirname "$NIRI_FIREFOX_POLICY_FILE")
 exe mkdir -p "$POL_DIR"
 POLICY_TMP=$(mktemp)
-printf '%s\n' '{ "policies": { "Extensions": { "Install": ["https://addons.mozilla.org/firefox/downloads/latest/pywalfox/latest.xpi"] } } }' > "$POLICY_TMP"
-install_if_changed "$POLICY_TMP" "$POL_DIR/policies.json" 644
+niri_firefox_policy_contract > "$POLICY_TMP"
+install_if_changed "$POLICY_TMP" "$NIRI_FIREFOX_POLICY_FILE" 644
 rm -f "$POLICY_TMP"
 exe chmod 755 "$POL_DIR"
+niri_firefox_policy_matches
 
 # ==============================================================================
 # STEP 3: File Manager
 # ==============================================================================
 section "Step 2/9" "File Manager"
-ensure_packages ffmpegthumbnailer gvfs-smb nautilus-open-any-terminal \
-  file-roller gnome-keyring gst-plugins-base gst-plugins-good gst-libav nautilus
-
-if [ ! -f /usr/bin/gnome-terminal ] || [ -L /usr/bin/gnome-terminal ]; then
-  exe ln -sf /usr/bin/kitty /usr/bin/gnome-terminal
+install -d -o "$TARGET_USER" -g "$(id -gn "$TARGET_USER")" \
+  "$(dirname "$NIRI_GNOME_TERMINAL_LINK")" \
+  "$(dirname "$NIRI_NAUTILUS_OVERRIDE_FILE")"
+if ! niri_user_terminal_link_matches; then
+  LINK_STAGE=$(mktemp -d \
+    "$(dirname "$NIRI_GNOME_TERMINAL_LINK")/.terminal-link.XXXXXX")
+  ln -s "$NIRI_GNOME_TERMINAL_TARGET" "$LINK_STAGE/gnome-terminal"
+  chown -h "$TARGET_USER:" "$LINK_STAGE/gnome-terminal"
+  mv -Tf "$LINK_STAGE/gnome-terminal" "$NIRI_GNOME_TERMINAL_LINK"
+  rmdir "$LINK_STAGE"
 fi
 
-# Nautilus Nvidia/Input Fix
-DESKTOP_FILE="/usr/share/applications/org.gnome.Nautilus.desktop"
-if [ -f "$DESKTOP_FILE" ]; then
-  GPU_COUNT=$(lspci | awk 'BEGIN { IGNORECASE=1 } /vga|3d/ { count++ } END { print count + 0 }')
-  HAS_NVIDIA=$(lspci | awk 'BEGIN { IGNORECASE=1 } /nvidia/ { count++ } END { print count + 0 }')
-  ENV_VARS="env GTK_IM_MODULE=fcitx"
-  [ "$GPU_COUNT" -gt 1 ] && [ "$HAS_NVIDIA" -gt 0 ] && ENV_VARS="env GSK_RENDERER=gl GTK_IM_MODULE=fcitx"
-
-  if ! grep -q "^Exec=$ENV_VARS" "$DESKTOP_FILE"; then
-    exe sed -i "s|^Exec=|Exec=$ENV_VARS |" "$DESKTOP_FILE"
-  fi
-fi
-
-section "Step 3/9" "Temp sudo file"
-
-SUDO_TEMP_FILE="/etc/sudoers.d/99_shorin_installer_temp"
-SUDO_TEMP_SOURCE=$(mktemp)
-printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$TARGET_USER" > "$SUDO_TEMP_SOURCE"
-install_sudoers_file "$SUDO_TEMP_SOURCE" "$SUDO_TEMP_FILE"
-rm -f "$SUDO_TEMP_SOURCE"
-cleanup_temp_sudoers() {
-  [ ! -f "$SUDO_TEMP_FILE" ] || rm -f "$SUDO_TEMP_FILE"
-}
-trap cleanup_temp_sudoers EXIT
-log "Temp sudo file created..."
+NAUTILUS_TMP=$(mktemp)
+niri_nautilus_override_contract > "$NAUTILUS_TMP"
+install_if_changed "$NAUTILUS_TMP" "$NIRI_NAUTILUS_OVERRIDE_FILE" 644
+rm -f "$NAUTILUS_TMP"
+chown "$TARGET_USER:" "$NIRI_NAUTILUS_OVERRIDE_FILE"
+niri_user_terminal_link_matches
+niri_nautilus_override_matches
 # ==============================================================================
 # STEP 5: Dependencies (RESTORED FZF)
 # ==============================================================================
 section "Step 4/9" "Dependencies"
-bash "$SCRIPT_DIR/modules/desktop-niri/packages-apply.sh"
+log "Required and selected desktop packages converged."
 
 # ==============================================================================
 # STEP 6: Dotfiles
 # ==============================================================================
 section "Step 5/9" "Dotfiles, Wallpapers, and Templates"
 bash "$SCRIPT_DIR/modules/desktop-niri/dotfiles-apply.sh"
+ensure_niri_quickshell_startup "$HOME_DIR/.config/niri/config.kdl" "$TARGET_USER"
 
 # ==============================================================================
 # STEP 8: Hardware Tools
@@ -131,7 +121,7 @@ bash "$SCRIPT_DIR/modules/desktop-niri/dotfiles-apply.sh"
 section "Step 7/9" "Hardware"
 if pacman -Q ddcutil &>/dev/null; then
   gpasswd -a "$TARGET_USER" i2c
-  lsmod | grep -q i2c_dev || ensure_line /etc/modules-load.d/i2c-dev.conf i2c-dev
+  ensure_line /etc/modules-load.d/i2c-dev.conf i2c-dev
 fi
 if pacman -Q swayosd &>/dev/null; then
   ensure_service_started swayosd-libinput-backend.service
@@ -142,7 +132,6 @@ success "Tools configured."
 # STEP 9: Cleanup & Auto-Login
 # ==============================================================================
 section "Final" "Cleanup & Boot"
-rm -f "$SUDO_TEMP_FILE"
 
 SVC_DIR="$HOME_DIR/.config/systemd/user"
 SVC_FILE="$SVC_DIR/niri-autostart.service"
@@ -174,7 +163,7 @@ WantedBy=default.target
 EOT
   install_if_changed "$SVC_TMP" "$SVC_FILE" 644
   rm -f "$SVC_TMP"
-  chown "$TARGET_USER:$TARGET_USER" "$SVC_FILE"
+  chown "$TARGET_USER:" "$SVC_FILE"
   ensure_user_unit_enabled "$TARGET_USER" niri-autostart.service default.target
   success "Enabled."
 fi

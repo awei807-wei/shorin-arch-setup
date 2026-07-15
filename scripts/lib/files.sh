@@ -227,6 +227,42 @@ ensure_fstab_entry() {
     rm -f "$tmp"
 }
 
+ensure_fstab_targets_unique() {
+    require_writable_mode || return
+    local fstab_file=$1 target_list tmp
+    shift
+
+    state_fstab_targets_unique "$fstab_file" "$@" && return 0
+    target_list=$(IFS=,; printf '%s' "$*")
+    tmp=$(mktemp "${fstab_file}.XXXXXX")
+    awk -v targets="$target_list" '
+        BEGIN {
+            count=split(targets, values, ",")
+            for (i=1; i<=count; i++) wanted[values[i]]=1
+        }
+        {
+            lines[NR]=$0
+            if ($0 !~ /^[[:space:]]*#/ && NF > 0 && $2 in wanted) {
+                target_at[NR]=$2
+                last[$2]=NR
+            }
+        }
+        END {
+            for (i=1; i<=NR; i++) {
+                target=target_at[i]
+                if (target == "" || i == last[target]) print lines[i]
+            }
+        }
+    ' "$fstab_file" > "$tmp"
+    if ! findmnt --verify --tab-file "$tmp" ||
+        ! install_if_changed "$tmp" "$fstab_file" 644; then
+        rm -f "$tmp"
+        return 1
+    fi
+    rm -f "$tmp"
+    state_fstab_targets_unique "$fstab_file" "$@"
+}
+
 # Compatibility query name used by existing modules.
 verify_file() {
     file_is_nonempty "$1"

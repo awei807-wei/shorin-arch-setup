@@ -48,7 +48,7 @@ sudo bash install.sh install --user shorin
 
 ### `repair`
 
-先完成所选模块的只读审计，再只对存在差异的模块执行 `apply` 和 `verify`。必需模块在审计阶段发生检查错误时，不继续修复。
+按依赖顺序对每个所选模块执行 `check`，只对存在差异的模块执行 `apply` 和 `verify`，再继续下游模块。这样上游修复后才出现的下游目标能在同一次运行中被重新判断并收敛；必需模块发生检查或应用错误时立即停止。
 
 ```bash
 sudo bash install.sh repair --user shorin
@@ -94,7 +94,7 @@ sudo bash install.sh install \
 当前 profile 文件包括：
 
 - `applications.list`：通用应用目标，保留 Repo、`AUR:`、`flatpak:`、`GitHub:` 来源信息。
-- `niri-packages.list`：Niri 附加包目标。
+- `niri-packages.list`：Niri 附加包目标。必需桌面目标由安装器维护，旧清单不能屏蔽新增的必需组件。
 
 首次交互安装会把最终选择原子写入 profile。后续 `repair`、`audit` 和 `verify` 读取同一声明，避免把“用户没有选择”误判为“安装失败”。自定义 profile 路径必须在后续运行中保持一致。
 
@@ -140,9 +140,11 @@ bash install.sh verify --user shorin grub
 | `virtualization` | 可选 | `applications` | QEMU/KVM、libvirt、用户组和默认网络 |
 | `nas-rime` | 可选 | `base` | NFS、Rime 同步和用户定时器 |
 | `vcp` | 可选 | `applications` | VCPChat 桌面入口和 NAS 备份定时器 |
-| `grub` | 可选 | `storage base` | GRUB、双启动、Btrfs 集成、主题及配置验收 |
+| `grub` | 动态 | `storage base` | 未安装时可跳过；检测到 GRUB 后升级为必需项，负责双启动、Btrfs 集成、主题及配置验收 |
 
 不适用或缺少外部前置的可选模块会被明确标记为跳过。例如 VCPChat 尚未部署时，`vcp` 不会冒充成功，整体结果为 `PARTIAL`。
+
+`desktop-niri` 的必需目标包含 QuickShell、Qt Wayland、主题生成、锁屏/空闲管理及桌面核心依赖。模块会把必需集合与 `niri-packages.list` 中的用户选择合并，并确保 Niri 配置中只有一个有效的 QuickShell 启动命令；已有带参数的 `spawn-sh-at-startup` 命令会被保留。旧 profile 中的 Waybar 及其两个扩展会被视为已由 QuickShell 取代，不再触发安装或修复，也不会主动卸载机器上已有的软件。
 
 ## 模块契约
 
@@ -153,6 +155,8 @@ bash install.sh verify --user shorin grub
 - `<name>_verify`：只读权威验收，记录未通过的具体目标。
 
 模块通过 `module_main <name> "$@"` 接入统一 runner。`check` 和 `verify` 在独立只读子进程中运行；`apply` 在可写子进程中运行。包、文件、systemd 和结构化配置分别由 `scripts/lib/` 下的公共原语处理。
+
+pacman 安装若明确返回未知或缺失密钥的 PGP 信任错误，包管理原语会在整次运行中至多执行一次官方 `archlinux-keyring` 更新和 `pacman-key --populate archlinux`，然后重试原包。单纯的缓存损坏、网络错误、包不存在和依赖冲突不会触发该恢复；安装器不会关闭签名验证、使用 `TrustAll` 或在单包修复中隐式执行整机升级。
 
 ## 目录结构
 
@@ -182,14 +186,14 @@ scripts/
     preflight.sh                 # 环境、权限、锁和目标用户预检
     audit.sh                     # 只读审计编排
     niri-rollback.sh             # 独立人工回滚工具，不参与正常收敛
-tests/                           # 严格模式、幂等、runner 与入口边界测试
+tests/                           # 原语、runner、入口及真实模块合同测试
 ```
 
 `install.sh` 不直接调用 `pacman`、`systemctl` 或文件修改命令，也不包含应用或桌面的专属实现。
 
 ## 最终状态与退出码
 
-每次运行结束都会重新验收所选模块，并输出以下之一：
+每次运行结束都会重新验收所选模块，并额外执行 `findmnt --verify` 全局门禁，再输出以下之一。最终验收会叠加当前状态，但不会清除先前 `check` 或 `apply` 已记录的失败与跳过证据：
 
 | 输出 | 退出码 | 含义 |
 | --- | ---: | --- |
@@ -218,6 +222,6 @@ tests/                           # 严格模式、幂等、runner 与入口边�
 
 ## 重跑与外部条件
 
-软件包、服务、配置文件、用户单元、`fstab` 和 GRUB 都以当前状态为判断依据。安装器管理的系统配置经校验后原子替换；用户可编辑的 dotfiles、Firefox 配置、壁纸和模板默认只在首次创建，重跑不会无条件覆盖。
+软件包、服务、配置文件、用户单元、`fstab` 和 GRUB 都以当前状态为判断依据。Storage 会按挂载目标清理旧版本遗留的重复根分区、Home、EFI、包缓存和日志条目，同时保留同一 Btrfs 文件系统上的不同子卷；写回前必须通过 `findmnt --verify`。安装器管理的系统配置经校验后原子替换；用户可编辑的 dotfiles、Firefox 用户配置、壁纸、模板和 XDG 目录配置默认只在首次创建，重跑不会无条件覆盖。
 
 用户级 systemd 单元在存在用户 bus 时立即 reload/start；没有 bus 时只建立 wants 链接并记录待登录状态。NAS、VCPChat 或其他外部前置不可用时，对应可选模块会进入跳过或失败状态，并反映到最终 `PARTIAL` 结果中。

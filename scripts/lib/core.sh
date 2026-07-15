@@ -65,13 +65,17 @@ acquire_run_lock() {
     command -v flock >/dev/null || die 'flock is required.'
     exec {SHORIN_LOCK_FD}>"$lock_file"
     flock -n "$SHORIN_LOCK_FD" || die 'Another Shorin setup process is running.'
+    trap release_run_lock EXIT
 }
 
 release_run_lock() {
     if [ -n "${SHORIN_LOCK_FD:-}" ]; then
         flock -u "$SHORIN_LOCK_FD" || true
         exec {SHORIN_LOCK_FD}>&-
+        unset SHORIN_LOCK_FD
     fi
+    [ -z "${SHORIN_RUN_TOKEN:-}" ] ||
+        rm -f "/run/lock/shorin-pacman-trust-$SHORIN_RUN_TOKEN"
 }
 
 source "$SHORIN_LIB_DIR/state.sh"

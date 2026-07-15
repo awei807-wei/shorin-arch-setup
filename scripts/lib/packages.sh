@@ -29,12 +29,75 @@ flatpak_is_installed() {
     flatpak info --system "$app" >/dev/null 2>&1
 }
 
+PACMAN_TRUST_RECOVERY_ATTEMPTED=${PACMAN_TRUST_RECOVERY_ATTEMPTED:-0}
+PACMAN_TRUST_STAMP=${PACMAN_TRUST_STAMP:-/run/lock/shorin-pacman-trust-${SHORIN_RUN_TOKEN:-$$}}
+
+pacman_log_has_trust_error() {
+    local log_file=$1
+
+    grep -Eqi '(signature from .* is (unknown|marginal) trust|required key missing from keyring)' \
+        "$log_file"
+}
+
+recover_pacman_trust() {
+    local recovery_state
+
+    require_writable_mode || return
+
+    if [ -f "$PACMAN_TRUST_STAMP" ]; then
+        recovery_state=$(< "$PACMAN_TRUST_STAMP")
+        [ "$recovery_state" = succeeded ]
+        return
+    fi
+    if [ "$PACMAN_TRUST_RECOVERY_ATTEMPTED" -eq 1 ]; then
+        printf 'ERROR: pacman trust recovery was already attempted in this module\n' >&2
+        return 1
+    fi
+    PACMAN_TRUST_RECOVERY_ATTEMPTED=1
+    install -D -m 600 /dev/null "$PACMAN_TRUST_STAMP"
+    printf 'attempted\n' > "$PACMAN_TRUST_STAMP"
+
+    printf 'WARNING: pacman signature trust failure detected; updating the official Arch keyring before one retry\n' >&2
+    # Use the already synchronized database. Refreshing it here would require
+    # an unrelated full system upgrade to avoid a partial-upgrade state.
+    pacman -S --noconfirm --needed archlinux-keyring || return
+    pacman-key --populate archlinux || return
+    printf 'succeeded\n' > "$PACMAN_TRUST_STAMP"
+}
+
+run_with_pacman_trust_recovery() {
+    local label=$1 log_file status=0
+    shift
+
+    log_file=$(mktemp)
+    if "$@" >"$log_file" 2>&1; then
+        cat "$log_file"
+        rm -f "$log_file"
+        return 0
+    else
+        status=$?
+    fi
+    cat "$log_file" >&2
+    if ! pacman_log_has_trust_error "$log_file"; then
+        rm -f "$log_file"
+        return "$status"
+    fi
+    rm -f "$log_file"
+
+    recover_pacman_trust || {
+        printf 'ERROR: pacman trust recovery failed while installing %s\n' "$label" >&2
+        return 1
+    }
+    "$@"
+}
+
 ensure_package() {
     require_writable_mode || return
     local package=$1
 
     package_is_installed "$package" ||
-        pacman -S --noconfirm --needed "$package"
+        run_with_pacman_trust_recovery "$package" \
+            pacman -S --noconfirm --needed "$package"
     package_is_installed "$package"
 }
 
@@ -67,9 +130,10 @@ ensure_aur_package() {
     fi
 
     package_is_installed "$package" ||
-        runuser -u "$user" -- env HOME="$home" \
-            yay -S --noconfirm --needed \
-            --answerdiff=None --answerclean=None "$package"
+        run_with_pacman_trust_recovery "$package" \
+            runuser -u "$user" -- env HOME="$home" \
+                yay -S --noconfirm --needed \
+                --answerdiff=None --answerclean=None "$package"
     package_is_installed "$package"
 }
 

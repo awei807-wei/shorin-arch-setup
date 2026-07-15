@@ -6,6 +6,7 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 
 SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "$SCRIPT_DIR/lib/core.sh"
+source "$SCRIPT_DIR/modules/desktop-niri/targets.sh"
 
 deploy_dotfiles() {
     local checkout=$1 source_file temporary
@@ -53,10 +54,12 @@ configure_desktop_theme() {
     fi
 
     temporary=$(mktemp)
-    printf '[preferred]\ndefault=gtk\n' > "$temporary"
+    niri_portal_config_contract > "$temporary"
     install_if_changed "$temporary" "$portal_dir/portals.conf" 644
     rm -f "$temporary"
-    chown -R "$TARGET_USER:$TARGET_USER" "$portal_dir"
+    chown -R "$TARGET_USER:" "$portal_dir"
+    niri_portal_config_matches
+    niri_gtk_links_match
 }
 
 deploy_wallpapers_and_templates() {
@@ -66,7 +69,8 @@ deploy_wallpapers_and_templates() {
         deploy_user_tree_once "$checkout/wallpapers" \
             "$HOME_DIR/Pictures/Wallpapers" "$TARGET_USER"
     fi
-    install -d -o "$TARGET_USER" -g "$TARGET_USER" "$HOME_DIR/Templates"
+    install -d -o "$TARGET_USER" -g "$(id -gn "$TARGET_USER")" \
+        "$HOME_DIR/Templates"
     as_user touch "$HOME_DIR/Templates/new"
     temporary=$(mktemp)
     printf '#!/usr/bin/env bash\n' > "$temporary"
@@ -80,6 +84,7 @@ main() {
     local gitee=https://gitee.com/shorinkiwata/ShorinArchExperience-ArchlinuxGuide.git
     local checkout=/tmp/shorin-repo
 
+    desktop_niri_contract_init
     if ! ensure_git_checkout "$TARGET_USER" "$github" main "$checkout"; then
         [ ! -e "$checkout" ] ||
             die "Refusing to replace an unverified dotfiles checkout: $checkout"

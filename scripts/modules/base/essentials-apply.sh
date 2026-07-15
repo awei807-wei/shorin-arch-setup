@@ -10,6 +10,7 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 
 SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "$SCRIPT_DIR/lib/core.sh"
+source "$SCRIPT_DIR/modules/base/targets.sh"
 
 check_root
 
@@ -68,16 +69,9 @@ section "Step 4/7" "Bluetooth"
 log "Detecting Bluetooth hardware..."
 ensure_packages usbutils pciutils
 
-BT_FOUND=false
-
-# 1. Check USB
-if lsusb | grep -qi "bluetooth"; then BT_FOUND=true; fi
-# 2. Check PCI
-if lspci | grep -qi "bluetooth"; then BT_FOUND=true; fi
-# 3. Check RFKill
-if rfkill list bluetooth >/dev/null 2>&1; then BT_FOUND=true; fi
-
-if [ "$BT_FOUND" = true ]; then
+BLUETOOTH_STATUS=0
+base_bluetooth_present || BLUETOOTH_STATUS=$?
+if [ "$BLUETOOTH_STATUS" -eq 0 ]; then
     info_kv "Hardware" "Detected"
 
     log "Installing Bluez "
@@ -85,9 +79,11 @@ if [ "$BT_FOUND" = true ]; then
 
     ensure_service_started bluetooth.service
     success "Bluetooth service enabled."
-else
+elif [ "$BLUETOOTH_STATUS" -eq 1 ]; then
     info_kv "Hardware" "Not Found"
     warn "No Bluetooth device detected. Skipping installation."
+else
+    die 'Unable to inspect Bluetooth hardware.'
 fi
 
 # ------------------------------------------------------------------------------
@@ -114,7 +110,14 @@ log "Module 02 completed."
 # ------------------------------------------------------------------------------
 
 ensure_package flatpak
-exe flatpak remote-add --system --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+if flatpak remotes --system --columns=name 2>/dev/null | grep -Fqx flathub; then
+    base_flathub_system_remote_present ||
+        exe flatpak remote-modify --system --url="$FLATHUB_REPO_URL" flathub
+else
+    exe flatpak remote-add --system flathub \
+        https://dl.flathub.org/repo/flathub.flatpakrepo
+fi
+base_flathub_system_remote_present
 
 CURRENT_TZ=$(readlink -f /etc/localtime)
 IS_CN_ENV=false

@@ -5,6 +5,7 @@ trap 'printf "ERROR: %s:%s: %s\n" \
   "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 SHORIN_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+export SHORIN_RUN_TOKEN=${SHORIN_RUN_TOKEN:-$$}
 source "$SHORIN_ROOT/scripts/lib/core.sh"
 source "$SHORIN_ROOT/scripts/checks/preflight.sh"
 source "$SHORIN_ROOT/scripts/checks/audit.sh"
@@ -28,7 +29,7 @@ declare -A DEFAULT_POLICY=(
     [virtualization]=optional
     [nas-rime]=optional
     [vcp]=optional
-    [grub]=optional
+    [grub]=$(command -v grub-mkconfig >/dev/null 2>&1 && printf required || printf optional)
 )
 
 declare -A MODULE_DEPENDS=(

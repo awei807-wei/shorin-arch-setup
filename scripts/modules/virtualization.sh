@@ -6,10 +6,9 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 
 SHORIN_ROOT=${SHORIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 source "$SHORIN_ROOT/scripts/lib/verify.sh"
+source "$SHORIN_ROOT/scripts/modules/virtualization/contract.sh"
 
 APPLICATION_MANIFEST=${APPLICATION_MANIFEST:-${SHORIN_PROFILE_DIR:-/etc/shorin-arch-setup}/applications.list}
-VIRTUALIZATION_PACKAGES=(qemu-full virt-manager swtpm dnsmasq)
-VIRTUALIZATION_GROUPS=(libvirt kvm input)
 
 virtualization_manifest_declares_target() {
     [ -s "$APPLICATION_MANIFEST" ] || return 1
@@ -25,17 +24,7 @@ virtualization_manifest_declares_target() {
 }
 
 virtualization_is_targeted() {
-    state_package_present virt-manager ||
-        virtualization_manifest_declares_target
-}
-
-virtualization_default_network_ready() {
-    command -v virsh >/dev/null 2>&1 || return 1
-    virsh net-info default 2>/dev/null | awk -F: '
-        /^Active:/ { gsub(/[[:space:]]/, "", $2); active=($2 == "yes") }
-        /^Autostart:/ { gsub(/[[:space:]]/, "", $2); autostart=($2 == "yes") }
-        END { exit(active && autostart ? 0 : 1) }
-    '
+    virtualization_manifest_declares_target
 }
 
 virtualization_service_enabled() {
@@ -70,20 +59,25 @@ virtualization_check() {
     fi
     for package in "${VIRTUALIZATION_PACKAGES[@]}"; do
         module_check_state "package:$package" state_package_present "$package"
-        [ "$MODULE_RESULT" -ne "$RC_FAILED" ] || return
+        [ "$MODULE_RESULT" -ne "$RC_FAILED" ] || return 0
     done
+    [ "$MODULE_RESULT" -eq "$RC_OK" ] || return 0
     module_check_state service:libvirtd \
         virtualization_service_enabled libvirtd.service
-    [ "$MODULE_RESULT" -ne "$RC_FAILED" ] || return
+    [ "$MODULE_RESULT" -ne "$RC_FAILED" ] || return 0
     module_check_state service:libvirtd-active \
         virtualization_service_active libvirtd.service
-    [ "$MODULE_RESULT" -ne "$RC_FAILED" ] || return
+    [ "$MODULE_RESULT" -ne "$RC_FAILED" ] || return 0
     for group in "${VIRTUALIZATION_GROUPS[@]}"; do
         module_check_state "group:$TARGET_USER:$group" \
             state_user_in_group "$TARGET_USER" "$group"
-        [ "$MODULE_RESULT" -ne "$RC_FAILED" ] || return
+        [ "$MODULE_RESULT" -ne "$RC_FAILED" ] || return 0
     done
     module_check_state network:default virtualization_default_network_ready
+    module_check_state gsettings:uris virtualization_gsettings_matches \
+        "$TARGET_USER" "$HOME_DIR" uris "['qemu:///system']"
+    module_check_state gsettings:autoconnect virtualization_gsettings_matches \
+        "$TARGET_USER" "$HOME_DIR" autoconnect "['qemu:///system']"
 }
 
 virtualization_apply() {
@@ -110,6 +104,12 @@ virtualization_verify() {
     done
     virtualization_default_network_ready ||
         module_verify_failed network:default
+    virtualization_gsettings_matches "$TARGET_USER" "$HOME_DIR" \
+        uris "['qemu:///system']" ||
+        module_verify_failed gsettings:uris
+    virtualization_gsettings_matches "$TARGET_USER" "$HOME_DIR" \
+        autoconnect "['qemu:///system']" ||
+        module_verify_failed gsettings:autoconnect
 }
 
 module_main virtualization "$@"

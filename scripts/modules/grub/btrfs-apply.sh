@@ -6,31 +6,38 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 
 SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "$SCRIPT_DIR/lib/core.sh"
+source "$SCRIPT_DIR/modules/grub/contract.sh"
 
 check_root
+grub_contract_init
 
-[ "$(findmnt -n -o FSTYPE / 2>/dev/null)" = btrfs ] || exit 0
-[ -f /etc/default/grub ] || exit 0
+grub_root_is_btrfs || exit 0
+[ -f "$GRUB_DEFAULT_FILE" ] || die "Missing GRUB defaults: $GRUB_DEFAULT_FILE"
 command -v grub-mkconfig >/dev/null 2>&1 || exit 0
 
 ensure_packages grub-btrfs inotify-tools
 ensure_service_started grub-btrfsd.service
 
-if ! grep -Fqw grub-btrfs-overlayfs /etc/mkinitcpio.conf; then
+if ! grub_overlay_hook_present; then
     tmp=$(mktemp)
     awk '
         /^HOOKS=/ && $0 !~ /grub-btrfs-overlayfs/ {
             sub(/\)$/, " grub-btrfs-overlayfs)")
         }
         { print }
-    ' /etc/mkinitcpio.conf > "$tmp"
-    install_if_changed "$tmp" /etc/mkinitcpio.conf 644
+    ' "$GRUB_MKINITCPIO_FILE" > "$tmp"
+    grep -Fqw grub-btrfs-overlayfs "$tmp" || {
+        rm -f "$tmp"
+        die "Unable to add grub-btrfs-overlayfs to $GRUB_MKINITCPIO_FILE"
+    }
+    install_if_changed "$tmp" "$GRUB_MKINITCPIO_FILE" 644
     rm -f "$tmp"
     mkinitcpio -P
 fi
+grub_overlay_hook_present
 
-tmp=$(mktemp /boot/grub/grub.cfg.XXXXXX)
+tmp=$(mktemp "${GRUB_CONFIG_FILE}.XXXXXX")
 grub-mkconfig -o "$tmp"
 grub-script-check "$tmp"
-install_if_changed "$tmp" /boot/grub/grub.cfg 600
+install_if_changed "$tmp" "$GRUB_CONFIG_FILE" 600
 rm -f "$tmp"

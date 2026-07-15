@@ -45,13 +45,16 @@ ensure_service_started() {
 
 user_unit_is_enabled() {
     local user=$1 unit=$2 target=${3:-default.target}
-    local home=${4:-}
+    local home=${4:-} unit_file link
 
     if [ -z "$home" ]; then
         home=$(getent passwd "$user" | cut -d: -f6)
     fi
-    [ -n "$home" ] &&
-        [ -L "$home/.config/systemd/user/${target}.wants/$unit" ]
+    [ -n "$home" ] || return 1
+    unit_file="$home/.config/systemd/user/$unit"
+    link="$home/.config/systemd/user/${target}.wants/$unit"
+    [ -s "$unit_file" ] && [ -L "$link" ] &&
+        [ "$(readlink "$link")" = "../$unit" ]
 }
 
 user_unit_bus_is_available() {
@@ -66,7 +69,7 @@ ensure_user_unit_enabled() {
     require_writable_mode || return
     local user=$1 unit=$2 target=${3:-default.target}
     local home=${4:-}
-    local uid unit_dir wants_dir runtime_dir
+    local uid group unit_dir wants_dir runtime_dir
 
     if [ -z "$home" ]; then
         home=$(getent passwd "$user" | cut -d: -f6)
@@ -74,11 +77,12 @@ ensure_user_unit_enabled() {
     [ -n "$home" ] || return 1
 
     uid=$(id -u "$user")
+    group=$(id -gn "$user")
     unit_dir="$home/.config/systemd/user"
     wants_dir="$unit_dir/${target}.wants"
     runtime_dir="/run/user/$uid"
 
-    install -d -o "$user" -g "$user" "$wants_dir"
+    install -d -o "$user" -g "$group" "$wants_dir"
     runuser -u "$user" -- ln -sfn "../$unit" "$wants_dir/$unit"
 
     if [ -S "$runtime_dir/bus" ]; then

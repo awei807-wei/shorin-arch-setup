@@ -11,8 +11,10 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 PARENT_DIR="${SHORIN_ROOT_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 source "$SCRIPT_DIR/lib/core.sh"
+source "$SCRIPT_DIR/modules/grub/contract.sh"
 
 check_root
+grub_contract_init
 
 # ------------------------------------------------------------------------------
 # 0. Pre-check: Is GRUB installed?
@@ -23,6 +25,11 @@ if ! command -v grub-mkconfig >/dev/null 2>&1; then
     log "Skipping GRUB theme installation."
     exit 20
 fi
+[ -f "$GRUB_DEFAULT_FILE" ] || die "Missing GRUB defaults: $GRUB_DEFAULT_FILE"
+if ! grub_theme_is_available; then
+    warn "No GRUB theme assets are available in $GRUB_THEME_SOURCE_ROOT."
+    exit 20
+fi
 
 section "Phase 7" "GRUB Customization & Theming"
 
@@ -31,14 +38,14 @@ section "Phase 7" "GRUB Customization & Theming"
 set_grub_value() {
     local key="$1"
     local value="$2"
-    local conf_file="/etc/default/grub"
+    local conf_file="$GRUB_DEFAULT_FILE"
     ensure_key_value "$conf_file" "$key" "\"$value\""
 }
 
 manage_kernel_param() {
     local action="$1"
     local param="$2"
-    local conf_file="/etc/default/grub"
+    local conf_file="$GRUB_DEFAULT_FILE"
     local line
     line=$(grep "^GRUB_CMDLINE_LINUX_DEFAULT=" "$conf_file" || true)
     local params
@@ -86,8 +93,8 @@ success "Kernel parameters updated."
 section "Step 2/5" "Theme Detection"
 log "Scanning for themes in 'grub-themes' folder..."
 
-SOURCE_BASE="$PARENT_DIR/grub-themes"
-DEST_DIR="/boot/grub/themes"
+SOURCE_BASE="$GRUB_THEME_SOURCE_ROOT"
+DEST_DIR="$GRUB_THEME_DEST_ROOT"
 
 if [ ! -d "$SOURCE_BASE" ]; then
     warn "Directory 'grub-themes' not found in repo."
@@ -117,7 +124,7 @@ section "Step 3/5" "Theme Selection"
 
 if [ "${SHORIN_MODE:-install}" != install ]; then
     CURRENT_THEME=$(awk -F= '$1 == "GRUB_THEME" { gsub(/"/, "", $2); print $2 }' \
-        /etc/default/grub | tail -n 1)
+        "$GRUB_DEFAULT_FILE" | tail -n 1)
     CURRENT_THEME_DIR=$(basename "$(dirname "${CURRENT_THEME:-/nonexistent/theme.txt}")")
     SELECTED_INDEX=0
     for i in "${!THEME_NAMES[@]}"; do
@@ -191,15 +198,29 @@ info_kv "Selected" "$THEME_NAME"
 section "Step 4/5" "Theme Installation"
 
 mkdir -p "$DEST_DIR"
-THEME_HASH=$(find "$THEME_SOURCE" -type f -print0 | sort -z | \
-    xargs -0 sha256sum | sha256sum | cut -c1-12)
+THEME_HASH=$(grub_theme_hash "$THEME_SOURCE")
 THEME_INSTALL_NAME="${THEME_NAME}-${THEME_HASH}"
 THEME_STAGED=$(mktemp -d "$DEST_DIR/.${THEME_NAME}.XXXXXX")
 cp -a "$THEME_SOURCE/." "$THEME_STAGED/"
-if [ ! -d "$DEST_DIR/$THEME_INSTALL_NAME" ]; then
-    mv "$THEME_STAGED" "$DEST_DIR/$THEME_INSTALL_NAME"
+if [ "$(grub_theme_hash "$THEME_STAGED")" != "$THEME_HASH" ]; then
+    find "$THEME_STAGED" -depth -delete
+    die 'Staged GRUB theme failed content verification.'
+fi
+THEME_TARGET="$DEST_DIR/$THEME_INSTALL_NAME"
+if [ -d "$THEME_TARGET" ] &&
+    [ "$(grub_theme_hash "$THEME_TARGET")" = "$THEME_HASH" ]; then
+    find "$THEME_STAGED" -depth -delete
 else
-    rm -rf "$THEME_STAGED"
+    THEME_OLD="$DEST_DIR/.${THEME_INSTALL_NAME}.old.$$"
+    [ ! -e "$THEME_OLD" ] || find "$THEME_OLD" -depth -delete
+    if [ -e "$THEME_TARGET" ]; then
+        mv "$THEME_TARGET" "$THEME_OLD"
+    fi
+    if ! mv "$THEME_STAGED" "$THEME_TARGET"; then
+        [ ! -e "$THEME_OLD" ] || mv "$THEME_OLD" "$THEME_TARGET"
+        die 'Failed to activate the staged GRUB theme.'
+    fi
+    [ ! -e "$THEME_OLD" ] || find "$THEME_OLD" -depth -delete
 fi
 
 if [ -f "$DEST_DIR/$THEME_INSTALL_NAME/theme.txt" ]; then
@@ -209,7 +230,7 @@ else
     exit 1
 fi
 
-GRUB_CONF="/etc/default/grub"
+GRUB_CONF="$GRUB_DEFAULT_FILE"
 THEME_PATH="$DEST_DIR/$THEME_INSTALL_NAME/theme.txt"
 
 if [ -f "$GRUB_CONF" ]; then
@@ -229,14 +250,11 @@ section "Step 5/5" "Menu Entries & Apply"
 log "Adding Power Options to GRUB menu..."
 
 CUSTOM_TMP=$(mktemp)
-cat > "$CUSTOM_TMP" <<'EOF'
-#!/bin/sh
-exec tail -n +3 $0
-menuentry "Reboot" { reboot }
-menuentry "Shutdown" { halt }
-EOF
-install_if_changed "$CUSTOM_TMP" /etc/grub.d/99_custom 755
+grub_custom_contract > "$CUSTOM_TMP"
+install_if_changed "$CUSTOM_TMP" "$GRUB_CUSTOM_FILE" 755
 rm -f "$CUSTOM_TMP"
+grub_custom_matches
+grub_theme_target_matches
 
 # 赋予执行权限
 success "Added grub menuentry 99-shutdown"
@@ -245,9 +263,9 @@ success "Added grub menuentry 99-shutdown"
 # ------------------------------------------------------------------------------
 log "Generating new GRUB configuration..."
 
-GRUB_TMP=$(mktemp /boot/grub/grub.cfg.XXXXXX)
+GRUB_TMP=$(mktemp "${GRUB_CONFIG_FILE}.XXXXXX")
 if grub-mkconfig -o "$GRUB_TMP" && grub-script-check "$GRUB_TMP"; then
-    install_if_changed "$GRUB_TMP" /boot/grub/grub.cfg 600
+    install_if_changed "$GRUB_TMP" "$GRUB_CONFIG_FILE" 600
     rm -f "$GRUB_TMP"
     success "GRUB updated successfully."
 else

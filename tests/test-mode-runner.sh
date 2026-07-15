@@ -62,6 +62,13 @@ ${prefix}_check() {
     ${prefix}_record check
     case '$behavior' in
         skip) module_skip 'fixture-not-applicable' ;;
+        dependent)
+            if [ ! -f "\$FIXTURE_STATE_DIR/fixture-drift" ]; then
+                module_skip 'fixture-dependency-not-ready'
+            elif [ ! -f "\$FIXTURE_STATE_DIR/$module" ]; then
+                module_drift 'fixture-state'
+            fi
+            ;;
         fail) module_inspection_failed 'fixture-inspection-failed' ;;
         *)
             if [ ! -f "\$FIXTURE_STATE_DIR/$module" ] ||
@@ -109,6 +116,8 @@ source "$ROOT_DIR/scripts/lib/files.sh"
 source "$ROOT_DIR/scripts/lib/packages.sh"
 source "$ROOT_DIR/scripts/lib/systemd.sh"
 
+findmnt() { [ "$1" = --verify ]; }
+
 MODULES_PATH=$FIXTURE_DIR
 export MODULES_PATH FIXTURE_LOG FIXTURE_STATE_DIR
 
@@ -121,6 +130,7 @@ create_fixture_module fixture-apply-skip apply-skip
 create_fixture_module fixture-apply-fail apply-fail
 create_fixture_module fixture-apply-fail-converged apply-fail-converged
 create_fixture_module fixture-after after
+create_fixture_module fixture-dependent dependent
 
 test_repair_applies_only_drift() {
     reset_run_state
@@ -144,6 +154,42 @@ test_repair_applies_only_drift() {
         'repair must verify a repaired module once'
     assert_equal desired "$(< "$FIXTURE_STATE_DIR/fixture-drift")" \
         'repair must converge fixture state'
+}
+
+test_repair_rechecks_downstream_after_dependency_converges() {
+    reset_run_state
+    : > "$FIXTURE_LOG"
+    rm -f "$FIXTURE_STATE_DIR/fixture-drift" \
+        "$FIXTURE_STATE_DIR/fixture-dependent"
+    register_module_policy fixture-drift required
+    register_module_policy fixture-dependent optional
+
+    run_modules repair fixture-drift fixture-dependent
+
+    assert_equal 1 "$(call_count fixture-drift:apply)" \
+        'repair must converge the upstream dependency first'
+    assert_equal 1 "$(call_count fixture-dependent:check)" \
+        'repair must inspect downstream state after the dependency converges'
+    assert_equal 1 "$(call_count fixture-dependent:apply)" \
+        'repair must apply downstream drift exposed by the repaired dependency'
+}
+
+test_final_verification_rejects_invalid_fstab() {
+    reset_run_state
+    : > "$FIXTURE_LOG"
+    register_module_policy fixture-clean required
+    printf 'desired\n' > "$FIXTURE_STATE_DIR/fixture-clean"
+    FSTAB_FILE="$TEST_DIR/invalid-fstab"
+    printf 'invalid\n' > "$FSTAB_FILE"
+    findmnt() { return 1; }
+
+    if run_final_verification fixture-clean; then
+        fail 'final verification must reject an invalid fstab'
+    fi
+    assert_array_contains REQUIRED_FAILURES global:verify:fstab-invalid
+
+    findmnt() { [ "$1" = --verify ]; }
+    unset FSTAB_FILE
 }
 
 test_audit_never_applies() {
@@ -265,7 +311,7 @@ test_final_verification_reruns_without_duplicate_failures() {
         'repeated verification must not duplicate the same failure'
 }
 
-test_final_status_uses_verified_state() {
+test_final_status_preserves_required_apply_failure() {
     reset_run_state
     : > "$FIXTURE_LOG"
     rm -f "$FIXTURE_STATE_DIR/fixture-apply-fail-converged"
@@ -277,12 +323,32 @@ test_final_status_uses_verified_state() {
     assert_equal 1 "${#REQUIRED_FAILURES[@]}" \
         'the process failure must be visible before final verification'
 
+    if run_final_verification fixture-apply-fail-converged; then
+        fail 'final verification must preserve a required apply failure'
+    fi
+    derive_final_status
+    assert_equal FAILED "$FINAL_STATUS" \
+        'a required apply failure must keep the final status failed'
+    assert_equal 1 "${#REQUIRED_FAILURES[@]}" \
+        'final verification must retain the required apply failure once'
+}
+
+test_final_status_preserves_optional_apply_failure() {
+    reset_run_state
+    : > "$FIXTURE_LOG"
+    rm -f "$FIXTURE_STATE_DIR/fixture-apply-fail-converged"
+    register_module_policy fixture-apply-fail-converged optional
+
+    run_modules install fixture-apply-fail-converged
+    assert_equal 1 "${#OPTIONAL_FAILURES[@]}" \
+        'the optional apply failure must be visible before final verification'
+
     run_final_verification fixture-apply-fail-converged
     derive_final_status
-    assert_equal SUCCESS "$FINAL_STATUS" \
-        'final status must follow verified target state'
-    assert_equal 0 "${#REQUIRED_FAILURES[@]}" \
-        'a transient process error must not override final verification'
+    assert_equal PARTIAL "$FINAL_STATUS" \
+        'an optional apply failure must keep the final status partial'
+    assert_equal 1 "${#OPTIONAL_FAILURES[@]}" \
+        'final verification must retain the optional apply failure once'
 }
 
 test_entrypoint_parse_status() {
@@ -342,11 +408,14 @@ test_status_matrix() {
 }
 
 test_repair_applies_only_drift
+test_repair_rechecks_downstream_after_dependency_converges
 test_audit_never_applies
 test_read_only_mutator_is_rejected
 test_apply_result_control_flow
 test_final_verification_reruns_without_duplicate_failures
-test_final_status_uses_verified_state
+test_final_status_preserves_required_apply_failure
+test_final_status_preserves_optional_apply_failure
+test_final_verification_rejects_invalid_fstab
 test_entrypoint_parse_status
 test_status_matrix
 

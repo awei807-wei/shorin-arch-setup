@@ -3,93 +3,49 @@ set -Eeuo pipefail
 
 trap 'printf "ERROR: %s:%s: %s\n" \
   "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
-# 06-vcp-backup-setup.sh - VCPChat NAS Backup Automation Installer
-# (v1.0 - Hot-plug Mount, Whitelist Sync, 16:00 Timer)
 
 SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "$SCRIPT_DIR/lib/core.sh"
+source "$SCRIPT_DIR/modules/vcp/contract.sh"
 
 check_root
 
-# --- [CONFIG] ---
-TARGET_USER="${1:-$(logname 2>/dev/null || awk -F: '$3 == 1000 {print $1}' /etc/passwd | head -n1)}"
-HOME_DIR="/home/$TARGET_USER"
-VCP_SYNC_PY="$HOME_DIR/.local/share/scripts/vcp_nas_sync.py"
-SUDOERS_FILE="/etc/sudoers.d/vcp-backup"
+TARGET_USER=${1:-${TARGET_USER:-}}
+[ -n "$TARGET_USER" ] || die 'Unable to resolve the VCP backup target user.'
+if [ -z "${HOME_DIR:-}" ]; then
+    HOME_DIR=$(getent passwd "$TARGET_USER" | cut -d: -f6)
+fi
+[ -d "$HOME_DIR" ] || die "Home directory not found: $HOME_DIR"
+vcp_contract_init
+
+[ -f "$VCP_BACKUP_SCRIPT" ] ||
+    die "Python backup script not found: $VCP_BACKUP_SCRIPT"
+[ -n "$VCP_PYTHON" ] && [ -x "$VCP_PYTHON" ] ||
+    die 'Python is required for the VCP backup timer.'
 
 section "VCP Backup" "Sudoers & Systemd Timer Setup"
 
-# 1. Check if Python script exists
-if [ ! -f "$VCP_SYNC_PY" ]; then
-  warn "Python backup script not found at $VCP_SYNC_PY"
-  log "Skipping setup until VCPChat is deployed."
-  exit 20
+sudoers_tmp=$(mktemp)
+service_tmp=$(mktemp)
+timer_tmp=$(mktemp)
+vcp_sudoers_contract > "$sudoers_tmp"
+vcp_backup_service_contract > "$service_tmp"
+vcp_backup_timer_contract > "$timer_tmp"
+
+install_sudoers_file "$sudoers_tmp" "$VCP_SUDOERS_FILE"
+install -d -o "$TARGET_USER" -g "$(id -gn "$TARGET_USER")" \
+    "$VCP_USER_UNIT_DIR"
+install_if_changed "$service_tmp" "$VCP_BACKUP_SERVICE" 644
+install_if_changed "$timer_tmp" "$VCP_BACKUP_TIMER" 644
+rm -f "$sudoers_tmp" "$service_tmp" "$timer_tmp"
+chown "$TARGET_USER:" "$VCP_BACKUP_SERVICE" "$VCP_BACKUP_TIMER"
+
+vcp_sudoers_matches
+vcp_backup_service_matches
+vcp_backup_timer_matches
+ensure_user_unit_enabled "$TARGET_USER" vcp-backup.timer timers.target "$HOME_DIR"
+vcp_backup_link_matches
+
+if ! user_unit_bus_is_available "$TARGET_USER"; then
+    warn 'VCP backup is enabled and will start at the next user login.'
 fi
-
-# 2. Sudoers Management (Scripted)
-log "Configuring sudoers for passwordless mount/umount..."
-SUDOERS_TMP=$(mktemp)
-cat >"$SUDOERS_TMP" <<EOF
-$TARGET_USER ALL=(ALL) NOPASSWD: /usr/bin/mount, /usr/bin/umount, /usr/bin/mkdir
-EOF
-install_sudoers_file "$SUDOERS_TMP" "$SUDOERS_FILE"
-rm -f "$SUDOERS_TMP"
-success "Sudoers entry created at $SUDOERS_FILE"
-
-# 3. Systemd User Timer Setup
-log "Setting up Systemd User Timer (Daily 16:00)..."
-TIMER_DIR="$HOME_DIR/.config/systemd/user"
-as_user mkdir -p "$TIMER_DIR"
-
-# Create Service Unit
-SERVICE_TMP=$(mktemp)
-TIMER_TMP=$(mktemp)
-cat >"$SERVICE_TMP" <<EOF
-[Unit]
-Description=VCPChat NAS Daily Backup (Hot-plug Mode)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/python $VCP_SYNC_PY
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=default.target
-EOF
-
-# Create Timer Unit (16:00)
-cat >"$TIMER_TMP" <<EOF
-[Unit]
-Description=Run VCPChat Backup at 16:00 Daily
-
-[Timer]
-OnCalendar=*-*-* 16:00:00
-Persistent=true
-Unit=vcp-backup.service
-
-[Install]
-WantedBy=timers.target
-EOF
-
-install_if_changed "$SERVICE_TMP" "$TIMER_DIR/vcp-backup.service" 644
-install_if_changed "$TIMER_TMP" "$TIMER_DIR/vcp-backup.timer" 644
-rm -f "$SERVICE_TMP" "$TIMER_TMP"
-chown "$TARGET_USER:$TARGET_USER" \
-  "$TIMER_DIR/vcp-backup.service" "$TIMER_DIR/vcp-backup.timer"
-ensure_user_unit_enabled "$TARGET_USER" vcp-backup.timer timers.target
-verify_file "$TIMER_DIR/vcp-backup.service"
-verify_file "$TIMER_DIR/vcp-backup.timer"
-verify_user_unit "$TARGET_USER" vcp-backup.timer timers.target
-
-# 4. Enable Timer
-if [ -S "/run/user/$(id -u "$TARGET_USER")/bus" ]; then
-  success "Timer is active and scheduled for 16:00."
-else
-  warn "Timer is enabled and pending the next user login."
-  exit 20
-fi
-
-success "VCP Backup automation setup complete!"

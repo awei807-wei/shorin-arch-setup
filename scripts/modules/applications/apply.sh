@@ -12,12 +12,10 @@ SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." &&
 PARENT_DIR="${SHORIN_ROOT_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 source "$SCRIPT_DIR/lib/core.sh"
 source "$SCRIPT_DIR/modules/applications/github-apps.sh"
+source "$SCRIPT_DIR/modules/applications/privilege-apply.sh"
 source "$SCRIPT_DIR/modules/applications/targets.sh"
 
 # --- [CONFIGURATION] ---
-# LazyVim 硬性依赖列表 (Moved from niri-setup)
-LAZYVIM_DEPS=("neovim" "ripgrep" "fd" "ttf-jetbrains-mono-nerd" "git")
-
 check_root
 
 trap 'echo -e "\n   ${H_YELLOW}>>> Operation cancelled by user.${NC}"; exit 130' INT
@@ -53,8 +51,6 @@ AUR_APPS=()
 FLATPAK_APPS=()
 GITHUB_APPS=()
 FAILED_PACKAGES=()
-INSTALL_LAZYVIM=false
-SUDO_TEMP_FILE=""
 
 if [ ! -f "$LIST_FILE" ]; then
     warn "File $LIST_FILENAME not found. Skipping."
@@ -123,8 +119,7 @@ while IFS= read -r line; do
 
     # Check for LazyVim explicitly (Case insensitive check)
     if [[ "${raw_pkg,,}" == "lazyvim" ]]; then
-        INSTALL_LAZYVIM=true
-        REPO_APPS+=("${LAZYVIM_DEPS[@]}")
+        REPO_APPS+=("${LAZYVIM_PACKAGES[@]}")
         info_kv "Config" "LazyVim detected" "Setup deferred to Post-Install"
         continue
     fi
@@ -153,22 +148,6 @@ done <<< "$SELECTED_RAW"
 info_kv "Scheduled" "Repo: ${#REPO_APPS[@]} | AUR: ${#AUR_APPS[@]} | Flatpak: ${#FLATPAK_APPS[@]} | GitHub: ${#GITHUB_APPS[@]}"
 
 # ------------------------------------------------------------------------------
-# [SETUP] GLOBAL SUDO CONFIGURATION
-# ------------------------------------------------------------------------------
-if [ ${#REPO_APPS[@]} -gt 0 ] || [ ${#AUR_APPS[@]} -gt 0 ]; then
-    log "Configuring temporary NOPASSWD for installation..."
-    SUDO_TEMP_FILE="/etc/sudoers.d/99_shorin_installer_apps"
-    SUDO_TEMP_SOURCE=$(mktemp)
-    printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$TARGET_USER" > "$SUDO_TEMP_SOURCE"
-    install_sudoers_file "$SUDO_TEMP_SOURCE" "$SUDO_TEMP_FILE"
-    rm -f "$SUDO_TEMP_SOURCE"
-    cleanup_temp_sudoers() {
-        [ ! -f "$SUDO_TEMP_FILE" ] || rm -f "$SUDO_TEMP_FILE"
-    }
-    trap cleanup_temp_sudoers EXIT
-fi
-
-# ------------------------------------------------------------------------------
 # 3. Install Applications
 # ------------------------------------------------------------------------------
 
@@ -186,7 +165,10 @@ fi
 # --- B. Install AUR Apps (INDIVIDUAL MODE + RETRY) ---
 if [ ${#AUR_APPS[@]} -gt 0 ]; then
     section "Step 2/4" "AUR Packages (Sequential + Retry)"
-    
+    log "Granting temporary package-install privilege for AUR targets..."
+    begin_temporary_aur_sudoers "${AUR_APPS[@]}"
+    trap end_temporary_aur_sudoers EXIT
+
     for app in "${AUR_APPS[@]}"; do
         if pacman -Qi "$app" &>/dev/null; then
             log "Skipping '$app' (Already installed)."
@@ -218,6 +200,10 @@ if [ ${#AUR_APPS[@]} -gt 0 ]; then
             FAILED_PACKAGES+=("aur:$app")
         fi
     done
+
+    log "Revoking temporary AUR package-install privilege..."
+    end_temporary_aur_sudoers
+    trap - EXIT
 fi
 
 # --- C. Install Flatpak Apps (INDIVIDUAL MODE) ---
@@ -245,6 +231,10 @@ if [ ${#GITHUB_APPS[@]} -gt 0 ]; then
     section "Step 4/4" "Custom GitHub Applications (Build from Source)"
 
     for app in "${GITHUB_APPS[@]}"; do
+        if application_entry_satisfied "GitHub:$app"; then
+            log "Skipping GitHub application '$app' (target already satisfied)."
+            continue
+        fi
         log "Installing GitHub application: $app ..."
         if install_github_app "$app"; then
             success "Installed $app from GitHub."
@@ -259,14 +249,7 @@ fi
 # 4. Converge application-specific configuration
 # ------------------------------------------------------------------------------
 source "$SCRIPT_DIR/modules/applications/config-apply.sh"
-
-# ------------------------------------------------------------------------------
-# [FIX] CLEANUP GLOBAL SUDO CONFIGURATION
-# ------------------------------------------------------------------------------
-if [ -n "$SUDO_TEMP_FILE" ] && [ -f "$SUDO_TEMP_FILE" ]; then
-    log "Revoking temporary NOPASSWD..."
-    rm -f "$SUDO_TEMP_FILE"
-fi
+converge_application_configs "$SELECTED_RAW"
 
 # ------------------------------------------------------------------------------
 # 5. Generate Failure Report
@@ -282,7 +265,7 @@ if [ ${#FAILED_PACKAGES[@]} -gt 0 ]; then
     printf "%s\n" "${FAILED_PACKAGES[@]}" >> "$REPORT_TMP"
     install_if_changed "$REPORT_TMP" "$REPORT_FILE" 600
     rm -f "$REPORT_TMP"
-    chown "$TARGET_USER:$TARGET_USER" "$REPORT_FILE"
+    chown "$TARGET_USER:" "$REPORT_FILE"
     
     echo ""
     warn "Some applications failed to install."

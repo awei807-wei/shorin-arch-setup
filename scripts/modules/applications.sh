@@ -48,7 +48,7 @@ applications_inspect() {
         if [ "$phase" = check ]; then
             module_check_state "application:$entry" \
                 application_entry_satisfied "$entry"
-            [ "$MODULE_RESULT" -ne "$RC_FAILED" ] || return
+            [ "$MODULE_RESULT" -ne "$RC_FAILED" ] || return 0
         elif ! application_entry_satisfied "$entry"; then
             module_verify_failed "application:$entry"
         fi

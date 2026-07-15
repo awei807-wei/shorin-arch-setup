@@ -11,14 +11,17 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 
 SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "$SCRIPT_DIR/lib/core.sh"
+source "$SCRIPT_DIR/modules/grub/contract.sh"
 
 check_root
+grub_contract_init
 
 # --- GRUB Installation Check ---
-if ! command -v grub-mkconfig &>/dev/null || [ ! -f "/etc/default/grub" ]; then
+if ! command -v grub-mkconfig &>/dev/null; then
     warn "GRUB is not detected. Skipping dual-boot configuration."
     exit 0
 fi
+[ -f "$GRUB_DEFAULT_FILE" ] || die "Missing GRUB defaults: $GRUB_DEFAULT_FILE"
 
 # --- Helper Functions ---
 
@@ -26,16 +29,16 @@ fi
 set_grub_value() {
     local key="$1"
     local value="$2"
-    local conf_file="/etc/default/grub"
+    local conf_file="$GRUB_DEFAULT_FILE"
 
     ensure_key_value "$conf_file" "$key" "\"$value\""
 }
 
 regenerate_grub() {
-    local output=/boot/grub/grub.cfg
+    local output=$GRUB_CONFIG_FILE
     local tmp
 
-    tmp=$(mktemp /boot/grub/grub.cfg.XXXXXX)
+    tmp=$(mktemp "${output}.XXXXXX")
     grub-mkconfig -o "$tmp"
     grub-script-check "$tmp"
     install_if_changed "$tmp" "$output" 600
@@ -51,23 +54,11 @@ section "Phase 2A" "Dual-Boot Configuration (Windows)"
 # ------------------------------------------------------------------------------
 section "Step 1/2" "System Analysis"
 
-log "Installing dual-boot detection tools (os-prober, exfat-utils)..."
-ensure_packages os-prober exfat-utils
-
-log "Scanning for Windows installation..."
-WINDOWS_DETECTED=$(os-prober | grep -qi "windows" && echo "true" || echo "false")
-
-if [ "$WINDOWS_DETECTED" != "true" ]; then
-    log "No Windows installation detected by os-prober."
-    log "Skipping dual-boot specific configurations."
-    log "Module 02a completed (Skipped)."
-    exit 0
-fi
-
-success "Windows installation detected."
+log "Installing dual-boot detection tools (os-prober, exfatprogs)..."
+ensure_packages os-prober exfatprogs
 
 # --- Check if already configured ---
-OS_PROBER_CONFIGURED=$(grep -q -E '^\s*GRUB_DISABLE_OS_PROBER\s*=\s*(false|"false")' /etc/default/grub && echo "true" || echo "false")
+OS_PROBER_CONFIGURED=$(grep -q -E '^\s*GRUB_DISABLE_OS_PROBER\s*=\s*(false|"false")' "$GRUB_DEFAULT_FILE" && echo "true" || echo "false")
 
 if [ "$OS_PROBER_CONFIGURED" == "true" ]; then
     log "Dual-boot settings seem to be already configured."

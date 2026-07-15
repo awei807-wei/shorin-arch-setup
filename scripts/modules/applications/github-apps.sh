@@ -69,11 +69,27 @@ _sync_github_app_repo() {
     GITHUB_APP_SOURCE_DIR="$source_dir"
 }
 
+_cleanup_github_build_dir() {
+    local build_dir=$1
+
+    case "$build_dir" in
+        "$HOME_DIR/.cache/shorin-build."*)
+            [ ! -e "$build_dir" ] || as_user find "$build_dir" -depth -delete
+            ;;
+        *)
+            error "Refusing to clean an unexpected build directory: $build_dir"
+            return 1
+            ;;
+    esac
+}
+
 _build_and_install_cargo_binary() {
     local source_dir="$1"
     local binary_name="$2"
     local destination="$HOME_DIR/.local/bin/$binary_name"
-    local build_dir
+    local provenance_dir=${GITHUB_PROVENANCE_DIR:-$HOME_DIR/.local/share/shorin-arch-setup/github}
+    local provenance="$provenance_dir/$binary_name.build"
+    local build_dir checkout_head checkout_status binary_sha provenance_tmp
 
     log "Building $binary_name from source ..."
     as_user mkdir -p "$HOME_DIR/.cache"
@@ -83,24 +99,57 @@ _build_and_install_cargo_binary() {
         --target-dir "$build_dir" \
         --release \
         --locked; then
-        rm -rf "$build_dir"
+        _cleanup_github_build_dir "$build_dir"
         error "Cargo build failed for $binary_name."
         return 1
     fi
 
+    checkout_head=$(as_user git -C "$source_dir" rev-parse HEAD) || {
+        _cleanup_github_build_dir "$build_dir"
+        error "Cannot determine the source commit for $binary_name."
+        return 1
+    }
+    checkout_status=$(as_user git -C "$source_dir" status --porcelain) || {
+        _cleanup_github_build_dir "$build_dir"
+        error "Cannot inspect the source checkout for $binary_name."
+        return 1
+    }
+    if [ -n "$checkout_status" ]; then
+        _cleanup_github_build_dir "$build_dir"
+        error "Refusing to build $binary_name from a modified checkout."
+        return 1
+    fi
+    binary_sha=$(sha256sum "$build_dir/release/$binary_name" | awk '{ print $1 }') || {
+        _cleanup_github_build_dir "$build_dir"
+        error "Cannot hash the built $binary_name binary."
+        return 1
+    }
     if ! install_if_changed "$build_dir/release/$binary_name" "$destination" 755; then
-        rm -rf "$build_dir"
+        _cleanup_github_build_dir "$build_dir"
         error "Failed to install $binary_name to $destination."
         return 1
     fi
-    chown "$TARGET_USER:$TARGET_USER" "$destination"
-    rm -rf "$build_dir"
-    [ -x "$destination" ]
+    chown "$TARGET_USER:" "$destination"
+
+    provenance_tmp=$(mktemp)
+    printf 'app=%s\ncommit=%s\nsha256=%s\n' \
+        "$binary_name" "$checkout_head" "$binary_sha" > "$provenance_tmp"
+    if ! install_if_changed "$provenance_tmp" "$provenance" 644; then
+        rm -f "$provenance_tmp"
+        _cleanup_github_build_dir "$build_dir"
+        error "Failed to record the build provenance for $binary_name."
+        return 1
+    fi
+    rm -f "$provenance_tmp"
+    chown "$TARGET_USER:" "$provenance"
+    _cleanup_github_build_dir "$build_dir"
+    github_provenance_satisfied \
+        "$binary_name" "$source_dir" "$destination"
 }
 
 _install_focus_shift() {
     _sync_github_app_repo \
-        "https://github.com/awei807-wei/FocusShift.git" \
+        "$FOCUS_SHIFT_REPO_URL" \
         "focus-shift" || return 1
 
     _build_and_install_cargo_binary "$GITHUB_APP_SOURCE_DIR" "focus-shift"
@@ -108,7 +157,7 @@ _install_focus_shift() {
 
 _install_niri_clip() {
     _sync_github_app_repo \
-        "https://github.com/awei807-wei/niri-clip.git" \
+        "$NIRI_CLIP_REPO_URL" \
         "niri-clip" || return 1
 
     _build_and_install_cargo_binary "$GITHUB_APP_SOURCE_DIR" "niri-clip" || return 1
@@ -120,7 +169,7 @@ _install_niri_clip() {
         error "Failed to install the niri-clip user service."
         return 1
     fi
-    chown "$TARGET_USER:$TARGET_USER" "$service_file"
+    chown "$TARGET_USER:" "$service_file"
     ensure_user_unit_enabled "$TARGET_USER" niri-clip.service graphical-session.target
     verify_user_unit "$TARGET_USER" niri-clip.service graphical-session.target
 }

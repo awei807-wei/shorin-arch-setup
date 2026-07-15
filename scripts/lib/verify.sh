@@ -43,15 +43,20 @@ run_final_verification() {
     local module
     export SHORIN_READ_ONLY=1
 
-    # Final status is derived from current state, not from an earlier command's
-    # exit code. Module policies remain registered while transient results reset.
-    REQUIRED_FAILURES=()
-    OPTIONAL_FAILURES=()
-    OPTIONAL_SKIPS=()
+    # Final verification adds authoritative current-state evidence without
+    # discarding failures or skips observed while checking or applying changes.
+    # append_unique keeps repeated verification idempotent.
 
     for module in "$@"; do
         verify_one_module "$module" || true
     done
+    if verify_fstab "${FSTAB_FILE:-/etc/fstab}"; then
+        printf 'MODULE_RESULT=global:verify:OK\n'
+    else
+        printf 'MODULE_RESULT=global:verify:FAILED\n'
+        printf 'MODULE_REASON=global:verify:fstab-invalid\n'
+        append_unique REQUIRED_FAILURES global:verify:fstab-invalid
+    fi
     derive_final_status
     [ "$FINAL_STATUS" != FAILED ]
 }

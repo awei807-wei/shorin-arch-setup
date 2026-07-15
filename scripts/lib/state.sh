@@ -94,10 +94,13 @@ resolve_target_user() {
 }
 
 state_user_unit_enabled() {
-    local user=$1 unit=$2 target=${3:-default.target} home
+    local user=$1 unit=$2 target=${3:-default.target} home unit_file link
     home=$(getent passwd "$user" | cut -d: -f6) || return 2
     [ -n "$home" ] || return 2
-    [ -L "$home/.config/systemd/user/${target}.wants/$unit" ]
+    unit_file="$home/.config/systemd/user/$unit"
+    link="$home/.config/systemd/user/${target}.wants/$unit"
+    [ -s "$unit_file" ] && [ -L "$link" ] &&
+        [ "$(readlink "$link")" = "../$unit" ]
 }
 
 state_fstab_valid() {
@@ -113,6 +116,24 @@ state_fstab_entry() {
     awk -v src="$source" -v dst="$target" -v type="$fstype" -v opts="$options" '
         $1 == src && $2 == dst && $3 == type && $4 == opts { found=1 }
         END { exit(found ? 0 : 1) }
+    ' "$file"
+}
+
+state_fstab_targets_unique() {
+    local file=$1 targets target_list
+    shift
+    target_list=$(IFS=,; printf '%s' "$*")
+    [ -r "$file" ] || return 2
+    awk -v targets="$target_list" '
+        BEGIN {
+            count=split(targets, values, ",")
+            for (i=1; i<=count; i++) wanted[values[i]]=1
+        }
+        /^[[:space:]]*#/ || NF == 0 { next }
+        $2 in wanted { seen[$2]++ }
+        END {
+            for (target in wanted) if (seen[target] > 1) exit 1
+        }
     ' "$file"
 }
 

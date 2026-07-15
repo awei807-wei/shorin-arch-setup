@@ -181,6 +181,7 @@ run_module_phase() {
         SHORIN_SCRIPTS_DIR="${SHORIN_SCRIPTS_DIR:-$SHORIN_ROOT/scripts}" \
         SHORIN_MODE="${SHORIN_MODE:-install}" \
         SHORIN_PROFILE_DIR="${SHORIN_PROFILE_DIR:-/etc/shorin-arch-setup}" \
+        SHORIN_RUN_TOKEN="${SHORIN_RUN_TOKEN:-$$}" \
         SHORIN_READ_ONLY="$readonly" \
         TARGET_USER="${TARGET_USER:-}" \
         HOME_DIR="${HOME_DIR:-}" \
@@ -262,41 +263,9 @@ run_module() {
     esac
 }
 
-collect_repair_drift() {
-    local module
-    DRIFT_MODULES=()
-
-    for module in "$@"; do
-        run_module_phase "$module" check
-        case "$PHASE_RC" in
-            "$RC_OK") ;;
-            "$RC_DRIFT") append_unique DRIFT_MODULES "$module" ;;
-            "$RC_SKIPPED")
-                record_module_skip "$module" check
-                [ "$(module_policy "$module")" != required ] || return 1
-                ;;
-            *)
-                record_module_failure "$module" check "rc=$PHASE_RC"
-                [ "$(module_policy "$module")" != required ] || return 1
-                ;;
-        esac
-    done
-    [ "${#REQUIRED_FAILURES[@]}" -eq 0 ]
-}
-
 run_modules() {
     local mode=$1 module
     shift
-
-    if [ "$mode" = repair ]; then
-        if ! collect_repair_drift "$@"; then
-            return 1
-        fi
-        for module in "${DRIFT_MODULES[@]}"; do
-            apply_and_verify_module "$module" || return 1
-        done
-        return 0
-    fi
 
     for module in "$@"; do
         run_module "$mode" "$module" || return 1

@@ -3,61 +3,42 @@ set -Eeuo pipefail
 
 trap 'printf "ERROR: %s:%s: %s\n" \
   "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
-# 08-vcp-desktop-entry.sh - VCPChat Desktop Entry Integration
-# (v1.0 - Automatic Path Detection & Database Refresh)
 
 SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "$SCRIPT_DIR/lib/core.sh"
+source "$SCRIPT_DIR/modules/vcp/contract.sh"
 
 check_root
 
-# --- [CONFIG] ---
-TARGET_USER="${1:-$(logname 2>/dev/null || awk -F: '$3 == 1000 {print $1}' /etc/passwd | head -n1)}"
-HOME_DIR="/home/$TARGET_USER"
-VCP_DIR="$HOME_DIR/Downloads/VCPChat"
-DESKTOP_FILE="$HOME_DIR/.local/share/applications/vchat.desktop"
+TARGET_USER=${1:-${TARGET_USER:-}}
+[ -n "$TARGET_USER" ] || die 'Unable to resolve the VCP desktop target user.'
+if [ -z "${HOME_DIR:-}" ]; then
+    HOME_DIR=$(getent passwd "$TARGET_USER" | cut -d: -f6)
+fi
+[ -d "$HOME_DIR" ] || die "Home directory not found: $HOME_DIR"
+vcp_contract_init
+
+[ -d "$VCP_DIR" ] && [ -f "$VCP_DIR/package.json" ] ||
+    die "VCPChat is incomplete: $VCP_DIR"
+[ -n "$VCP_NPM" ] && [ -x "$VCP_NPM" ] ||
+    die 'An absolute npm executable is required for VCPChat.'
 
 section "VCP Integration" "Desktop Application Entry"
 
-# 1. Check VCP directory
-if [ ! -d "$VCP_DIR" ]; then
-    warn "VCPChat directory not found at $VCP_DIR"
-    log "Skipping desktop entry creation."
-    exit 20
-fi
-if [ ! -f "$VCP_DIR/package.json" ] || ! command -v npm >/dev/null 2>&1; then
-    warn "VCPChat is incomplete (package.json or npm missing)."
-    exit 20
-fi
+install -d -o "$TARGET_USER" -g "$(id -gn "$TARGET_USER")" \
+    "$(dirname "$VCP_DESKTOP_FILE")"
+desktop_tmp=$(mktemp)
+vcp_desktop_contract > "$desktop_tmp"
+install_if_changed "$desktop_tmp" "$VCP_DESKTOP_FILE" 755
+rm -f "$desktop_tmp"
+chown "$TARGET_USER:" "$VCP_DESKTOP_FILE"
+vcp_desktop_matches
 
-# 2. Create local applications directory
-as_user mkdir -p "$HOME_DIR/.local/share/applications"
-
-# 3. Write .desktop file
-log "Creating desktop entry: $DESKTOP_FILE"
-DESKTOP_TMP=$(mktemp)
-cat > "$DESKTOP_TMP" <<INNER_EOF
-[Desktop Entry]
-Name=VCPChat
-Comment=Start VCPChat Environment
-Exec=env WAYLAND_DISPLAY=wayland-1 npm start --prefix $VCP_DIR -- --ozone-platform=wayland --enable-features=WaylandWindowDecorations
-Icon=utilities-terminal
-Terminal=false
-Type=Application
-Categories=Development;
-Keywords=vchat;vcp;npm;
-INNER_EOF
-
-# 4. Set permissions and refresh database
-install_if_changed "$DESKTOP_TMP" "$DESKTOP_FILE" 755
-rm -f "$DESKTOP_TMP"
-chown "$TARGET_USER:$TARGET_USER" "$DESKTOP_FILE"
 if command -v desktop-file-validate >/dev/null 2>&1; then
-    desktop-file-validate "$DESKTOP_FILE"
+    desktop-file-validate "$VCP_DESKTOP_FILE"
 fi
-if [ -z "${CHROOT_ACTIVE:-}" ]; then
-    log "Refreshing desktop database..."
-    as_user update-desktop-database "$HOME_DIR/.local/share/applications"
+if [ -z "${CHROOT_ACTIVE:-}" ] &&
+    command -v update-desktop-database >/dev/null 2>&1; then
+    runuser -u "$TARGET_USER" -- \
+        update-desktop-database "$(dirname "$VCP_DESKTOP_FILE")"
 fi
-
-success "VCPChat desktop entry is now available in Vicinae/Fuzzel!"

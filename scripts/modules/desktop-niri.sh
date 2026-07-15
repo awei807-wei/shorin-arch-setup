@@ -6,20 +6,7 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 
 SHORIN_ROOT=${SHORIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 source "$SHORIN_ROOT/scripts/lib/verify.sh"
-
-NIRI_PACKAGES=(niri fuzzel kitty xdg-desktop-portal-gnome
-    xdg-desktop-portal-gtk firefox nautilus)
-
-desktop_niri_entry_satisfied() {
-    local entry=$1
-    case "$entry" in
-        AUR:*) state_package_present "${entry#AUR:}" ;;
-        flatpak:*) state_flatpak_present "${entry#flatpak:}" ;;
-        GitHub:*) return 1 ;;
-        imagemagic) state_package_present imagemagick ;;
-        *) state_package_present "$entry" ;;
-    esac
-}
+source "$SHORIN_ROOT/scripts/modules/desktop-niri/targets.sh"
 
 desktop_niri_expect() {
     local phase=$1 label=$2
@@ -33,25 +20,20 @@ desktop_niri_expect() {
 }
 
 desktop_niri_inspect() {
-    local phase=$1 package entry source_file
+    local phase=$1 entry source_file
     local manifest=${SHORIN_PROFILE_DIR:-/etc/shorin-arch-setup}/niri-packages.list
 
-    for package in "${NIRI_PACKAGES[@]}"; do
-        desktop_niri_expect "$phase" "package:$package" \
-            state_package_present "$package"
-    done
     if [ -s "$manifest" ]; then
         source_file=$manifest
     else
         source_file="$SHORIN_ROOT/niri-applist.txt"
     fi
-    if [ -f "$source_file" ]; then
+    if [ -f "$source_file" ] && [ -r "$source_file" ]; then
         while IFS= read -r entry; do
-            entry=${entry%%#*}
-            entry=$(printf '%s\n' "$entry" | xargs)
-            [ -z "$entry" ] || desktop_niri_expect "$phase" \
-                "package-target:$entry" desktop_niri_entry_satisfied "$entry"
-        done < "$source_file"
+            desktop_niri_expect "$phase" "package-target:$entry" \
+                niri_package_target_satisfied "$entry"
+        done < <(niri_all_package_targets "$manifest" \
+            "$SHORIN_ROOT/niri-applist.txt")
     else
         [ "$phase" = check ] && module_drift niri-package-targets ||
             module_verify_failed niri-package-targets
@@ -62,13 +44,27 @@ desktop_niri_inspect() {
             module_verify_failed target-home
         return
     fi
+    desktop_niri_contract_init
+    desktop_niri_expect "$phase" file:firefox-policy \
+        niri_firefox_policy_matches
+    desktop_niri_expect "$phase" file:nautilus-user-override \
+        niri_nautilus_override_matches
+    desktop_niri_expect "$phase" link:user-gnome-terminal \
+        niri_user_terminal_link_matches
+    desktop_niri_expect "$phase" file:xdg-desktop-portal \
+        niri_portal_config_matches
+    desktop_niri_expect "$phase" link:gtk4-theme niri_gtk_links_match
+    desktop_niri_expect "$phase" hardware:optional-tools \
+        niri_optional_hardware_targets_match
     desktop_niri_expect "$phase" file:niri-config \
         state_file_nonempty "$HOME_DIR/.config/niri/config.kdl"
+    desktop_niri_expect "$phase" config:niri-quickshell-startup \
+        niri_quickshell_startup_satisfied \
+            "$HOME_DIR/.config/niri/config.kdl"
     if grep -Fq -- "--autologin $TARGET_USER" \
         /etc/systemd/system/getty@tty1.service.d/autologin.conf 2>/dev/null; then
         desktop_niri_expect "$phase" unit:niri-autostart \
-            state_user_unit_enabled "$TARGET_USER" niri-autostart.service \
-                default.target
+            niri_autostart_unit_satisfied "$TARGET_USER" "$HOME_DIR"
     fi
 }
 

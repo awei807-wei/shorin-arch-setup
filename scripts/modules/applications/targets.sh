@@ -11,6 +11,19 @@ if [ -z "${APPLICATION_MANIFEST:-}" ]; then
     APPLICATION_MANIFEST="${SHORIN_PROFILE_DIR:-/etc/shorin-arch-setup}/applications.list"
 fi
 LAZYVIM_PACKAGES=(neovim ripgrep fd ttf-jetbrains-mono-nerd git)
+WINE_CONFIG_PACKAGES=(wine wine-gecko wine-mono)
+LUTRIS_CONFIG_PACKAGES=(
+    alsa-plugins giflib glfw gst-plugins-base-libs lib32-alsa-plugins
+    lib32-giflib lib32-gst-plugins-base-libs lib32-gtk3
+    lib32-libjpeg-turbo lib32-libva lib32-mpg123 lib32-openal
+    libjpeg-turbo libva libxslt mpg123 openal ttf-liberation
+)
+APPLICATION_DESKTOP_DIR=${APPLICATION_DESKTOP_DIR:-/usr/share/applications}
+WINDOWS_FONT_SOURCE=${WINDOWS_FONT_SOURCE:-$SHORIN_ROOT/resources/windows-sim-fonts}
+FIREFOX_DEFAULT_SOURCE=${FIREFOX_DEFAULT_SOURCE:-$SHORIN_ROOT/resources/firefox}
+FOCUS_SHIFT_REPO_URL=https://github.com/awei807-wei/FocusShift.git
+NIRI_CLIP_REPO_URL=https://github.com/awei807-wei/niri-clip.git
+GITHUB_PROVENANCE_DIR=${GITHUB_PROVENANCE_DIR:-}
 
 application_entries_from_file() {
     local file=$1
@@ -31,31 +44,180 @@ application_manifest_entries() {
     application_entries_from_file "$APPLICATION_MANIFEST"
 }
 
+lazyvim_config_satisfied() {
+    [ -s "$HOME_DIR/.config/nvim/init.lua" ] &&
+        [ -s "$HOME_DIR/.config/nvim/lua/config/lazy.lua" ]
+}
+
 lazyvim_target_satisfied() {
     local package
 
     for package in "${LAZYVIM_PACKAGES[@]}"; do
         state_package_present "$package" || return
     done
-    [ -s "$HOME_DIR/.config/nvim/lua/config/lazy.lua" ]
+    lazyvim_config_satisfied
 }
 
-application_entry_satisfied() {
+application_packages_present() {
+    local package
+
+    for package in "$@"; do
+        state_package_present "$package" || return
+    done
+}
+
+wine_config_satisfied() {
+    local font
+
+    application_packages_present "${WINE_CONFIG_PACKAGES[@]}" || return
+    [ -d "$HOME_DIR/.wine" ] || return 1
+    [ -d "$WINDOWS_FONT_SOURCE" ] || return 0
+    while IFS= read -r -d '' font; do
+        [ -f "$HOME_DIR/.wine/drive_c/windows/Fonts/$(basename "$font")" ] ||
+            return 1
+    done < <(find "$WINDOWS_FONT_SOURCE" -maxdepth 1 -type f -print0)
+}
+
+lutris_config_satisfied() {
+    application_packages_present "${LUTRIS_CONFIG_PACKAGES[@]}"
+}
+
+firefox_defaults_satisfied() {
+    local source relative
+
+    [ -d "$FIREFOX_DEFAULT_SOURCE" ] || return 0
+    while IFS= read -r -d '' source; do
+        relative=${source#"$FIREFOX_DEFAULT_SOURCE"/}
+        [ -e "$HOME_DIR/.mozilla/$relative" ] || return 1
+    done < <(find "$FIREFOX_DEFAULT_SOURCE" -type f -print0)
+}
+
+steam_native_locale_satisfied() {
+    local desktop_file="$APPLICATION_DESKTOP_DIR/steam.desktop"
+
+    [ -f "$desktop_file" ] || return 1
+    awk '
+        /^Exec=env LANG=zh_CN.UTF-8 (\/usr\/bin\/steam|steam)([[:space:]%]|$)/ {
+            patched=1
+        }
+        /^Exec=(\/usr\/bin\/steam|steam)([[:space:]%]|$)/ { unpatched=1 }
+        END { exit(patched && !unpatched ? 0 : 1) }
+    ' "$desktop_file"
+}
+
+steam_flatpak_locale_satisfied() {
+    command -v flatpak >/dev/null 2>&1 || return 2
+    flatpak override --system --show com.valvesoftware.Steam 2>/dev/null |
+        grep -Fqx 'LANG=zh_CN.UTF-8'
+}
+
+github_provenance_satisfied() {
+    local app=$1 source_dir=$2 binary=$3
+    local provenance_dir=${GITHUB_PROVENANCE_DIR:-$HOME_DIR/.local/share/shorin-arch-setup/github}
+    local provenance="$provenance_dir/$app.build" checkout_head checkout_status
+    local recorded_app recorded_commit recorded_sha binary_sha
+
+    [ -x "$binary" ] && [ -s "$provenance" ] || return 1
+    checkout_head=$(git -C "$source_dir" rev-parse HEAD 2>/dev/null) || return 1
+    checkout_status=$(git -C "$source_dir" status --porcelain 2>/dev/null) ||
+        return 1
+    [ -z "$checkout_status" ] || return 1
+    recorded_app=$(awk -F= '$1 == "app" { print substr($0, 5) }' "$provenance")
+    recorded_commit=$(awk -F= '$1 == "commit" { print substr($0, 8) }' "$provenance")
+    recorded_sha=$(awk -F= '$1 == "sha256" { print substr($0, 8) }' "$provenance")
+    binary_sha=$(sha256sum "$binary" 2>/dev/null | awk '{ print $1 }') || return 1
+
+    [ "$recorded_app" = "$app" ] &&
+        [ "$recorded_commit" = "$checkout_head" ] &&
+        [ "$recorded_sha" = "$binary_sha" ]
+}
+
+github_application_satisfied() {
+    local app=$1 source_dir="$HOME_DIR/.local/src/$1"
+    local binary="$HOME_DIR/.local/bin/$1"
+
+    case "$app" in
+        focus-shift)
+            state_git_checkout "$source_dir" "$FOCUS_SHIFT_REPO_URL" main &&
+                github_provenance_satisfied "$app" "$source_dir" "$binary"
+            ;;
+        niri-clip)
+            state_git_checkout "$source_dir" "$NIRI_CLIP_REPO_URL" main &&
+                github_provenance_satisfied "$app" "$source_dir" "$binary" &&
+                state_file_matches \
+                    "$source_dir/systemd/niri-clip.service" \
+                    "$HOME_DIR/.config/systemd/user/niri-clip.service" &&
+                state_user_unit_enabled "$TARGET_USER" niri-clip.service \
+                    graphical-session.target
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+application_nodisplay_files() {
+    case "$1" in
+        btop) printf '%s\n' "$APPLICATION_DESKTOP_DIR/btop.desktop" ;;
+        lazyvim|neovim) printf '%s\n' "$APPLICATION_DESKTOP_DIR/nvim.desktop" ;;
+        mpv) printf '%s\n' "$APPLICATION_DESKTOP_DIR/mpv.desktop" ;;
+        yazi) printf '%s\n' "$APPLICATION_DESKTOP_DIR/yazi.desktop" ;;
+    esac
+}
+
+application_nodisplay_satisfied() {
+    local entry=$1 file
+
+    while IFS= read -r file; do
+        [ -n "$file" ] || continue
+        [ ! -f "$file" ] || desktop_entry_key_matches \
+            "$file" NoDisplay true || return 1
+    done < <(application_nodisplay_files "$entry")
+}
+
+application_entry_payload_satisfied() {
     local entry=$1
 
     case "$entry" in
         AUR:*) state_package_present "${entry#AUR:}" ;;
         flatpak:*) state_flatpak_present "${entry#flatpak:}" ;;
-        GitHub:focus-shift) [ -x "$HOME_DIR/.local/bin/focus-shift" ] ;;
-        GitHub:niri-clip)
-            [ -x "$HOME_DIR/.local/bin/niri-clip" ] &&
-                state_user_unit_enabled "$TARGET_USER" niri-clip.service \
-                    graphical-session.target
-            ;;
-        GitHub:*) return 1 ;;
+        GitHub:*) github_application_satisfied "${entry#GitHub:}" ;;
         lazyvim) lazyvim_target_satisfied ;;
         *) state_package_present "$entry" ;;
     esac
+}
+
+application_entry_config_satisfied() {
+    local entry=$1
+
+    case "$entry" in
+        wine) wine_config_satisfied || return ;;
+        lutris) lutris_config_satisfied || return ;;
+        steam) steam_native_locale_satisfied || return ;;
+        flatpak:com.valvesoftware.Steam)
+            steam_flatpak_locale_satisfied || return
+            ;;
+        firefox) firefox_defaults_satisfied || return ;;
+    esac
+    application_nodisplay_satisfied "$entry"
+}
+
+desktop_entry_key_matches() {
+    local file=$1 key=$2 value=$3
+
+    awk -F= -v wanted_key="$key" -v wanted_value="$value" '
+        /^\[/ { in_desktop=($0 == "[Desktop Entry]"); next }
+        in_desktop && $1 == wanted_key {
+            count++
+            if (substr($0, index($0, "=") + 1) == wanted_value) matches++
+        }
+        END { exit !(count == 1 && matches == 1) }
+    ' "$file"
+}
+
+application_entry_satisfied() {
+    local entry=$1
+
+    application_entry_payload_satisfied "$entry" &&
+        application_entry_config_satisfied "$entry"
 }
 
 application_entry_is_valid() {
@@ -83,7 +245,7 @@ application_entry_detected() {
                 [ -f "$HOME_DIR/.config/systemd/user/niri-clip.service" ]
             ;;
         lazyvim) [ -s "$HOME_DIR/.config/nvim/lua/config/lazy.lua" ] ;;
-        *) application_entry_satisfied "$entry" ;;
+        *) application_entry_payload_satisfied "$entry" ;;
     esac
 }
 
