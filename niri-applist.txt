@@ -3,7 +3,6 @@ fish                                     # Friendly Interactive Shell
 gnome-software                           # Gui store for flatpak software
 # --- Niri/Wayland Components ---
 xwayland-satellite                       # XWayland compatibility 
-swayidle                                 # Idle management daemon (Screen lock/suspend)
 swayosd                                  # On-Screen Display for Volume/Brightness
 nwg-look                                 # GTK3 settings editor for Wayland
 qt5ct                                    # Qt5 configuration tool
@@ -14,10 +13,8 @@ breeze                                   # KDE Breeze visual style
 breeze-gtk                               # Breeze GTK theme
 breeze-icons                             # Breeze icon theme
 breeze5                                  # Breeze style for Qt5
-ttf-jetbrains-mono-nerd                  # JetBrains Mono font (Nerd Font patched)
 
 # --- Wallpaper ---
-awww                                     # Efficient wallpaper daemon for Wayland
 
 # --- Screenshots & Recording ---
 grim                                     # Screenshot utility (Grabs images)
@@ -45,7 +42,6 @@ bluetui                                  # tui for bluetooth
 
 # --- AUR Packages ---
 AUR:wlogout                              # Logout menu (Shutdown/Reboot/Lock)
-AUR:matugen                              # Material You theme generator
 AUR:clipse                               # Clipboard manager
 AUR:clipse-gui                           # Clipboard manager (GUI binary)
 AUR:python-pywalfox                      # Pywal support for Firefox

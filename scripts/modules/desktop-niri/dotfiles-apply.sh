@@ -82,13 +82,17 @@ deploy_wallpapers_and_templates() {
 main() {
     local github=https://github.com/awei807-wei/ShorinArchExperience-ArchlinuxGuide.git
     local gitee=https://gitee.com/shorinkiwata/ShorinArchExperience-ArchlinuxGuide.git
+    local github_commit=e6074b8d35552884eb4d3fa2232462f80dc7053e
+    local gitee_commit=47a18fac7c5e8bcb64a40bf6f194fa477e1c7639
     local checkout=/tmp/shorin-repo
 
     desktop_niri_contract_init
-    if ! ensure_git_checkout "$TARGET_USER" "$github" main "$checkout"; then
+    if ! ensure_git_checkout "$TARGET_USER" "$github" main "$checkout" \
+        "$HOME_DIR" "$github_commit"; then
         [ ! -e "$checkout" ] ||
             die "Refusing to replace an unverified dotfiles checkout: $checkout"
-        ensure_git_checkout "$TARGET_USER" "$gitee" main "$checkout"
+        ensure_git_checkout "$TARGET_USER" "$gitee" main "$checkout" \
+            "$HOME_DIR" "$gitee_commit"
     fi
     deploy_dotfiles "$checkout"
     configure_desktop_theme

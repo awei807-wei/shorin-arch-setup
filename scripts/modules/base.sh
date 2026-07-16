@@ -13,7 +13,7 @@ BASE_PACKAGES=(
     alsa-firmware alsa-ucm-conf archlinuxcn-keyring base-devel fastfetch
     fcitx5 fcitx5-chinese-addons fcitx5-configtool fcitx5-gtk fcitx5-mozc
     fcitx5-qt fcitx5-rime flatpak libva-utils noto-fonts noto-fonts-cjk
-    noto-fonts-emoji paru pavucontrol pciutils pipewire pipewire-alsa
+    noto-fonts-emoji pavucontrol pciutils pipewire pipewire-alsa
     pipewire-jack pipewire-pulse power-profiles-daemon sof-firmware
     terminus-font ttf-jetbrains-mono-nerd usbutils wireplumber xdg-user-dirs
     yay
@@ -90,7 +90,7 @@ base_inspect() {
     mapfile -t gpu_packages < <(base_gpu_target_packages "$gpu_info")
     for package in "${gpu_packages[@]}"; do
         base_expect "$phase" "gpu-package:$package" \
-            state_package_present "$(base_gpu_package_name "$package")"
+            declared_package_target_satisfied "$package"
     done
     if [ "$(base_gpu_count "$gpu_info")" -ge 2 ] &&
         base_gpu_has_vendor NVIDIA "$gpu_info"; then

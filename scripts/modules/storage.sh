@@ -26,6 +26,10 @@ storage_require_btrfs() {
 storage_check() {
     storage_require_btrfs check || return 0
     local package
+    if [[ "${SHORIN_MODE:-}" =~ ^(install|repair)$ ]] &&
+        [ ! -e "$(storage_run_snapshot_stamp)" ]; then
+        module_drift snapshot:current-run
+    fi
     module_check_state fstab:unique-targets state_fstab_targets_unique \
         "${FSTAB_FILE:-/etc/fstab}" "${STORAGE_FSTAB_UNIQUE_TARGETS[@]}"
     for package in "${STORAGE_PACKAGES[@]}"; do
@@ -49,14 +53,15 @@ storage_apply() {
         "${STORAGE_FSTAB_UNIQUE_TARGETS[@]}"
     ensure_packages "${STORAGE_PACKAGES[@]}"
     bash "$implementation/btrfs-apply.sh" || return
-    if [ "${SHORIN_MODE:-install}" = install ]; then
-        bash "$implementation/checkpoint-apply.sh" || return
-    fi
 }
 
 storage_verify() {
     storage_require_btrfs verify || return 0
     local package
+    if [[ "${SHORIN_MODE:-}" =~ ^(install|repair)$ ]] &&
+        [ ! -e "$(storage_run_snapshot_stamp)" ]; then
+        module_verify_failed snapshot:current-run
+    fi
     state_fstab_targets_unique "${FSTAB_FILE:-/etc/fstab}" \
         "${STORAGE_FSTAB_UNIQUE_TARGETS[@]}" ||
         module_verify_failed fstab:unique-targets

@@ -33,6 +33,10 @@ state_package_present() {
 source "$ROOT_DIR/scripts/modules/applications/targets.sh"
 source "$ROOT_DIR/scripts/modules/applications/config-apply.sh"
 
+declared_package_target_satisfied() {
+    state_package_present "${1#AUR:}"
+}
+
 SIMULATE_DIRECTORY_OWNER_DRIFT=0
 SIMULATE_SETTINGS_OWNER_DRIFT=0
 

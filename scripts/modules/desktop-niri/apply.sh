@@ -14,7 +14,6 @@ source "$SCRIPT_DIR/modules/desktop-niri/targets.sh"
 
 DEBUG=${DEBUG:-0}
 CN_MIRROR=${CN_MIRROR:-0}
-UNDO_SCRIPT="$SCRIPT_DIR/checks/niri-rollback.sh"
 
 check_root
 

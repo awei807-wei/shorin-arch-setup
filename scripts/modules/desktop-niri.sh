@@ -63,6 +63,9 @@ desktop_niri_inspect() {
     desktop_niri_expect "$phase" config:niri-quickshell-startup \
         niri_quickshell_startup_satisfied \
             "$HOME_DIR/.config/niri/config.kdl"
+    desktop_niri_expect "$phase" config:niri-fcitx5-startup \
+        niri_fcitx5_startup_satisfied \
+            "$HOME_DIR/.config/niri/config.kdl"
     desktop_niri_expect "$phase" config:niri-path niri_path_satisfied
     desktop_niri_expect "$phase" config:niri-wallpaper-backend \
         niri_wallpaper_backend_satisfied
@@ -95,6 +98,9 @@ desktop_niri_inspect() {
 desktop_niri_check() { desktop_niri_inspect check; }
 
 desktop_niri_apply() {
+    if [ "${SHORIN_MODE:-install}" = install ]; then
+        bash "$SHORIN_ROOT/scripts/modules/storage/checkpoint-apply.sh" || return
+    fi
     bash "$SHORIN_ROOT/scripts/modules/desktop-niri/apply.sh"
 }
 

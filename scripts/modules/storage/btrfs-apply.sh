@@ -43,6 +43,8 @@ if [ "$ROOT_FSTYPE" == "btrfs" ]; then
         log "Config 'root' already exists."
     fi
     snapper -c root get-config >/dev/null
+    snapshot_config_subvolume_matches root / ||
+        die "Snapper config 'root' does not target /."
 else
     warn "Root is not Btrfs. Skipping Root snapshot."
 fi
@@ -56,8 +58,9 @@ fi
 # ------------------------------------------------------------------------------
 log "Checking Home filesystem..."
 
-# Check if /home is a mountpoint and is btrfs
-if findmnt -n -o FSTYPE /home | grep -q "btrfs"; then
+# Snapper needs /home itself to be a Btrfs subvolume, not merely a directory on
+# the Btrfs root filesystem.
+if storage_home_is_btrfs; then
     log "Home is Btrfs. Configuring Snapper for Home..."
     
     if ! snapper list-configs | grep -q "^home "; then
@@ -75,10 +78,15 @@ if findmnt -n -o FSTYPE /home | grep -q "btrfs"; then
         log "Config 'home' already exists."
     fi
 else
-    log "/home is not a separate Btrfs volume. Skipping."
+    if snapper list-configs | grep -q "^home "; then
+        die "Snapper config 'home' exists but /home is not a Btrfs subvolume."
+    fi
+    log "/home is not a Btrfs subvolume. Skipping."
 fi
 
 if snapper list-configs | grep -q "^home "; then
+    snapshot_config_subvolume_matches home /home ||
+        die "Snapper config 'home' does not target /home."
     exe snapper -c home set-config "${SNAPPER_TARGET_SETTINGS[@]}"
 fi
 
@@ -88,37 +96,33 @@ ensure_service_enabled snapper-cleanup.timer
 # 3. Create Initial Safety Snapshots
 # ------------------------------------------------------------------------------
 section "Safety Net" "Creating Initial Snapshots"
+SNAPSHOT_HAS_HOME=0
+snapshot_config_subvolume_matches home /home && SNAPSHOT_HAS_HOME=1
+SNAPSHOT_DESCRIPTION="Before Shorin Setup [run:${SHORIN_RUN_TOKEN:-$$};home:$SNAPSHOT_HAS_HOME]"
 
 # Snapshot Root
 if snapper list-configs | grep -q "root "; then
-    if snapper_snapshot_present root 'Before Shorin Setup'; then
-        log "Snapshot already created."
+    log "Creating a fresh Root snapshot for this run..."
+    if exe snapper -c root create --description "$SNAPSHOT_DESCRIPTION"; then
+        success "Root snapshot created."
     else
-        log "Creating Root snapshot..."
-        if exe snapper -c root create --description "Before Shorin Setup"; then
-            success "Root snapshot created."
-        else
-            error "Failed to create Root snapshot."
-            warn "Cannot proceed without a safety snapshot. Aborting."
-            exit 1
-        fi
+        error "Failed to create Root snapshot."
+        warn "Cannot proceed without a safety snapshot. Aborting."
+        exit 1
     fi
 fi
 
 # Snapshot Home
 if snapper list-configs | grep -q "home "; then
-    if snapper_snapshot_present home 'Before Shorin Setup'; then
-        log "Snapshot already created."
+    log "Creating a fresh Home snapshot for this run..."
+    if exe snapper -c home create --description "$SNAPSHOT_DESCRIPTION"; then
+        success "Home snapshot created."
     else
-        log "Creating Home snapshot..."
-        if exe snapper -c home create --description "Before Shorin Setup"; then
-            success "Home snapshot created."
-        else
-            error "Failed to create Home snapshot."
-            # This is less critical than root, but should still be a failure.
-            exit 1
-        fi
+        error "Failed to create Home snapshot."
+        exit 1
     fi
 fi
+
+touch "$(storage_run_snapshot_stamp)"
 
 log "Module 00 completed. Safe to proceed."

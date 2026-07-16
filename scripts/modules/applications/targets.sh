@@ -23,6 +23,9 @@ WINDOWS_FONT_SOURCE=${WINDOWS_FONT_SOURCE:-$SHORIN_ROOT/resources/windows-sim-fo
 FIREFOX_DEFAULT_SOURCE=${FIREFOX_DEFAULT_SOURCE:-$SHORIN_ROOT/resources/firefox}
 FOCUS_SHIFT_REPO_URL=https://github.com/awei807-wei/FocusShift.git
 NIRI_CLIP_REPO_URL=https://github.com/awei807-wei/niri-clip.git
+FOCUS_SHIFT_COMMIT=cb841ebd12db77517dfe60ab0c980cf7d55ad788
+NIRI_CLIP_COMMIT=81daa7b8b2044765a562e8fe30b3e7e3c10576e2
+LAZYVIM_STARTER_COMMIT=803bc181d7c0d6d5eeba9274d9be49b287294d99
 GITHUB_PROVENANCE_DIR=${GITHUB_PROVENANCE_DIR:-}
 source "$SHORIN_ROOT/scripts/modules/applications/vicinae-contract.sh"
 
@@ -46,8 +49,13 @@ application_manifest_entries() {
 }
 
 lazyvim_config_satisfied() {
-    [ -s "$HOME_DIR/.config/nvim/init.lua" ] &&
-        [ -s "$HOME_DIR/.config/nvim/lua/config/lazy.lua" ]
+    local config_dir="$HOME_DIR/.config/nvim"
+    local provenance="$config_dir/.shorin-starter-commit"
+
+    [ -s "$config_dir/init.lua" ] &&
+        [ -s "$config_dir/lua/config/lazy.lua" ] || return 1
+    [ ! -e "$provenance" ] ||
+        [ "$(< "$provenance")" = "$LAZYVIM_STARTER_COMMIT" ]
 }
 
 lazyvim_target_satisfied() {
@@ -139,11 +147,13 @@ github_application_satisfied() {
 
     case "$app" in
         focus-shift)
-            state_git_checkout "$source_dir" "$FOCUS_SHIFT_REPO_URL" main &&
+            state_git_checkout "$source_dir" "$FOCUS_SHIFT_REPO_URL" main \
+                "$FOCUS_SHIFT_COMMIT" &&
                 github_provenance_satisfied "$app" "$source_dir" "$binary"
             ;;
         niri-clip)
-            state_git_checkout "$source_dir" "$NIRI_CLIP_REPO_URL" main &&
+            state_git_checkout "$source_dir" "$NIRI_CLIP_REPO_URL" main \
+                "$NIRI_CLIP_COMMIT" &&
                 github_provenance_satisfied "$app" "$source_dir" "$binary" &&
                 state_file_matches \
                     "$source_dir/systemd/niri-clip.service" \
@@ -178,7 +188,7 @@ application_entry_payload_satisfied() {
     local entry=$1
 
     case "$entry" in
-        AUR:*) state_package_present "${entry#AUR:}" ;;
+        AUR:*) declared_package_target_satisfied "$entry" ;;
         flatpak:*) state_flatpak_present "${entry#flatpak:}" ;;
         GitHub:*) github_application_satisfied "${entry#GitHub:}" ;;
         lazyvim) lazyvim_target_satisfied ;;
@@ -237,6 +247,7 @@ application_entry_detected() {
     local entry=$1
 
     case "$entry" in
+        AUR:*) state_package_present "${entry#AUR:}" ;;
         GitHub:focus-shift)
             [ -x "$HOME_DIR/.local/bin/focus-shift" ] ||
                 [ -d "$HOME_DIR/.local/src/focus-shift/.git" ]

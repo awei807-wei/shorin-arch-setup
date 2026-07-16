@@ -144,10 +144,17 @@ state_grub_config_valid() {
 }
 
 state_git_checkout() {
-    local directory=$1 remote=$2 branch=$3 actual_remote actual_branch
+    local directory=$1 remote=$2 branch=$3 expected_commit=${4:-}
+    local actual_remote actual_branch actual_commit
     state_command_exists git || return 2
     [ -d "$directory/.git" ] || return 1
     actual_remote=$(git -C "$directory" remote get-url origin 2>/dev/null) || return 1
-    actual_branch=$(git -C "$directory" branch --show-current 2>/dev/null) || return 1
-    [ "$actual_remote" = "$remote" ] && [ "$actual_branch" = "$branch" ]
+    [ "$actual_remote" = "$remote" ] || return 1
+    if [ -n "$expected_commit" ]; then
+        actual_commit=$(git -C "$directory" rev-parse HEAD 2>/dev/null) || return 1
+        [ "$actual_commit" = "$expected_commit" ]
+    else
+        actual_branch=$(git -C "$directory" branch --show-current 2>/dev/null) || return 1
+        [ "$actual_branch" = "$branch" ]
+    fi
 }

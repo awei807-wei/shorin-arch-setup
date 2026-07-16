@@ -26,6 +26,11 @@ cd shorin-arch-setup
 sudo bash install.sh install --user shorin
 ```
 
+`install` 和 `repair` 必须由 root 启动，因为它们需要调用 pacman、写入
+`/etc`、管理 systemd、fstab 和 GRUB。`--user` 必须指向实际桌面普通用户，
+不能填写 `root`；Git checkout、AUR 构建和用户配置操作会降权到该用户，
+只有系统状态写入保留 root 权限。`audit` 和 `verify` 是只读模式，不要求 root。
+
 `install` 是默认模式，因此也可以执行：
 
 ```bash
@@ -146,7 +151,7 @@ bash install.sh verify --user shorin grub
 
 不适用或缺少外部前置的可选模块会被明确标记为跳过。例如 VCPChat 尚未部署时，`vcp` 不会冒充成功，整体结果为 `PARTIAL`。
 
-`desktop-niri` 的必需目标包含 QuickShell、`qt6-wayland`、`qt6-multimedia`、`bluez-utils`、主题生成、锁屏/空闲管理及桌面核心依赖。模块会把必需集合与 `niri-packages.list` 中的用户选择合并，并确保 Niri 配置中只有一个有效的 QuickShell 启动命令；已有带参数的 `spawn-sh-at-startup` 命令会被保留。旧 profile 中的 Waybar 及其两个扩展会被视为已由 QuickShell 取代，不再触发安装或修复，也不会主动卸载机器上已有的软件。
+`desktop-niri` 的必需目标包含 QuickShell、`qt6-wayland`、`qt6-multimedia`、`bluez-utils`、主题生成、锁屏/空闲管理及桌面核心依赖。模块会把必需集合与 `niri-packages.list` 中的用户选择合并，并确保 Niri 配置中分别只有一个有效的 QuickShell 和 Fcitx5 启动命令；已有带参数的 `spawn-sh-at-startup` 命令会被保留。旧 profile 中的 Waybar 及其两个扩展会被视为已由 QuickShell 取代，不再触发安装或修复，也不会主动卸载机器上已有的软件。
 
 桌面修复还会收敛以下持久状态：Niri 的 `PATH` 包含目标用户 `~/.local/bin`；`Mod+Alt+V` 调用 `niri-clip toggle`；`Mod+ALT+C` 调用 `focus-shift`；Fish 仅在环境文件存在时执行 `source`；明确的旧 `swww` 命令迁移为 `awww`。Niri 配置修改后必须通过 `niri validate`，失败时会恢复原 `config.kdl` 和 `binds.kdl`。
 
@@ -164,6 +169,17 @@ TTY1 会话由 `~/.bash_profile` 中的托管块启动 `niri-session`。旧版 `
 
 pacman 安装若明确返回未知或缺失密钥的 PGP 信任错误，包管理原语会在整次运行中至多执行一次官方 `archlinux-keyring` 更新和 `pacman-key --populate archlinux`，然后重试原包。单纯的缓存损坏、网络错误、包不存在和依赖冲突不会触发该恢复；安装器不会关闭签名验证、使用 `TrustAll` 或在单包修复中隐式执行整机升级。
 
+AUR 目标先检查 Arch 官方 `core`、`extra` 和 `multilib`；同名官方包存在时
+使用仓库限定的 pacman 目标收敛到官方版本。真正的 AUR 目标强制使用
+`yay --aur`，保留 PKGBUILD/diff 交互审阅，并通过目标用户正常的 sudo 策略完成
+安装，不创建临时 NOPASSWD 规则。因此 AUR 安装需要可用 TTY 和目标用户的 sudo
+凭据。ArchLinuxCN 目前仅用于引导 `yay` 等明确的第三方二进制目标，不会把应用
+清单中的第三方包标记为官方包。
+
+带来源前缀的包会在 `/var/lib/shorin-arch-setup/package-sources/` 记录来源和已安装
+版本。旧安装缺少该凭据时会执行一次仓库限定的官方重装或 AUR rebuild，完成
+ArchLinuxCN/AUR 到目标来源的迁移；凭据与当前版本不一致时同样报告 drift。
+
 ## 目录结构
 
 ```text
@@ -175,6 +191,8 @@ scripts/
     state.sh                     # 只读状态谓词
     packages.sh                  # pacman、AUR 与系统级 Flatpak
     files.sh                     # 原子写入、模板和结构化文件原语
+    git.sh                       # 降权、固定版本的 Git checkout
+    snapshots.sh                 # 成对快照查找与回滚标识
     systemd.sh                   # 系统及用户服务
     verify.sh                    # 通用验收函数
     compat.sh                    # 迁移期 apply 兼容接口
@@ -226,10 +244,24 @@ tests/                           # 原语、runner、入口及真实模块合同
 
 当前 `GitHub:` 应用包括 `focus-shift` 和 `niri-clip`。源码位于目标用户的 `~/.local/src/`，可执行文件安装到 `~/.local/bin/`；`niri-clip` 同时部署并启用用户级 systemd 服务。
 
+源码应用、桌面 dotfiles 和新部署的 LazyVim starter 均固定到仓库内审核过的 commit；
+远端 `main` 更新不会自动进入 root 安装链。升级这些输入时需要显式更新提交常量
+并重新运行测试。`strap.sh` 同样不会直接执行刚拉取的分支头：首次运行只打印
+commit，审核后必须通过 `SHORIN_EXPECTED_COMMIT=<commit>` 再次运行。
+
+安装器新建的 LazyVim 配置会记录 starter commit 并参与后续验收；没有该标记的
+既有配置视为用户自管，不会为了补写 provenance 而覆盖。
+
 声明 `AUR:vicinae-bin` 或兼容的旧 `AUR:vicinae` 目标时，applications 模块会管理 `~/.config/vicinae/settings.json` 的初始化与旧空壳迁移。缺失或仅含默认 schema 的配置会从可信模板原子部署，路径按目标用户 home 渲染，权限为 `600`；已存在的真实用户配置和符号链接不会覆盖。扩展、数据库、缓存、访问历史等运行数据不属于安装器管理范围。
 
 ## 重跑与外部条件
 
 软件包、服务、配置文件、用户单元、`fstab` 和 GRUB 都以当前状态为判断依据。Storage 会按挂载目标清理旧版本遗留的重复根分区、Home、EFI、包缓存和日志条目，同时保留同一 Btrfs 文件系统上的不同子卷；写回前必须通过 `findmnt --verify`。安装器管理的系统配置经校验后原子替换；用户可编辑的 dotfiles、Firefox 用户配置、Vicinae 用户配置、壁纸、模板和 XDG 目录配置默认只在首次创建或明确识别为旧空壳时部署，重跑不会无条件覆盖。
+
+每次可写安装都会创建新的 `Before Shorin Setup` 快照；真正进入 desktop-niri
+前再创建新的桌面检查点，不复用旧运行的同名快照。回滚脚本会在修改前解析并
+校验 root/home 两侧的最新检查点，交互确认后才执行；自动化调用必须显式传入
+`--yes`。回滚不会清理 pacman、yay 或 paru 缓存。只有 `/home` 自身是 Btrfs
+子卷时才创建独立 Home Snapper 配置。
 
 用户级 systemd 单元在存在用户 bus 时立即 reload/start；没有 bus 时只建立 wants 链接并记录待登录状态。NAS、VCPChat 或其他外部前置不可用时，对应可选模块会进入跳过或失败状态，并反映到最终 `PARTIAL` 结果中。

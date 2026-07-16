@@ -101,8 +101,8 @@ success "ArchLinuxCN configured."
 # ------------------------------------------------------------------------------
 section "Step 5/6" "AUR Helpers"
 
-log "Installing yay and paru..."
-ensure_packages base-devel yay paru
-success "Helpers installed."
+log "Installing the yay AUR helper..."
+ensure_packages base-devel yay
+success "AUR helper installed."
 
 log "Module 01 completed."

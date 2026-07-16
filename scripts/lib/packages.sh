@@ -31,6 +31,31 @@ flatpak_is_installed() {
 
 PACMAN_TRUST_RECOVERY_ATTEMPTED=${PACMAN_TRUST_RECOVERY_ATTEMPTED:-0}
 PACMAN_TRUST_STAMP=${PACMAN_TRUST_STAMP:-/run/lock/shorin-pacman-trust-${SHORIN_RUN_TOKEN:-$$}}
+PACKAGE_SOURCE_DIR=${PACKAGE_SOURCE_DIR:-/var/lib/shorin-arch-setup/package-sources}
+
+package_source_matches() {
+    local package=$1 expected_source=$2 file="$PACKAGE_SOURCE_DIR/$1"
+    local installed_version recorded_source recorded_version
+
+    [ -r "$file" ] || return 1
+    installed_version=$(pacman -Q "$package" 2>/dev/null | awk '{ print $2 }') ||
+        return 1
+    recorded_source=$(awk -F= '$1 == "source" { print $2 }' "$file")
+    recorded_version=$(awk -F= '$1 == "version" { print $2 }' "$file")
+    [ "$recorded_source" = "$expected_source" ] &&
+        [ "$recorded_version" = "$installed_version" ]
+}
+
+record_package_source() {
+    local package=$1 source=$2 version temporary
+
+    version=$(pacman -Q "$package" | awk '{ print $2 }') || return 1
+    install -d -m 755 "$PACKAGE_SOURCE_DIR"
+    temporary=$(mktemp)
+    printf 'source=%s\nversion=%s\n' "$source" "$version" > "$temporary"
+    install_if_changed "$temporary" "$PACKAGE_SOURCE_DIR/$package" 644
+    rm -f "$temporary"
+}
 
 pacman_log_has_trust_error() {
     local log_file=$1
@@ -110,11 +135,60 @@ ensure_packages() {
     done
 }
 
+official_package_repository() {
+    local package=$1 repository
+
+    for repository in core extra multilib; do
+        if pacman -Si "$repository/$package" >/dev/null 2>&1; then
+            printf '%s\n' "$repository"
+            return 0
+        fi
+    done
+    return 1
+}
+
+ensure_official_package() {
+    require_writable_mode || return
+    local repository=$1 package=$2
+
+    run_with_pacman_trust_recovery "$repository/$package" \
+        pacman -S --noconfirm "$repository/$package"
+    package_is_installed "$package"
+    record_package_source "$package" "official:$repository"
+}
+
+declared_package_target_satisfied() {
+    local target=$1 package repository
+
+    case "$target" in
+        AUR:*)
+            package=${target#AUR:}
+            repository=$(official_package_repository "$package") || true
+            if [ -n "$repository" ]; then
+                package_source_matches "$package" "official:$repository"
+            else
+                package_source_matches "$package" aur
+            fi
+            ;;
+        *) package_is_installed "$target" ;;
+    esac
+}
+
 ensure_aur_package() {
     require_writable_mode || return
     local package=$1
     local user=${2:-${TARGET_USER:-}}
     local home=${3:-${HOME_DIR:-}}
+    local repository
+
+    repository=$(official_package_repository "$package") || true
+    if [ -n "$repository" ]; then
+        printf 'INFO: %s is available from the official %s repository; using pacman\n' \
+            "$package" "$repository" >&2
+        package_source_matches "$package" "official:$repository" && return 0
+        ensure_official_package "$repository" "$package"
+        return
+    fi
 
     if [ -z "$user" ]; then
         printf 'ERROR: a target user is required for AUR package %s\n' \
@@ -129,12 +203,11 @@ ensure_aur_package() {
         return 1
     fi
 
-    package_is_installed "$package" ||
-        run_with_pacman_trust_recovery "$package" \
-            runuser -u "$user" -- env HOME="$home" \
-                yay -S --noconfirm --needed \
-                --answerdiff=None --answerclean=None "$package"
+    package_source_matches "$package" aur ||
+        runuser -u "$user" -- env HOME="$home" \
+            yay -S --aur --rebuild "$package"
     package_is_installed "$package"
+    record_package_source "$package" aur
 }
 
 ensure_flatpak() {

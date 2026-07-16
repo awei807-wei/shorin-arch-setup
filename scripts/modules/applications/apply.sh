@@ -12,7 +12,6 @@ SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." &&
 PARENT_DIR="${SHORIN_ROOT_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 source "$SCRIPT_DIR/lib/core.sh"
 source "$SCRIPT_DIR/modules/applications/github-apps.sh"
-source "$SCRIPT_DIR/modules/applications/privilege-apply.sh"
 source "$SCRIPT_DIR/modules/applications/targets.sh"
 
 # --- [CONFIGURATION] ---
@@ -153,7 +152,7 @@ info_kv "Scheduled" "Repo: ${#REPO_APPS[@]} | AUR: ${#AUR_APPS[@]} | Flatpak: ${
 
 # --- A. Install Repo Apps (individual convergence) ---
 if [ ${#REPO_APPS[@]} -gt 0 ]; then
-    section "Step 1/4" "Official Repository Packages"
+    section "Step 1/4" "Configured Binary Repository Packages"
     mapfile -t REPO_APPS < <(printf '%s\n' "${REPO_APPS[@]}" | sort -u)
     for pkg in "${REPO_APPS[@]}"; do
         if ! ensure_package "$pkg"; then
@@ -165,17 +164,8 @@ fi
 # --- B. Install AUR Apps (INDIVIDUAL MODE + RETRY) ---
 if [ ${#AUR_APPS[@]} -gt 0 ]; then
     section "Step 2/4" "AUR Packages (Sequential + Retry)"
-    log "Granting temporary package-install privilege for AUR targets..."
-    begin_temporary_aur_sudoers "${AUR_APPS[@]}"
-    trap end_temporary_aur_sudoers EXIT
 
     for app in "${AUR_APPS[@]}"; do
-        if pacman -Qi "$app" &>/dev/null; then
-            log "Skipping '$app' (Already installed)."
-            continue
-        fi
-
-
         log "Installing AUR: $app ..."
         install_success=false
         max_retries=2
@@ -200,10 +190,6 @@ if [ ${#AUR_APPS[@]} -gt 0 ]; then
             FAILED_PACKAGES+=("aur:$app")
         fi
     done
-
-    log "Revoking temporary AUR package-install privilege..."
-    end_temporary_aur_sudoers
-    trap - EXIT
 fi
 
 # --- C. Install Flatpak Apps (INDIVIDUAL MODE) ---

@@ -30,6 +30,8 @@ ensure_niri_session_config() {
     done < <(find "$NIRI_QUICKSHELL_DIR" -type f -print0)
 
     ensure_niri_quickshell_startup "$NIRI_CONFIG_FILE" "$user" || status=$?
+    [ "$status" -ne 0 ] || ensure_niri_fcitx5_startup \
+        "$NIRI_CONFIG_FILE" "$user" || status=$?
     [ "$status" -ne 0 ] || ensure_niri_path "$user" || status=$?
     [ "$status" -ne 0 ] || ensure_niri_wallpaper_backend "$user" || status=$?
     [ "$status" -ne 0 ] || ensure_niri_bindings "$user" || status=$?

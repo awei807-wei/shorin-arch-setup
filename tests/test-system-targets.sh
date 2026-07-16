@@ -18,6 +18,10 @@ fail() {
 
 source "$ROOT_DIR/scripts/modules/base/targets.sh"
 
+if resolve_target_user root; then
+    fail 'root may run the installer but must never be accepted as the desktop target user'
+fi
+
 flatpak() {
     printf 'flathub\thttps://wrong.example/repo/\n'
 }
@@ -51,6 +55,23 @@ fi
 
 source "$ROOT_DIR/scripts/modules/storage/targets.sh"
 SNAPPER_CONFIG_DIR="$TEST_DIR/snapper"
+SNAPPER_HOME_TARGET=/home
+snapper() {
+    local config=""
+    while [ "$#" -gt 0 ]; do
+        if [ "$1" = -c ]; then
+            config=$2
+            shift 2
+        else
+            shift
+        fi
+    done
+    case "$config" in
+        root) printf '/\n' ;;
+        home) printf '%s\n' "$SNAPPER_HOME_TARGET" ;;
+        *) return 1 ;;
+    esac
+}
 mkdir -p "$SNAPPER_CONFIG_DIR"
 for config in root home; do
     for setting in "${SNAPPER_TARGET_SETTINGS[@]}"; do
@@ -58,6 +79,11 @@ for config in root home; do
     done > "$SNAPPER_CONFIG_DIR/$config"
 done
 snapper_config_matches root || fail 'declared Snapper values must pass'
+SNAPPER_HOME_TARGET=/wrong-home
+if snapper_config_matches home; then
+    fail 'a Snapper home config targeting another subvolume must be rejected'
+fi
+SNAPPER_HOME_TARGET=/home
 sed -i 's/^NUMBER_LIMIT="20"/NUMBER_LIMIT="99"/' \
     "$SNAPPER_CONFIG_DIR/root"
 if snapper_config_matches root; then

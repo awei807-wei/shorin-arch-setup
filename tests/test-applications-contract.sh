@@ -19,7 +19,6 @@ export SHORIN_ROOT SHORIN_READ_ONLY
 source "$ROOT_DIR/scripts/modules/applications/targets.sh"
 source "$ROOT_DIR/scripts/modules/applications/config-apply.sh"
 source "$ROOT_DIR/scripts/modules/applications/github-apps.sh"
-source "$ROOT_DIR/scripts/modules/applications/privilege-apply.sh"
 
 cleanup() {
     find "$TEST_DIR" -depth -delete
@@ -37,6 +36,7 @@ FLATPAK_STEAM_LOCALE=0
 GITHUB_REMOTE_OK=0
 NIRI_CLIP_UNIT_ENABLED=0
 LAZYVIM_CLONES=0
+LAZYVIM_CHECKOUT_FAIL=0
 GITHUB_HEAD=0123456789abcdef0123456789abcdef01234567
 GITHUB_CHECKOUT_DIRTY=0
 AS_USER_LOG="$TEST_DIR/as-user.log"
@@ -95,6 +95,12 @@ as_user() {
         printf 'require("config.lazy")\n' > "$destination/init.lua"
         printf 'return {}\n' > "$destination/lua/config/lazy.lua"
         return 0
+    fi
+    if [ "${1:-}" = git ] && [ "${2:-}" = -C ] &&
+        [ "${4:-}" = checkout ] && [ "${5:-}" = --detach ]; then
+        [ "$LAZYVIM_CHECKOUT_FAIL" -eq 0 ] || return 1
+        [ "${6:-}" = "$LAZYVIM_STARTER_COMMIT" ]
+        return
     fi
     if [[ " $* " == *' wineboot '* ]]; then
         mkdir -p "$HOME_DIR/.wine"
@@ -289,16 +295,16 @@ NIRI_CLIP_UNIT_ENABLED=1
 application_entry_satisfied GitHub:niri-clip ||
     fail 'niri-clip source, binary, service and wants link must satisfy target'
 
-APPLICATIONS_TEMP_SUDOERS_FILE="$TEST_DIR/sudoers/temporary-applications"
-begin_temporary_aur_sudoers
-[ ! -e "$APPLICATIONS_TEMP_SUDOERS_FILE" ] ||
-    fail 'repository-only targets must not create temporary NOPASSWD'
-begin_temporary_aur_sudoers vicinae-bin
-grep -Fqx "$TARGET_USER ALL=(root) NOPASSWD: /usr/bin/pacman" \
-    "$APPLICATIONS_TEMP_SUDOERS_FILE" ||
-    fail 'AUR targets must receive the temporary package-install privilege'
-end_temporary_aur_sudoers
-[ ! -e "$APPLICATIONS_TEMP_SUDOERS_FILE" ] ||
-    fail 'temporary AUR privilege must be revoked immediately after use'
+find "$HOME_DIR/.config/nvim" -depth -delete
+LAZYVIM_CHECKOUT_FAIL=1
+if ensure_lazyvim_config 2>/dev/null; then
+    fail 'a failed pinned LazyVim checkout must fail closed'
+fi
+[ ! -e "$HOME_DIR/.config/nvim" ] ||
+    fail 'a failed pinned LazyVim checkout must remove the unverified clone'
+
+if grep -R -Fq 'NOPASSWD: /usr/bin/pacman' "$ROOT_DIR/scripts"; then
+    fail 'AUR installation must not grant unrestricted pacman sudo privileges'
+fi
 
 printf 'PASS: applications configuration contract\n'

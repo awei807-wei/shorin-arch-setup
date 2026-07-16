@@ -5,12 +5,12 @@ virt-manager                             # KVM qemu virtula machine
 # --- Gaming & Media ---
 steam                                    # Gaming Platform (Valve)
 lutris                                   # Gaming outside steam
-heroic-games-launcher-bin                # Playing Epic games
+AUR:heroic-games-launcher-bin            # Playing Epic games
 mpv                                      # Minimalist High Performance Video Player
 fragments                                # BitTorrent Client (GNOME style)
 mangohud                                 # OSD tool for gaming (like msi afterburner)
 gamescope                                # gaming conpositor made by Valve
-upscaler                                 # image upscaler (make it more clear)
+AUR:upscaler                             # image upscaler (make it more clear)
 curtail                                  # compress image (make it smaller)    
 lact                                     # GPU Control Tool (Overclocking/Fan)
 obs-studio                               # OBS Studio (Streaming & Recording)
@@ -20,12 +20,11 @@ btop                                     # Resource Monitor (TUI)
 gnome-disk-utility                       # Disk Management Utility (Disks)
 baobab                                   # Disk Usage Analyzer
 mission-center                           # System Monitor (Task Manager style)
-clash-verge-rev                          # Sometimes a detour is necessary to solve a problem
+AUR:clash-verge-rev                      # Sometimes a detour is necessary to solve a problem
 flatseal                                 # flatpak permission manager 
 # --- Filesystem Support ---
 dosfstools                               # Tools for FAT12/16/32 filesystems
 ntfs-3g                                  # NTFS filesystem driver
-exfat-utils                              # exFAT filesystem utilities
 f2fs-tools                               # Tools for Flash-Friendly File System
 udftools                                 # Tools for UDF filesystems (DVD/Optical)
 xfsprogs                                 # Tools for XFS filesystems

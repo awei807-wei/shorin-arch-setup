@@ -68,6 +68,15 @@ ensure_lazyvim_config() {
         error 'Failed to clone the LazyVim starter.'
         return 1
     fi
+    if ! as_user git -C "$config_dir" checkout --detach \
+        "$LAZYVIM_STARTER_COMMIT"; then
+        error "Pinned LazyVim starter commit is unavailable: $LAZYVIM_STARTER_COMMIT"
+        find "$config_dir" -depth -delete
+        return 1
+    fi
+    printf '%s\n' "$LAZYVIM_STARTER_COMMIT" > \
+        "$config_dir/.shorin-starter-commit"
+    chown "$TARGET_USER:" "$config_dir/.shorin-starter-commit"
     [ ! -d "$config_dir/.git" ] || find "$config_dir/.git" -depth -delete
     lazyvim_config_satisfied
 }

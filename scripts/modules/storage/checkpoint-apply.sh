@@ -20,7 +20,9 @@ section "Phase 3c" "System Snapshot"
 # ==============================================================================
 
 create_checkpoint() {
-    local MARKER="Before Desktop Environments"
+    local has_home=0
+    snapshot_config_subvolume_matches home /home && has_home=1
+    local MARKER="Before Desktop Environments [run:${SHORIN_RUN_TOKEN:-$$};home:$has_home]"
     local root_fstype
 
     root_fstype=$(findmnt -n -o FSTYPE /)
@@ -38,15 +40,9 @@ create_checkpoint() {
     # 1. Root 分区快照
     # 检查 root 配置是否存在
     if snapper -c root get-config &>/dev/null; then
-        # 检查是否已存在同名快照 (避免重复创建)
-        if snapper -c root list --columns description | grep -Fqx "$MARKER"; then
-            log "Snapshot '$MARKER' already exists on [root]."
-        else
-            log "Creating safety checkpoint on [root]..."
-            # 使用 --type single 表示这是一个独立的存档点
-            snapper -c root create --description "$MARKER"
-            success "Root snapshot created."
-        fi
+        log "Creating a fresh safety checkpoint on [root]..."
+        snapper -c root create --description "$MARKER"
+        success "Root snapshot created."
     else
         error "Snapper root config is missing; cannot create the required checkpoint."
         return 1
@@ -54,13 +50,9 @@ create_checkpoint() {
 
     # 2. Home 分区快照 (如果存在 home 配置)
     if snapper -c home get-config &>/dev/null; then
-        if snapper -c home list --columns description | grep -Fqx "$MARKER"; then
-            log "Snapshot '$MARKER' already exists on [home]."
-        else
-            log "Creating safety checkpoint on [home]..."
-            snapper -c home create --description "$MARKER"
-            success "Home snapshot created."
-        fi
+        log "Creating a fresh safety checkpoint on [home]..."
+        snapper -c home create --description "$MARKER"
+        success "Home snapshot created."
     fi
 }
 

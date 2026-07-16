@@ -11,6 +11,7 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 # --- [配置区域] ---
 # 优先使用环境变量传入的分支名，如果没传，则默认使用 'main'
 TARGET_BRANCH="${BRANCH:-main}"
+EXPECTED_COMMIT="${SHORIN_EXPECTED_COMMIT:-}"
 REPO_URL="https://github.com/awei807-wei/shorin-arch-setup.git"
 DIR_NAME="shorin-arch-setup"
 
@@ -44,7 +45,25 @@ else
     mv "$STAGED_DIR" "$DIR_NAME"
 fi
 
-# 3. 运行安装
+# 3. Verify the exact reviewed revision before executing it as root.
+CHECKED_OUT_COMMIT=$(git -C "$DIR_NAME" rev-parse HEAD)
+if [ -z "$EXPECTED_COMMIT" ]; then
+    printf 'Fetched commit: %s\n' "$CHECKED_OUT_COMMIT"
+    printf 'Review it, then rerun with SHORIN_EXPECTED_COMMIT=%s\n' \
+        "$CHECKED_OUT_COMMIT"
+    exit 2
+fi
+if [ "$CHECKED_OUT_COMMIT" != "$EXPECTED_COMMIT" ]; then
+    printf 'Error: expected commit %s but fetched %s\n' \
+        "$EXPECTED_COMMIT" "$CHECKED_OUT_COMMIT" >&2
+    exit 1
+fi
+if [ -n "$(git -C "$DIR_NAME" status --porcelain)" ]; then
+    printf 'Error: refusing to execute a modified checkout: %s\n' "$DIR_NAME" >&2
+    exit 1
+fi
+
+# 4. Run the verified installer.
 if [ -d "$DIR_NAME" ]; then
     cd "$DIR_NAME"
     echo "Starting installer..."

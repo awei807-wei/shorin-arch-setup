@@ -30,6 +30,7 @@ _normalize_github_url() {
 _sync_github_app_repo() {
     local repo_url="$1"
     local source_name="$2"
+    local expected_commit="$3"
     local source_root="$HOME_DIR/.local/src"
     local source_dir="$source_root/$source_name"
 
@@ -54,7 +55,8 @@ _sync_github_app_repo() {
 
         log "Updating GitHub source: $source_name ..."
         if ! as_user env HOME="$HOME_DIR" git -C "$source_dir" fetch origin main ||
-            ! as_user env HOME="$HOME_DIR" git -C "$source_dir" merge --ff-only origin/main; then
+            ! as_user git -C "$source_dir" cat-file -e "$expected_commit^{commit}" ||
+            ! as_user git -C "$source_dir" checkout --detach "$expected_commit"; then
             error "Failed to update $source_name from GitHub."
             return 1
         fi
@@ -62,6 +64,10 @@ _sync_github_app_repo() {
         log "Cloning GitHub source: $source_name ..."
         if ! as_user env HOME="$HOME_DIR" git clone --branch main --single-branch "$repo_url" "$source_dir"; then
             error "Failed to clone $source_name from GitHub."
+            return 1
+        fi
+        if ! as_user git -C "$source_dir" checkout --detach "$expected_commit"; then
+            error "Pinned commit is unavailable for $source_name: $expected_commit"
             return 1
         fi
     fi
@@ -150,7 +156,7 @@ _build_and_install_cargo_binary() {
 _install_focus_shift() {
     _sync_github_app_repo \
         "$FOCUS_SHIFT_REPO_URL" \
-        "focus-shift" || return 1
+        "focus-shift" "$FOCUS_SHIFT_COMMIT" || return 1
 
     _build_and_install_cargo_binary "$GITHUB_APP_SOURCE_DIR" "focus-shift"
 }
@@ -158,7 +164,7 @@ _install_focus_shift() {
 _install_niri_clip() {
     _sync_github_app_repo \
         "$NIRI_CLIP_REPO_URL" \
-        "niri-clip" || return 1
+        "niri-clip" "$NIRI_CLIP_COMMIT" || return 1
 
     _build_and_install_cargo_binary "$GITHUB_APP_SOURCE_DIR" "niri-clip" || return 1
 

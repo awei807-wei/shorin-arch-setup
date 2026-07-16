@@ -40,6 +40,68 @@ test_atomic_text_convergence() {
         'line convergence must not append duplicates'
 }
 
+test_file_metadata_convergence() {
+    local source="$TEST_DIR/mode-source" destination="$TEST_DIR/mode-destination"
+
+    printf 'same content\n' > "$source"
+    cp "$source" "$destination"
+    chmod 600 "$destination"
+    install_if_changed "$source" "$destination" 644
+    assert_equal 644 "$(stat -c '%a' "$destination")" \
+        'content convergence must also repair the requested file mode'
+}
+
+test_checkout_preserves_shared_parent_mode() {
+    local repository="$TEST_DIR/source-repository"
+    local shared_parent="$TEST_DIR/shared-tmp"
+    local checkout="$shared_parent/checkout"
+    local current_user expected_commit
+
+    current_user=$(id -un)
+    mkdir -p "$repository" "$shared_parent"
+    chmod 1777 "$shared_parent"
+    git init -q -b main "$repository"
+    printf 'fixture\n' > "$repository/file.txt"
+    git -C "$repository" add file.txt
+    git -C "$repository" -c user.name=Fixture \
+        -c user.email=fixture@example.invalid commit -q -m fixture
+    expected_commit=$(git -C "$repository" rev-parse HEAD)
+
+    runuser() {
+        [ "$1" = -u ] || return 1
+        shift 2
+        [ "$1" = -- ] || return 1
+        shift
+        "$@"
+    }
+
+    HOME_DIR=$HOME ensure_git_checkout \
+        "$current_user" "$repository" main "$checkout" "$HOME" \
+        "$expected_commit"
+    assert_equal 1777 "$(stat -c '%a' "$shared_parent")" \
+        'checkout creation must not rewrite an existing shared parent mode'
+    [ -f "$checkout/file.txt" ] || {
+        printf 'FAIL: checkout fixture was not cloned\n' >&2
+        return 1
+    }
+    [ "$(git -C "$checkout" rev-parse HEAD)" = "$expected_commit" ] || {
+        printf 'FAIL: checkout did not use the pinned commit\n' >&2
+        return 1
+    }
+    mkdir -p "$shared_parent/preexisting"
+    printf 'untrusted\n' > "$shared_parent/preexisting/sentinel"
+    if HOME_DIR=$HOME ensure_git_checkout "$current_user" "$repository" main \
+        "$shared_parent/preexisting" "$HOME" "$expected_commit" 2>/dev/null; then
+        printf 'FAIL: a preexisting non-Git checkout path was accepted\n' >&2
+        return 1
+    fi
+    [ "$(< "$shared_parent/preexisting/sentinel")" = untrusted ] || {
+        printf 'FAIL: a refused checkout path was modified\n' >&2
+        return 1
+    }
+    unset -f runuser
+}
+
 test_package_convergence() {
     PACMAN_INSTALLED=0
     PACMAN_INSTALLS=0
@@ -59,6 +121,49 @@ test_package_convergence() {
     assert_equal 1 "$PACMAN_INSTALLS" \
         'package convergence must install only once'
 }
+
+test_aur_source_routing() (
+    local installed=0 runuser_called=0 aur_command=""
+    PACKAGE_SOURCE_DIR="$TEST_DIR/package-sources"
+
+    pacman() {
+        case "$1" in
+            -Si) [ "$2" = extra/official-example ] ;;
+            -Q) [ "$installed" -eq 1 ] && printf 'official-example 1.0\n' ;;
+            -S)
+                [ "${*: -1}" = extra/official-example ] || return 1
+                installed=1
+                ;;
+            *) return 1 ;;
+        esac
+    }
+    runuser() { runuser_called=1; return 1; }
+    ensure_aur_package official-example tester "$TEST_DIR/home"
+    assert_equal 1 "$installed" \
+        'an AUR declaration must prefer an available official package'
+    assert_equal 0 "$runuser_called" \
+        'official package routing must not invoke an AUR helper'
+
+    installed=0
+    pacman() {
+        case "$1" in
+            -Si) return 1 ;;
+            -Q) [ "$installed" -eq 1 ] && printf 'aur-example 2.0\n' ;;
+            *) return 1 ;;
+        esac
+    }
+    runuser() {
+        runuser_called=1
+        aur_command="$*"
+        installed=1
+    }
+    ensure_aur_package aur-example tester "$TEST_DIR/home"
+    [[ " $aur_command " == *' yay -S --aur --rebuild aur-example '* ]] || {
+        printf 'FAIL: a real AUR target must force yay --aur (command=%s)\n' \
+            "$aur_command" >&2
+        return 1
+    }
+)
 
 test_package_trust_recovery() {
     local package_log="$TEST_DIR/package-trust.log"
@@ -310,7 +415,10 @@ test_script_contract() {
 }
 
 test_atomic_text_convergence
+test_file_metadata_convergence
+test_checkout_preserves_shared_parent_mode
 test_package_convergence
+test_aur_source_routing
 test_package_trust_recovery
 test_failed_package_trust_recovery_is_not_retried
 test_package_non_trust_failure_does_not_recover

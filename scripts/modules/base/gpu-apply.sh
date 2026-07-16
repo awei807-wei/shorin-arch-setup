@@ -20,20 +20,6 @@ if [ "$(base_gpu_count "$GPU_INFO")" -ge 2 ] &&
 fi
 
 mapfile -t GPU_PACKAGES < <(base_gpu_target_packages "$GPU_INFO")
-SUDO_TEMP_FILE=
-if printf '%s\n' "${GPU_PACKAGES[@]}" | grep -q '^AUR:'; then
-    SUDO_TEMP_FILE=/etc/sudoers.d/99_shorin_installer_temp
-    SUDO_TEMP_SOURCE=$(mktemp)
-    printf '%s ALL=(root) NOPASSWD: /usr/bin/pacman\n' \
-        "$TARGET_USER" > "$SUDO_TEMP_SOURCE"
-    install_sudoers_file "$SUDO_TEMP_SOURCE" "$SUDO_TEMP_FILE"
-    rm -f "$SUDO_TEMP_SOURCE"
-fi
-cleanup_sudo() {
-    [ -z "$SUDO_TEMP_FILE" ] || [ ! -f "$SUDO_TEMP_FILE" ] ||
-        rm -f "$SUDO_TEMP_FILE"
-}
-trap cleanup_sudo EXIT INT TERM
 
 section Installation 'Installing hardware-derived GPU packages'
 for package in "${GPU_PACKAGES[@]}"; do

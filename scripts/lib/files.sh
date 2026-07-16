@@ -47,6 +47,7 @@ install_if_changed() {
     local staged="${destination}.new"
 
     if file_matches "$source" "$destination"; then
+        chmod "$mode" "$destination"
         return 0
     fi
     if ! install -D -m "$mode" "$source" "$staged"; then
@@ -91,57 +92,6 @@ deploy_user_tree_once() {
             install_user_file_once "$source" "$destination" "$mode" "$user" "$group"
         fi
     done < <(find "$source_root" -mindepth 1 -print0)
-}
-
-git_checkout_matches() {
-    local user=$1 repository=$2 branch=$3 destination=$4
-    local actual branch_name
-
-    [ -d "$destination/.git" ] || return 1
-    actual=$(runuser -u "$user" -- git -C "$destination" remote get-url origin) ||
-        return 1
-    branch_name=$(runuser -u "$user" -- git -C "$destination" branch --show-current) ||
-        return 1
-    [ "${actual%/}" = "${repository%/}" ] && [ "$branch_name" = "$branch" ]
-}
-
-ensure_git_checkout() {
-    require_writable_mode || return
-    local user=$1 repository=$2 branch=$3 destination=$4
-    local home=${5:-${HOME_DIR:-}}
-    local actual parent staged
-
-    if [ -z "$home" ]; then
-        home=$(getent passwd "$user" | cut -d: -f6)
-    fi
-    [ -n "$home" ] || return 1
-
-    if [ -d "$destination/.git" ]; then
-        actual=$(runuser -u "$user" -- git -C "$destination" remote get-url origin)
-        if [ "${actual%/}" != "${repository%/}" ]; then
-            printf 'ERROR: refusing to update %s: origin is %s\n' \
-                "$destination" "$actual" >&2
-            return 1
-        fi
-        runuser -u "$user" -- env HOME="$home" \
-            git -C "$destination" fetch origin "$branch"
-        runuser -u "$user" -- env HOME="$home" \
-            git -C "$destination" checkout "$branch"
-        runuser -u "$user" -- env HOME="$home" \
-            git -C "$destination" merge --ff-only "origin/$branch"
-        return 0
-    fi
-
-    parent=$(dirname "$destination")
-    install -d -o "$user" -g "$user" "$parent"
-    staged=$(mktemp -d "$parent/.checkout.XXXXXX")
-    rmdir "$staged"
-    if ! runuser -u "$user" -- env HOME="$home" \
-        git clone --branch "$branch" --single-branch "$repository" "$staged"; then
-        [ ! -e "$staged" ] || find "$staged" -depth -delete
-        return 1
-    fi
-    mv "$staged" "$destination"
 }
 
 key_value_matches() {

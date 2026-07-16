@@ -5,7 +5,7 @@ trap 'printf "ERROR: %s:%s: %s\n" \
   "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 SHORIN_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-export SHORIN_RUN_TOKEN=${SHORIN_RUN_TOKEN:-$$}
+export SHORIN_RUN_TOKEN=${SHORIN_RUN_TOKEN:-$(cat /proc/sys/kernel/random/uuid)}
 source "$SHORIN_ROOT/scripts/lib/core.sh"
 source "$SHORIN_ROOT/scripts/checks/preflight.sh"
 source "$SHORIN_ROOT/scripts/checks/audit.sh"

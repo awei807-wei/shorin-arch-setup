@@ -25,7 +25,7 @@ NIRI_REQUIRED_PACKAGE_TARGETS=(
     polkit-gnome
     ffmpegthumbnailer
     gvfs-smb
-    nautilus-open-any-terminal
+    AUR:nautilus-open-any-terminal
     file-roller
     gnome-keyring
     gst-plugins-base
@@ -39,7 +39,7 @@ NIRI_REQUIRED_PACKAGE_TARGETS=(
     matugen
     awww
     swayidle
-    swaylock-effects
+    AUR:swaylock-effects
 )
 
 niri_required_package_targets() {
@@ -109,7 +109,7 @@ niri_package_target_satisfied() {
     local target=$1
 
     case "$target" in
-        AUR:*) state_package_present "${target#AUR:}" ;;
+        AUR:*) declared_package_target_satisfied "$target" ;;
         flatpak:*) state_flatpak_present "${target#flatpak:}" ;;
         GitHub:*) return 1 ;;
         imagemagic) state_package_present imagemagick ;;
@@ -194,4 +194,49 @@ ensure_niri_quickshell_startup() {
     rm -f "$temporary"
     chown "$user:$group" "$file"
     niri_quickshell_startup_satisfied "$file"
+}
+
+niri_fcitx5_startup_satisfied() {
+    local file=$1
+
+    [ -s "$file" ] || return 1
+    awk '
+        /^[[:space:]]*spawn(-sh)?-at-startup[[:space:]].*["\/[:space:]]fcitx5([[:space:]&"]|$)/ {
+            fcitx++
+        }
+        END { exit !(fcitx == 1) }
+    ' "$file"
+}
+
+ensure_niri_fcitx5_startup() {
+    local file=$1 user=$2 temporary mode group
+
+    require_writable_mode || return
+    [ -s "$file" ] || die "Niri config is missing or empty: $file"
+    niri_fcitx5_startup_satisfied "$file" && return 0
+
+    temporary=$(mktemp)
+    awk '
+        /^[[:space:]]*spawn(-sh)?-at-startup[[:space:]].*["\/[:space:]]fcitx5([[:space:]&"]|$)/ {
+            if (!fcitx) {
+                print
+                fcitx=1
+            }
+            next
+        }
+        { print }
+        END {
+            if (!fcitx) print "spawn-at-startup \"fcitx5\""
+        }
+    ' "$file" > "$temporary"
+
+    mode=$(stat -c '%a' "$file")
+    group=$(id -gn "$user")
+    if ! install_if_changed "$temporary" "$file" "$mode"; then
+        rm -f "$temporary"
+        return 1
+    fi
+    rm -f "$temporary"
+    chown "$user:$group" "$file"
+    niri_fcitx5_startup_satisfied "$file"
 }

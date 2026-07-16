@@ -47,7 +47,7 @@ fi
 
 mapfile -t TARGETS < <(niri_all_package_targets "$MANIFEST" "$LIST_FILE")
 for REQUIRED_TARGET in quickshell qt6-wayland qt6-multimedia bluez-utils \
-    matugen awww swayidle swaylock-effects; do
+    matugen awww swayidle AUR:swaylock-effects; do
     printf '%s\n' "${TARGETS[@]}" | grep -Fqx "$REQUIRED_TARGET" ||
         fail "an old manifest must not mask required target $REQUIRED_TARGET"
 done
@@ -76,18 +76,25 @@ spawn-at-startup "waybar"
 spawn-at-startup "quickshell" "--config" "user-shell"
 spawn-at-startup "quickshell"
 spawn-at-startup "ags" "run"
+spawn-at-startup "/usr/bin/fcitx5" "-d"
+spawn-at-startup "env" "fcitx5"
 binds {
     Mod+Return { spawn "kitty"; }
 }
 EOF
 
 ensure_niri_quickshell_startup "$NIRI_CONFIG" "$TARGET_USER"
+ensure_niri_fcitx5_startup "$NIRI_CONFIG" "$TARGET_USER"
 niri_quickshell_startup_satisfied "$NIRI_CONFIG" ||
     fail 'converged config must contain one conflict-free QuickShell startup'
 grep -Fqx '// user-owned marker' "$NIRI_CONFIG" ||
     fail 'QuickShell convergence must preserve unrelated user content'
 grep -Fqx '    Mod+Return { spawn "kitty"; }' "$NIRI_CONFIG" ||
     fail 'QuickShell convergence must preserve user key bindings'
+niri_fcitx5_startup_satisfied "$NIRI_CONFIG" ||
+    fail 'converged config must contain exactly one Fcitx5 startup'
+[ "$(grep -Ec '^[[:space:]]*spawn(-sh)?-at-startup.*fcitx5' "$NIRI_CONFIG")" -eq 1 ] ||
+    fail 'Fcitx5 convergence must remove duplicate startup commands'
 grep -Fqx 'spawn-at-startup "quickshell" "--config" "user-shell"' \
     "$NIRI_CONFIG" ||
     fail 'QuickShell convergence must preserve the first user command and arguments'
@@ -113,6 +120,9 @@ niri_quickshell_startup_satisfied "$NIRI_CONFIG" ||
     fail 'QuickShell startup must be added without replacing the config'
 grep -Fqx '// arbitrary but nonempty config' "$NIRI_CONFIG" ||
     fail 'startup insertion must preserve the existing config'
+ensure_niri_fcitx5_startup "$NIRI_CONFIG" "$TARGET_USER"
+niri_fcitx5_startup_satisfied "$NIRI_CONFIG" ||
+    fail 'Fcitx5 startup must be added without replacing the config'
 
 NIRI_FIREFOX_POLICY_FILE="$TEST_DIR/firefox/policies.json"
 NIRI_NAUTILUS_VENDOR_FILE="$TEST_DIR/vendor-nautilus.desktop"
@@ -397,25 +407,35 @@ fi
 
 PROFILE_DIR="$TEST_DIR/profile"
 BIN_DIR="$TEST_DIR/mock-bin"
-mkdir -p "$PROFILE_DIR" "$BIN_DIR"
+PACKAGE_SOURCES="$TEST_DIR/package-sources"
+mkdir -p "$PROFILE_DIR" "$BIN_DIR" "$PACKAGE_SOURCES"
 printf 'imv\n' > "$PROFILE_DIR/niri-packages.list"
+for package in nautilus-open-any-terminal swaylock-effects; do
+    printf 'source=aur\nversion=1.0\n' > "$PACKAGE_SOURCES/$package"
+done
 cat > "$BIN_DIR/pacman" <<'EOF'
 #!/usr/bin/env bash
 if [ "$1" = -Q ] && { [ "$2" = ddcutil ] || [ "$2" = swayosd ]; }; then
     exit 1
 fi
-[ "$1" = -Q ]
+if [ "$1" = -Q ]; then
+    printf '%s 1.0\n' "$2"
+    exit 0
+fi
+exit 1
 EOF
 chmod +x "$BIN_DIR/pacman"
 
 status=0
 output=$(PATH="$BIN_DIR:$PATH" SHORIN_PROFILE_DIR="$PROFILE_DIR" \
+    PACKAGE_SOURCE_DIR="$PACKAGE_SOURCES" \
     bash "$ROOT_DIR/scripts/modules/desktop-niri.sh" check 2>&1) || status=$?
 [ "$status" -eq 0 ] || fail 'complete desktop managed state must check successfully'
 
 printf 'stale policy\n' > "$NIRI_FIREFOX_POLICY_FILE"
 status=0
 output=$(PATH="$BIN_DIR:$PATH" SHORIN_PROFILE_DIR="$PROFILE_DIR" \
+    PACKAGE_SOURCE_DIR="$PACKAGE_SOURCES" \
     bash "$ROOT_DIR/scripts/modules/desktop-niri.sh" verify 2>&1) || status=$?
 [ "$status" -eq 1 ] || fail 'stale managed desktop state must fail verification'
 grep -Fq file:firefox-policy <<< "$output" ||
@@ -426,6 +446,7 @@ printf '[Service]\nExecStart=/usr/bin/niri-session\n' > "$NIRI_LEGACY_UNIT"
 ln -s ../niri-autostart.service "$NIRI_LEGACY_UNIT_LINK"
 status=0
 output=$(PATH="$BIN_DIR:$PATH" SHORIN_PROFILE_DIR="$PROFILE_DIR" \
+    PACKAGE_SOURCE_DIR="$PACKAGE_SOURCES" \
     bash "$ROOT_DIR/scripts/modules/desktop-niri.sh" check 2>&1) || status=$?
 [ "$status" -eq 10 ] || fail 'legacy Niri autostart service must report drift'
 grep -Fq legacy:niri-autostart-absent <<< "$output" ||
