@@ -71,6 +71,16 @@ fi
 
 section "Systemd" "Automated Rime Synchronization"
 
+# Install safe sync script with NAS ESTALE + LOCK conflict handling
+install -d -o "$TARGET_USER" -g "$(id -gn "$TARGET_USER")" \
+    "$HOME_DIR/.local/bin"
+safe_sync_tmp=$(mktemp)
+rime_safe_sync_script_contract > "$safe_sync_tmp"
+install_if_changed "$safe_sync_tmp" "$HOME_DIR/.local/bin/rime-safe-sync.sh" 755
+rm -f "$safe_sync_tmp"
+chown "$TARGET_USER:" "$HOME_DIR/.local/bin/rime-safe-sync.sh"
+chmod 755 "$HOME_DIR/.local/bin/rime-safe-sync.sh"
+
 install -d -o "$TARGET_USER" -g "$(id -gn "$TARGET_USER")" \
     "$RIME_USER_UNIT_DIR"
 service_tmp=$(mktemp)
