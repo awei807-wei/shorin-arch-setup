@@ -30,12 +30,22 @@ state_flatpak_present() {
 
 state_service_enabled() {
     state_command_exists systemctl || return 2
-    systemctl is-enabled --quiet "$1"
+    # A missing unit (systemctl exit 4) or a disabled one is drift, not an
+    # inspection error: on a fresh install the unit is not present yet.
+    systemctl is-enabled --quiet "$1" && return 0
+    return 1
+}
+
+state_global_service_enabled() {
+    state_command_exists systemctl || return 2
+    systemctl --global is-enabled --quiet "$1" && return 0
+    return 1
 }
 
 state_service_active() {
     state_command_exists systemctl || return 2
-    systemctl is-active --quiet "$1"
+    systemctl is-active --quiet "$1" && return 0
+    return 1
 }
 
 state_file_exists() {

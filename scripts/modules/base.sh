@@ -53,7 +53,7 @@ base_inspect() {
         state_service_active power-profiles-daemon.service
     for unit in pipewire.service pipewire-pulse.service wireplumber.service; do
         base_expect "$phase" "global-unit:$unit" \
-            systemctl --global is-enabled --quiet "$unit"
+            state_global_service_enabled "$unit"
     done
     base_expect "$phase" pacman:multilib pacman_section_matches \
         /etc/pacman.conf multilib 'Include = /etc/pacman.d/mirrorlist'
@@ -73,7 +73,10 @@ base_inspect() {
 
     if ! gpu_info=$(base_gpu_info); then
         if [ "$phase" = check ]; then
-            module_inspection_failed gpu:inspection-unavailable
+            # lspci comes from pciutils, a base package. If it is missing the
+            # environment is not converged yet, so treat it as drift and let
+            # apply install the tooling before verify re-inspects.
+            module_drift gpu:inspection-unavailable
         else
             module_verify_failed gpu:inspection-unavailable
         fi
@@ -115,7 +118,9 @@ base_inspect() {
         1) ;;
         *)
             if [ "$phase" = check ]; then
-                module_inspection_failed bluetooth:inspection-unavailable
+                # Detection tools (usbutils/pciutils) are base packages that may
+                # not be installed yet; that is drift, not an inspection error.
+                module_drift bluetooth:inspection-unavailable
             else
                 module_verify_failed bluetooth:inspection-unavailable
             fi
