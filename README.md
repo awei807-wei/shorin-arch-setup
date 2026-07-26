@@ -155,7 +155,7 @@ bash install.sh verify --user shorin grub
 
 桌面修复还会收敛以下持久状态：Niri 的 `PATH` 包含目标用户 `~/.local/bin`；`Mod+Alt+V` 调用 `niri-clip toggle`；`Mod+ALT+C` 调用 `focus-shift`；Fish 直接且幂等地加入 `~/.cargo/bin` 与 `~/.local/bin`，不依赖安装器生成的 `env.fish`；明确的旧 `swww` 命令迁移为 `awww`。Niri 配置修改后必须通过 `niri validate`，失败时会恢复原 `config.kdl` 和 `binds.kdl`。
 
-TTY1 会话由 `~/.bash_profile` 中的托管块启动 `niri-session`。旧版 `niri-autostart.service` 及 wants 链接会被清理；存在用户 bus 时同步执行 `daemon-reload` 和失败状态清理，避免后台重复启动一个没有 TTY 的 Niri 会话。
+TTY1 会话由 `~/.bash_profile` 中的托管块启动 `niri-session -l`。`-l` 声明当前已处于登录 Shell；不带它时 `niri-session` 会重新拉起登录 Shell 导入环境，若登录 Shell 是 bash 会再次读取 `.bash_profile` 形成启动循环。旧版 `niri-autostart.service` 及 wants 链接会被清理；存在用户 bus 时同步执行 `daemon-reload` 和失败状态清理，避免后台重复启动一个没有 TTY 的 Niri 会话。
 
 ## 模块契约
 

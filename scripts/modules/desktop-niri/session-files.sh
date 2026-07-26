@@ -46,10 +46,14 @@ niri_fish_sources_satisfied() {
 }
 
 niri_bash_profile_contract() {
+    # -l tells niri-session it is already inside a login shell. Without it,
+    # niri-session re-execs "$SHELL" as a login shell to import the login
+    # environment; when that shell is bash it reads .bash_profile again and
+    # loops instead of starting the session.
     cat <<'EOF'
 # >>> shorin niri tty1 >>>
 if [[ -z ${DISPLAY:-} && -z ${WAYLAND_DISPLAY:-} && $(tty) == /dev/tty1 ]]; then
-    exec niri-session
+    exec niri-session -l
 fi
 # <<< shorin niri tty1 <<<
 EOF

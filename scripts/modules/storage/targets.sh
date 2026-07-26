@@ -6,7 +6,7 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 
 readonly -a STORAGE_PACKAGES=(btrfs-progs snapper snap-pac btrfs-assistant less)
 readonly -a STORAGE_FSTAB_UNIQUE_TARGETS=(
-    / /home /boot /var/cache/pacman/pkg /var/log
+    / /home /boot /boot/efi /var/cache/pacman/pkg /var/log
 )
 readonly -a SNAPPER_TARGET_SETTINGS=(
     'ALLOW_GROUPS=wheel'

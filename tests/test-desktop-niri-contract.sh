@@ -310,6 +310,29 @@ ensure_niri_fish_sources "$TARGET_USER"
 niri_fish_sources_satisfied ||
     fail 'a user-owned legacy Fish symlink must satisfy the migration boundary'
 
+# A previously deployed tty1 block without -l loops through the login shell;
+# it must drift and be upgraded in place.
+cat > "$NIRI_BASH_PROFILE" <<'EOF'
+# preserve upgrade marker
+# >>> shorin niri tty1 >>>
+if [[ -z ${DISPLAY:-} && -z ${WAYLAND_DISPLAY:-} && $(tty) == /dev/tty1 ]]; then
+    exec niri-session
+fi
+# <<< shorin niri tty1 <<<
+EOF
+if niri_bash_profile_satisfied; then
+    fail 'a tty1 startup block without -l must drift'
+fi
+ensure_niri_bash_profile "$TARGET_USER"
+niri_bash_profile_satisfied ||
+    fail 'the upgraded tty1 startup block must satisfy the contract'
+grep -Fqx '    exec niri-session -l' "$NIRI_BASH_PROFILE" ||
+    fail 'tty1 startup must run niri-session -l inside the login shell'
+[ "$(grep -Fc 'exec niri-session' "$NIRI_BASH_PROFILE")" -eq 1 ] ||
+    fail 'the tty1 startup upgrade must not duplicate the exec line'
+grep -Fqx '# preserve upgrade marker' "$NIRI_BASH_PROFILE" ||
+    fail 'the tty1 startup upgrade must preserve user content'
+
 chmod 000 "$NIRI_BINDS_FILE"
 if niri_session_files_accessible "$TARGET_USER"; then
     fail 'unreadable Niri session files must fail the access contract'
