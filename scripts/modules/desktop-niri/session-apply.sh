@@ -4,7 +4,7 @@ set -Eeuo pipefail
 trap 'printf "ERROR: %s:%s: %s\n" \
   "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
-ensure_niri_session_config() {
+ensure_niri_managed_config_files() {
     local user=$1 config_backup binds_backup config_mode binds_mode group status=0
     local file backup index
     local -a quickshell_files=() quickshell_backups=() quickshell_modes=()
@@ -51,7 +51,16 @@ ensure_niri_session_config() {
     fi
     rm -f "$config_backup" "$binds_backup"
     rm -f "${quickshell_backups[@]}"
+}
 
-    ensure_niri_fish_sources "$user"
-    ensure_niri_bash_profile "$user"
+ensure_niri_session_config() {
+    local user=$1 status=0
+
+    ensure_niri_managed_config_files "$user" || status=$?
+    # The shell startup targets are independent of the niri config chain.
+    # Converge them even when the config work fails, so a broken or missing
+    # config can never block fish and .bash_profile restoration.
+    ensure_niri_fish_sources "$user" || status=1
+    ensure_niri_bash_profile "$user" || status=1
+    return "$status"
 }

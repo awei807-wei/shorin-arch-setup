@@ -244,13 +244,19 @@ ensure_pacman_section() {
     local tmp
 
     tmp=$(mktemp "${file}.XXXXXX")
+    # Trim trailing blank lines after stripping the section, so re-running
+    # never accumulates the separator blank line added below.
     awk -v wanted="$section" '
         /^\[[^]]+\]$/ {
             current=$0
             gsub(/^\[|\]$/, "", current)
             skip=(current == wanted)
         }
-        !skip { print }
+        !skip { lines[++count]=$0 }
+        END {
+            while (count > 0 && lines[count] == "") count--
+            for (i=1; i<=count; i++) print lines[i]
+        }
     ' "$file" > "$tmp"
     printf '\n[%s]\n%s\n' "$section" "$body" >> "$tmp"
     if ! pacman-conf --config "$tmp" >/dev/null ||

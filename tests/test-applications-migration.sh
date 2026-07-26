@@ -100,10 +100,13 @@ assert_not_contains "$APPLICATION_MANIFEST" GitHub:niri-clip
 EMPTY_SOURCE="$TEST_DIR/empty-source.txt"
 EMPTY_MANIFEST="$TEST_DIR/empty-profile/applications.list"
 printf 'wine\n' > "$EMPTY_SOURCE"
-migrate_legacy_application_manifest "$EMPTY_SOURCE" "$EMPTY_MANIFEST"
-[ -s "$EMPTY_MANIFEST" ] || fail 'an empty legacy target must be declared'
-[ -z "$(application_entries_from_file "$EMPTY_MANIFEST")" ] ||
-    fail 'migration must not select undetected default applications'
+EMPTY_STATUS=0
+migrate_legacy_application_manifest "$EMPTY_SOURCE" "$EMPTY_MANIFEST" \
+    2>/dev/null || EMPTY_STATUS=$?
+[ "$EMPTY_STATUS" -eq 20 ] ||
+    fail 'migration without detected targets must report a skip'
+[ ! -e "$EMPTY_MANIFEST" ] ||
+    fail 'migration must never declare an empty application manifest'
 
 FIRST_COPY="$TEST_DIR/first-applications.list"
 cp "$APPLICATION_MANIFEST" "$FIRST_COPY"
@@ -147,12 +150,24 @@ printf 'shorin-legacy-fixture-not-installed\n' > "$CHAIN_SOURCE"
 run_applications_phase "$CHAIN_MANIFEST" check repair "$CHAIN_SOURCE"
 [ "$PHASE_STATUS" -eq 10 ] || fail 'legacy chain check must report drift'
 run_applications_phase "$CHAIN_MANIFEST" apply repair "$CHAIN_SOURCE"
-[ "$PHASE_STATUS" -eq 0 ] || fail 'legacy chain apply must migrate an empty target'
-[ -s "$CHAIN_MANIFEST" ] || fail 'legacy chain apply must create the manifest'
-[ -z "$(application_entries_from_file "$CHAIN_MANIFEST")" ] ||
-    fail 'legacy chain apply must not select an undetected default target'
+[ "$PHASE_STATUS" -eq 20 ] ||
+    fail 'legacy chain apply must skip when no targets are detected'
+[ ! -e "$CHAIN_MANIFEST" ] ||
+    fail 'legacy chain apply must not declare an empty manifest'
+grep -Fq application-targets-undetected <<< "$PHASE_OUTPUT" ||
+    fail 'legacy chain apply must report the undetected-target reason'
 run_applications_phase "$CHAIN_MANIFEST" verify repair "$CHAIN_SOURCE"
-[ "$PHASE_STATUS" -eq 0 ] || fail 'legacy chain verify must accept the empty target'
+[ "$PHASE_STATUS" -eq 20 ] ||
+    fail 'legacy chain verify must skip an undeclared target'
+
+PREEXISTING_EMPTY_MANIFEST="$TEST_DIR/preexisting-empty/applications.list"
+mkdir -p "$(dirname "$PREEXISTING_EMPTY_MANIFEST")"
+printf '# empty by an older migration\n' > "$PREEXISTING_EMPTY_MANIFEST"
+run_applications_phase "$PREEXISTING_EMPTY_MANIFEST" apply repair
+[ "$PHASE_STATUS" -eq 20 ] ||
+    fail 'repair apply must skip a pre-existing empty manifest'
+grep -Fq application-targets-empty <<< "$PHASE_OUTPUT" ||
+    fail 'a pre-existing empty manifest must report a precise reason'
 
 INVALID_MANIFEST="$TEST_DIR/invalid-applications.list"
 printf 'AUR:\n' > "$INVALID_MANIFEST"

@@ -269,10 +269,28 @@ test_apply_result_control_flow() {
     register_module_policy fixture-after optional
 
     if run_modules install fixture-apply-fail fixture-after; then
-        fail 'a required apply failure must stop later modules'
+        fail 'a required apply failure must fail the run'
+    fi
+    assert_equal 1 "$(call_count fixture-after:check)" \
+        'an independent module must still run after a required failure'
+    assert_equal 1 "$(call_count fixture-after:apply)" \
+        'an independent module must still converge after a required failure'
+
+    reset_run_state
+    : > "$FIXTURE_LOG"
+    rm -f "$FIXTURE_STATE_DIR/fixture-apply-fail" \
+        "$FIXTURE_STATE_DIR/fixture-after"
+    register_module_policy fixture-apply-fail required
+    register_module_policy fixture-after required
+    local -A MODULE_DEPENDS=([fixture-after]='fixture-apply-fail')
+    if run_modules install fixture-apply-fail fixture-after; then
+        fail 'a failed dependency must fail the run'
     fi
     assert_equal 0 "$(call_count fixture-after:check)" \
-        'a module after a required failure must not run'
+        'a dependent of a failed module must be skipped'
+    assert_array_contains REQUIRED_FAILURES \
+        fixture-after:converge:blocked-by:fixture-apply-fail
+    unset MODULE_DEPENDS
 
     reset_run_state
     : > "$FIXTURE_LOG"
@@ -290,10 +308,10 @@ test_apply_result_control_flow() {
     register_module_policy fixture-fail required
     register_module_policy fixture-after optional
     if run_modules repair fixture-fail fixture-after; then
-        fail 'a required repair check failure must stop collection'
+        fail 'a required repair check failure must fail the run'
     fi
-    assert_equal 0 "$(call_count fixture-after:check)" \
-        'repair must stop checking after a required inspection failure'
+    assert_equal 1 "$(call_count fixture-after:check)" \
+        'an independent module must still be checked after an inspection failure'
 }
 
 test_final_verification_reruns_without_duplicate_failures() {

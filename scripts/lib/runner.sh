@@ -264,12 +264,34 @@ run_module() {
 }
 
 run_modules() {
-    local mode=$1 module
+    local mode=$1 module dependency blocked status=0
     shift
 
+    # A failed required module no longer stops the whole run: independent
+    # modules keep converging, and only declared dependents are skipped.
+    local -A halted_modules=()
     for module in "$@"; do
-        run_module "$mode" "$module" || return 1
+        blocked=''
+        if [[ $(declare -p MODULE_DEPENDS 2>/dev/null) == 'declare -A'* ]]; then
+            for dependency in ${MODULE_DEPENDS[$module]:-}; do
+                if [ -n "${halted_modules[$dependency]:-}" ]; then
+                    blocked=$dependency
+                    break
+                fi
+            done
+        fi
+        if [ -n "$blocked" ]; then
+            record_module_failure "$module" converge "blocked-by:$blocked"
+            halted_modules[$module]=1
+            status=1
+            continue
+        fi
+        if ! run_module "$mode" "$module"; then
+            halted_modules[$module]=1
+            status=1
+        fi
     done
+    return "$status"
 }
 
 derive_final_status() {

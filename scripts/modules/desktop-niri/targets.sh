@@ -132,13 +132,16 @@ ensure_niri_package_target() {
         esac && niri_package_target_satisfied "$target" && return 0
         warn "Failed to converge desktop target $target (attempt $attempt/3)."
     done
-    die "Failed to converge desktop target $target after three attempts."
+    error "Failed to converge desktop target $target after three attempts."
+    return 1
 }
 
 niri_quickshell_startup_satisfied() {
     local file=$1
 
     [ -s "$file" ] || return 1
+    # Multiple quickshell instances (for example a separate lockscreen config)
+    # are user-owned; only require at least one and no conflicting shells.
     awk '
         /^[[:space:]]*spawn(-sh)?-at-startup[[:space:]]+"quickshell([[:space:]&"]|$)/ {
             quickshell++
@@ -149,7 +152,7 @@ niri_quickshell_startup_satisfied() {
         /^[[:space:]]*spawn-at-startup[[:space:]]+"ags"[[:space:]]+"run"([[:space:]]|$)/ {
             conflicts++
         }
-        END { exit !(quickshell == 1 && conflicts == 0) }
+        END { exit !(quickshell >= 1 && conflicts == 0) }
     ' "$file"
 }
 
@@ -167,10 +170,8 @@ ensure_niri_quickshell_startup() {
             return substr(line, 1, RLENGTH)
         }
         /^[[:space:]]*spawn(-sh)?-at-startup[[:space:]]+"quickshell([[:space:]&"]|$)/ {
-            if (!quickshell) {
-                print
-                quickshell=1
-            }
+            quickshell=1
+            print
             next
         }
         /^[[:space:]]*spawn(-sh)?-at-startup[[:space:]]+"(waybar|ags run)([[:space:]&"]|$)/ ||

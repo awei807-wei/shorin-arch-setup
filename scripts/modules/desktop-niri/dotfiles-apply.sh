@@ -67,14 +67,14 @@ deploy_wallpapers_and_templates() {
 
     if [ -d "$checkout/wallpapers" ]; then
         deploy_user_tree_once "$checkout/wallpapers" \
-            "$HOME_DIR/Pictures/Wallpapers" "$TARGET_USER"
+            "$NIRI_WALLPAPER_DIR" "$TARGET_USER"
     fi
     install -d -o "$TARGET_USER" -g "$(id -gn "$TARGET_USER")" \
-        "$HOME_DIR/Templates"
-    as_user touch "$HOME_DIR/Templates/new"
+        "$NIRI_TEMPLATES_DIR"
+    as_user touch "$NIRI_TEMPLATES_DIR/new"
     temporary=$(mktemp)
     printf '#!/usr/bin/env bash\n' > "$temporary"
-    install_user_file_once "$temporary" "$HOME_DIR/Templates/new.sh" \
+    install_user_file_once "$temporary" "$NIRI_TEMPLATES_DIR/new.sh" \
         755 "$TARGET_USER"
     rm -f "$temporary"
 }

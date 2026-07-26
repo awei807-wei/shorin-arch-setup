@@ -64,20 +64,27 @@ applications_inspect() {
 applications_check() { applications_inspect check; }
 
 applications_apply() {
-    local status=0 manifest_entries
+    local status=0 manifest_entries migrate_status=0
 
     if [ "${SHORIN_MODE:-install}" = repair ] &&
         [ ! -s "$APPLICATION_MANIFEST" ]; then
         log "Migrating legacy application targets from current installed state..."
         migrate_legacy_application_manifest \
-            "$APPLICATION_SOURCE_LIST" "$APPLICATION_MANIFEST"
+            "$APPLICATION_SOURCE_LIST" "$APPLICATION_MANIFEST" ||
+            migrate_status=$?
+        if [ "$migrate_status" -eq "$RC_SKIPPED" ]; then
+            module_skip application-targets-undetected
+            return 0
+        fi
+        [ "$migrate_status" -eq 0 ] || return "$migrate_status"
     fi
     if [ "${SHORIN_MODE:-install}" = repair ]; then
         if ! manifest_entries=$(application_manifest_entries); then
             die "Application manifest is not readable: $APPLICATION_MANIFEST"
         fi
         if [ -z "$manifest_entries" ]; then
-            log "No legacy application targets were detected; the empty target is declared."
+            warn "The declared application manifest is empty; run install mode to select applications."
+            module_skip application-targets-empty
             return 0
         fi
     fi

@@ -54,6 +54,8 @@ desktop_niri_inspect() {
     desktop_niri_expect "$phase" file:xdg-desktop-portal \
         niri_portal_config_matches
     desktop_niri_expect "$phase" link:gtk4-theme niri_gtk_links_match
+    desktop_niri_expect "$phase" file:wallpapers niri_wallpapers_deployed
+    desktop_niri_expect "$phase" file:templates niri_templates_deployed
     desktop_niri_expect "$phase" hardware:optional-tools \
         niri_optional_hardware_targets_match
     desktop_niri_expect "$phase" file:niri-config \

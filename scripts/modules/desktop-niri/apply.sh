@@ -58,7 +58,10 @@ fi
 # STEP 2: Core Components
 # ==============================================================================
 section "Step 1/9" "Core Components"
-bash "$SCRIPT_DIR/modules/desktop-niri/packages-apply.sh"
+# Package failures must not block the user-data restoration below; the module
+# still exits non-zero at the end so the runner records the failure.
+APPLY_STATUS=0
+bash "$SCRIPT_DIR/modules/desktop-niri/packages-apply.sh" || APPLY_STATUS=$?
 
 log "Configuring Firefox Policies..."
 POL_DIR=$(dirname "$NIRI_FIREFOX_POLICY_FILE")
@@ -103,8 +106,8 @@ log "Required and selected desktop packages converged."
 # STEP 6: Dotfiles
 # ==============================================================================
 section "Step 5/9" "Dotfiles, Wallpapers, and Templates"
-bash "$SCRIPT_DIR/modules/desktop-niri/dotfiles-apply.sh"
-ensure_niri_session_config "$TARGET_USER"
+bash "$SCRIPT_DIR/modules/desktop-niri/dotfiles-apply.sh" || APPLY_STATUS=$?
+ensure_niri_session_config "$TARGET_USER" || APPLY_STATUS=$?
 
 # ==============================================================================
 # STEP 8: Hardware Tools
@@ -133,3 +136,4 @@ fi
 ensure_niri_autologin_state "$TARGET_USER" "$SKIP_AUTOLOGIN"
 
 log "Module 04 completed."
+exit "$APPLY_STATUS"

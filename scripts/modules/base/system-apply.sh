@@ -62,7 +62,13 @@ log "Installing terminus-font..."
 ensure_package terminus-font
 
 log "Setting font for current session..."
-exe setfont ter-v28n
+# setfont only works on a virtual console; a re-run over SSH or from a
+# graphical terminal must not abort the whole module here.
+if CURRENT_TTY=$(tty 2>/dev/null) && [[ "$CURRENT_TTY" == /dev/tty[0-9]* ]]; then
+    exe setfont ter-v28n
+else
+    log "Not on a virtual console; skipping the session font (the permanent vconsole font still converges)."
+fi
 
 log "Configuring permanent vconsole font..."
 if ! key_value_matches /etc/vconsole.conf FONT ter-v28n; then

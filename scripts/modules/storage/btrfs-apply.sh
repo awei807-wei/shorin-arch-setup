@@ -103,7 +103,8 @@ SNAPSHOT_DESCRIPTION="Before Shorin Setup [run:${SHORIN_RUN_TOKEN:-$$};home:$SNA
 # Snapshot Root
 if snapper list-configs | grep -q "root "; then
     log "Creating a fresh Root snapshot for this run..."
-    if exe snapper -c root create --description "$SNAPSHOT_DESCRIPTION"; then
+    if exe snapper -c root create --cleanup-algorithm number \
+        --description "$SNAPSHOT_DESCRIPTION"; then
         success "Root snapshot created."
     else
         error "Failed to create Root snapshot."
@@ -115,7 +116,8 @@ fi
 # Snapshot Home
 if snapper list-configs | grep -q "home "; then
     log "Creating a fresh Home snapshot for this run..."
-    if exe snapper -c home create --description "$SNAPSHOT_DESCRIPTION"; then
+    if exe snapper -c home create --cleanup-algorithm number \
+        --description "$SNAPSHOT_DESCRIPTION"; then
         success "Home snapshot created."
     else
         error "Failed to create Home snapshot."

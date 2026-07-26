@@ -60,7 +60,9 @@ ensure_lazyvim_config() {
 
     lazyvim_config_satisfied && return 0
     if [ -e "$config_dir" ]; then
-        backup_path="$HOME_DIR/.config/nvim.old.apps.$(date +%s)"
+        backup_path="$HOME_DIR/.config/nvim.old.apps"
+        [ ! -e "$backup_path" ] ||
+            backup_path="$HOME_DIR/.config/nvim.old.apps.$(date +%s)"
         warn "Incomplete Neovim configuration moved to $backup_path"
         mv "$config_dir" "$backup_path"
     fi

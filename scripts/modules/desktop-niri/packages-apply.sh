@@ -64,9 +64,14 @@ main() {
     fi
 
     mapfile -t packages < <(niri_all_package_targets "$manifest" "$list_file")
+    local -a failed_targets=()
     for entry in "${packages[@]}"; do
-        ensure_niri_package_target "$entry"
+        ensure_niri_package_target "$entry" || failed_targets+=("$entry")
     done
+    if [ "${#failed_targets[@]}" -gt 0 ]; then
+        error "Failed desktop package targets: ${failed_targets[*]}"
+        return 1
+    fi
 }
 
 main "$@"

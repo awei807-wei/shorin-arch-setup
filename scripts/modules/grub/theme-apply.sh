@@ -230,6 +230,14 @@ else
     exit 1
 fi
 
+# Prune superseded hashes of the same theme and any staging leftovers from
+# interrupted runs, so repeated applies do not accumulate directories.
+while IFS= read -r -d '' STALE_DIR; do
+    find "$STALE_DIR" -depth -delete
+done < <(find "$DEST_DIR" -mindepth 1 -maxdepth 1 -type d \
+    \( -name "${THEME_NAME}-*" ! -name "$THEME_INSTALL_NAME" \
+    -o -name ".${THEME_NAME}.*" -o -name ".${THEME_NAME}-*" \) -print0)
+
 GRUB_CONF="$GRUB_DEFAULT_FILE"
 THEME_PATH="$DEST_DIR/$THEME_INSTALL_NAME/theme.txt"
 

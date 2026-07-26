@@ -41,7 +41,8 @@ create_checkpoint() {
     # 检查 root 配置是否存在
     if snapper -c root get-config &>/dev/null; then
         log "Creating a fresh safety checkpoint on [root]..."
-        snapper -c root create --description "$MARKER"
+        snapper -c root create --cleanup-algorithm number \
+            --description "$MARKER"
         success "Root snapshot created."
     else
         error "Snapper root config is missing; cannot create the required checkpoint."
@@ -51,7 +52,8 @@ create_checkpoint() {
     # 2. Home 分区快照 (如果存在 home 配置)
     if snapper -c home get-config &>/dev/null; then
         log "Creating a fresh safety checkpoint on [home]..."
-        snapper -c home create --description "$MARKER"
+        snapper -c home create --cleanup-algorithm number \
+            --description "$MARKER"
         success "Home snapshot created."
     fi
 }

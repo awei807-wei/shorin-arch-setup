@@ -22,14 +22,14 @@ rime_service_contract() {
 [Unit]
 Description=Rime Dictionary Sync
 After=network-online.target
-ConditionPathIsMountPoint="$NAS_LOCAL_PATH"
+ConditionPathIsMountPoint=$NAS_LOCAL_PATH
 
 [Service]
 Type=oneshot
 ExecStartPre=/usr/bin/test -x /usr/bin/rime_dict_manager
 ExecStartPre=/usr/bin/test -x "$HOME_DIR/.local/bin/rime-safe-sync.sh"
 ExecStart="$HOME_DIR/.local/bin/rime-safe-sync.sh"
-WorkingDirectory="$RIME_DIR"
+WorkingDirectory=$RIME_DIR
 
 [Install]
 WantedBy=default.target
@@ -37,22 +37,23 @@ EOF
 }
 
 rime_safe_sync_script_contract() {
-    cat <<'SAFE_SYNC_EOF'
+    cat <<SAFE_SYNC_EOF
 #!/bin/bash
 # Rime 安全同步脚本
 # 解决两个问题：NAS ESTALE coredump + fcitx5 LOCK 排他锁冲突
 
-SYNC_DIR="/mnt/nas/arch/rime_sync"
-RIME_DIR="$HOME/.local/share/fcitx5/rime"
-LOCK_FILE="$RIME_DIR/rime_ice.userdb/LOCK"
+SYNC_DIR="$RIME_SYNC_DIR"
+RIME_DIR="$RIME_DIR"
+NAS_MOUNT="$NAS_LOCAL_PATH"
+LOCK_FILE="\$RIME_DIR/rime_ice.userdb/LOCK"
 
 # 1. 检测 NAS 挂载是否健康（非 Stale）
-if ! stat "$SYNC_DIR" >/dev/null 2>&1; then
+if ! stat "\$SYNC_DIR" >/dev/null 2>&1; then
     echo "NAS sync dir inaccessible, attempting remount..."
-    sudo umount /mnt/nas 2>/dev/null
+    sudo umount "\$NAS_MOUNT" 2>/dev/null
     sudo mount -a 2>/dev/null
     sleep 2
-    if ! stat "$SYNC_DIR" >/dev/null 2>&1; then
+    if ! stat "\$SYNC_DIR" >/dev/null 2>&1; then
         echo "NAS still unavailable, skipping sync."
         exit 0
     fi
@@ -60,19 +61,19 @@ if ! stat "$SYNC_DIR" >/dev/null 2>&1; then
 fi
 
 # 2. 处理 LOCK 排他锁
-if [ -f "$LOCK_FILE" ] && pgrep -x fcitx5 >/dev/null 2>&1; then
-    rm -f "$LOCK_FILE" 2>/dev/null
+if [ -f "\$LOCK_FILE" ] && pgrep -x fcitx5 >/dev/null 2>&1; then
+    rm -f "\$LOCK_FILE" 2>/dev/null
     echo "Removed stale LOCK for sync."
 fi
 
 # 3. 执行同步
-cd "$RIME_DIR" || exit 0
+cd "\$RIME_DIR" || exit 0
 /usr/bin/rime_dict_manager --sync 2>&1
-SYNC_EXIT=$?
-echo "Sync completed (exit: $SYNC_EXIT)."
+SYNC_EXIT=\$?
+echo "Sync completed (exit: \$SYNC_EXIT)."
 
 # 4. coredump 检测
-if [ $SYNC_EXIT -eq 134 ]; then
+if [ \$SYNC_EXIT -eq 134 ]; then
     echo "rime_dict_manager crashed (likely ESTALE during sync). Will retry next cycle."
 fi
 

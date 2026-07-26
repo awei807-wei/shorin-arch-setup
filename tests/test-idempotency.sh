@@ -396,11 +396,17 @@ test_pacman_section_convergence() {
     }
 
     ensure_pacman_section "$config" custom "$body"
+    cp "$config" "$config.first"
+    ensure_pacman_section "$config" custom "$body"
     ensure_pacman_section "$config" custom "$body"
 
     pacman_section_matches "$config" custom "$body"
     assert_equal 1 "$(grep -c '^\[custom\]$' "$config")" \
         'pacman convergence must leave one named section'
+    cmp -s "$config.first" "$config" || {
+        printf 'FAIL: repeated pacman section convergence must be byte-stable\n' >&2
+        return 1
+    }
 }
 
 test_script_contract() {

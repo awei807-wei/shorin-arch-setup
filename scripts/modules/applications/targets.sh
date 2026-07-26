@@ -277,19 +277,28 @@ collect_legacy_application_targets() {
 
 migrate_legacy_application_manifest() {
     local source_file=$1 destination=${2:-$APPLICATION_MANIFEST}
-    local temporary
+    local temporary detected
 
     require_writable_mode || return
     [ -f "$source_file" ] && [ -r "$source_file" ] ||
         die "Application source list is not readable: $source_file"
-    install -d -m 755 "$(dirname "$destination")"
-    temporary=$(mktemp)
-    printf '# Migrated from legacy installed state.\n' > "$temporary"
-    if ! collect_legacy_application_targets "$source_file" |
-        sort -u >> "$temporary"; then
-        rm -f "$temporary"
+    if ! detected=$(collect_legacy_application_targets "$source_file" |
+        sort -u); then
         return 1
     fi
+    # An empty result usually means the installed state is gone (fresh machine
+    # or a rolled-back system), not that the user wants zero applications.
+    # Declaring it would permanently drop every previously selected target.
+    if [ -z "$detected" ]; then
+        warn 'No installed application targets were detected; refusing to declare an empty manifest. Run install mode to select applications.'
+        return "$RC_SKIPPED"
+    fi
+    install -d -m 755 "$(dirname "$destination")"
+    temporary=$(mktemp)
+    {
+        printf '# Migrated from legacy installed state.\n'
+        printf '%s\n' "$detected"
+    } > "$temporary"
     if ! install_if_changed "$temporary" "$destination" 644; then
         rm -f "$temporary"
         return 1

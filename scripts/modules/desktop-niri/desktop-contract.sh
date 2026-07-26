@@ -13,6 +13,8 @@ desktop_niri_contract_init() {
     NIRI_PORTAL_CONFIG_FILE=${NIRI_PORTAL_CONFIG_FILE:-$HOME_DIR/.config/xdg-desktop-portal/portals.conf}
     NIRI_GTK4_DIR=${NIRI_GTK4_DIR:-$HOME_DIR/.config/gtk-4.0}
     NIRI_GTK_THEME_DIR=${NIRI_GTK_THEME_DIR:-$HOME_DIR/.themes/adw-gtk3-dark/gtk-4.0}
+    NIRI_WALLPAPER_DIR=${NIRI_WALLPAPER_DIR:-$HOME_DIR/Pictures/Wallpapers}
+    NIRI_TEMPLATES_DIR=${NIRI_TEMPLATES_DIR:-$HOME_DIR/Templates}
     NIRI_AUTOLOGIN_FILE=${NIRI_AUTOLOGIN_FILE:-/etc/systemd/system/getty@tty1.service.d/autologin.conf}
     niri_session_contract_init
 }
@@ -177,6 +179,15 @@ niri_gtk_links_match() {
         [ "$(readlink "$NIRI_GTK4_DIR/gtk.css")" = "$NIRI_GTK_THEME_DIR/gtk.css" ] &&
         [ -L "$NIRI_GTK4_DIR/gtk-dark.css" ] &&
         [ "$(readlink "$NIRI_GTK4_DIR/gtk-dark.css")" = "$NIRI_GTK_THEME_DIR/gtk-dark.css" ]
+}
+
+niri_wallpapers_deployed() {
+    [ -d "$NIRI_WALLPAPER_DIR" ] &&
+        find "$NIRI_WALLPAPER_DIR" -type f -print -quit 2>/dev/null | grep -q .
+}
+
+niri_templates_deployed() {
+    [ -e "$NIRI_TEMPLATES_DIR/new" ] && [ -s "$NIRI_TEMPLATES_DIR/new.sh" ]
 }
 
 niri_optional_hardware_targets_match() {

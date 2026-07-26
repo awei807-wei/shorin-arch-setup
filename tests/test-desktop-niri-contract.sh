@@ -98,6 +98,8 @@ niri_fcitx5_startup_satisfied "$NIRI_CONFIG" ||
 grep -Fqx 'spawn-at-startup "quickshell" "--config" "user-shell"' \
     "$NIRI_CONFIG" ||
     fail 'QuickShell convergence must preserve the first user command and arguments'
+grep -Fqx 'spawn-at-startup "quickshell"' "$NIRI_CONFIG" ||
+    fail 'additional QuickShell instances (e.g. a lockscreen) must be preserved'
 FIRST_COPY="$TEST_DIR/first-config.kdl"
 cp "$NIRI_CONFIG" "$FIRST_COPY"
 ensure_niri_quickshell_startup "$NIRI_CONFIG" "$TARGET_USER"
@@ -416,6 +418,14 @@ PROFILE_DIR="$TEST_DIR/profile"
 BIN_DIR="$TEST_DIR/mock-bin"
 PACKAGE_SOURCES="$TEST_DIR/package-sources"
 mkdir -p "$PROFILE_DIR" "$BIN_DIR" "$PACKAGE_SOURCES"
+mkdir -p "$HOME_DIR/Pictures/Wallpapers" "$HOME_DIR/Templates"
+printf 'wallpaper\n' > "$HOME_DIR/Pictures/Wallpapers/default.png"
+touch "$HOME_DIR/Templates/new"
+printf '#!/usr/bin/env bash\n' > "$HOME_DIR/Templates/new.sh"
+niri_wallpapers_deployed ||
+    fail 'a deployed wallpaper tree must satisfy the wallpaper state'
+niri_templates_deployed ||
+    fail 'deployed template files must satisfy the template state'
 printf 'imv\n' > "$PROFILE_DIR/niri-packages.list"
 for package in nautilus-open-any-terminal swaylock-effects; do
     printf 'source=aur\nversion=1.0\n' > "$PACKAGE_SOURCES/$package"
