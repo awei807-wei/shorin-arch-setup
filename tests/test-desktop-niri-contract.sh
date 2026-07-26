@@ -249,6 +249,13 @@ niri_bindings_satisfied || fail 'Niri clipboard and FocusShift bindings must be 
 niri_fish_sources_satisfied || fail 'Fish environment sources must be conditional'
 [ -f "$NIRI_FISH_GUARD_FILE" ] ||
     fail 'Fish guards must use a dedicated installer-managed conf.d file'
+grep -Fqx '    set -gx PATH "$HOME/.cargo/bin" $PATH' "$NIRI_FISH_GUARD_FILE" ||
+    fail 'managed Fish environment must add Cargo bin without generated env files'
+grep -Fqx '    set -gx PATH "$HOME/.local/bin" $PATH' "$NIRI_FISH_GUARD_FILE" ||
+    fail 'managed Fish environment must add local bin without generated env files'
+if grep -Fq 'source "$HOME/' "$NIRI_FISH_GUARD_FILE"; then
+    fail 'managed Fish environment must not depend on installer-generated env files'
+fi
 [ ! -e "$NIRI_FISH_RUSTUP_FILE" ] && [ ! -e "$NIRI_FISH_LOCAL_ENV_FILE" ] ||
     fail 'known legacy Fish source files must be migrated without duplicate sourcing'
 niri_bash_profile_satisfied || fail 'TTY1 Niri startup must use the managed profile block'

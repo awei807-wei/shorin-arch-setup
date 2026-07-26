@@ -6,12 +6,12 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 
 niri_fish_guard_contract() {
     cat <<'EOF'
-if test -f "$HOME/.cargo/env.fish"
-    source "$HOME/.cargo/env.fish"
+if not contains "$HOME/.cargo/bin" $PATH
+    set -gx PATH "$HOME/.cargo/bin" $PATH
 end
 
-if test -f "$HOME/.local/bin/env.fish"
-    source "$HOME/.local/bin/env.fish"
+if not contains "$HOME/.local/bin" $PATH
+    set -gx PATH "$HOME/.local/bin" $PATH
 end
 EOF
 }

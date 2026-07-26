@@ -153,7 +153,7 @@ bash install.sh verify --user shorin grub
 
 `desktop-niri` 的必需目标包含 QuickShell、`qt6-wayland`、`qt6-multimedia`、`bluez-utils`、主题生成、锁屏/空闲管理及桌面核心依赖。模块会把必需集合与 `niri-packages.list` 中的用户选择合并，并确保 Niri 配置中分别只有一个有效的 QuickShell 和 Fcitx5 启动命令；已有带参数的 `spawn-sh-at-startup` 命令会被保留。旧 profile 中的 Waybar 及其两个扩展会被视为已由 QuickShell 取代，不再触发安装或修复，也不会主动卸载机器上已有的软件。
 
-桌面修复还会收敛以下持久状态：Niri 的 `PATH` 包含目标用户 `~/.local/bin`；`Mod+Alt+V` 调用 `niri-clip toggle`；`Mod+ALT+C` 调用 `focus-shift`；Fish 仅在环境文件存在时执行 `source`；明确的旧 `swww` 命令迁移为 `awww`。Niri 配置修改后必须通过 `niri validate`，失败时会恢复原 `config.kdl` 和 `binds.kdl`。
+桌面修复还会收敛以下持久状态：Niri 的 `PATH` 包含目标用户 `~/.local/bin`；`Mod+Alt+V` 调用 `niri-clip toggle`；`Mod+ALT+C` 调用 `focus-shift`；Fish 直接且幂等地加入 `~/.cargo/bin` 与 `~/.local/bin`，不依赖安装器生成的 `env.fish`；明确的旧 `swww` 命令迁移为 `awww`。Niri 配置修改后必须通过 `niri validate`，失败时会恢复原 `config.kdl` 和 `binds.kdl`。
 
 TTY1 会话由 `~/.bash_profile` 中的托管块启动 `niri-session`。旧版 `niri-autostart.service` 及 wants 链接会被清理；存在用户 bus 时同步执行 `daemon-reload` 和失败状态清理，避免后台重复启动一个没有 TTY 的 Niri 会话。
 
