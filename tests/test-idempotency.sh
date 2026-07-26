@@ -158,7 +158,7 @@ test_aur_source_routing() (
         installed=1
     }
     ensure_aur_package aur-example tester "$TEST_DIR/home"
-    [[ " $aur_command " == *' yay -S --aur --rebuild aur-example '* ]] || {
+    [[ " $aur_command " == *' yay -S --aur --rebuild --noconfirm --nodiffmenu aur-example '* ]] || {
         printf 'FAIL: a real AUR target must force yay --aur (command=%s)\n' \
             "$aur_command" >&2
         return 1

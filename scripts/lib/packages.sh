@@ -205,7 +205,7 @@ ensure_aur_package() {
 
     package_source_matches "$package" aur ||
         runuser -u "$user" -- env HOME="$home" \
-            yay -S --aur --rebuild "$package"
+            yay -S --aur --rebuild --noconfirm --nodiffmenu "$package"
     package_is_installed "$package"
     record_package_source "$package" aur
 }
