@@ -60,6 +60,7 @@ ensure_niri_session_config() {
     # The shell startup targets are independent of the niri config chain.
     # Converge them even when the config work fails, so a broken or missing
     # config can never block fish and .bash_profile restoration.
+    ensure_niri_waypaper_backend "$user" || status=1
     ensure_niri_fish_sources "$user" || status=1
     ensure_niri_bash_profile "$user" || status=1
     return "$status"

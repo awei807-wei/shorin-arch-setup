@@ -55,6 +55,8 @@ desktop_niri_inspect() {
         niri_portal_config_matches
     desktop_niri_expect "$phase" link:gtk4-theme niri_gtk_links_match
     desktop_niri_expect "$phase" file:wallpapers niri_wallpapers_deployed
+    desktop_niri_expect "$phase" file:starship-config \
+        niri_starship_config_deployed
     desktop_niri_expect "$phase" file:templates niri_templates_deployed
     desktop_niri_expect "$phase" hardware:optional-tools \
         niri_optional_hardware_targets_match
@@ -73,6 +75,8 @@ desktop_niri_inspect() {
         niri_wallpaper_backend_satisfied
     desktop_niri_expect "$phase" config:quickshell-wallpaper-backend \
         niri_quickshell_wallpaper_backend_satisfied
+    desktop_niri_expect "$phase" config:waypaper-wallpaper-backend \
+        niri_waypaper_backend_satisfied
     desktop_niri_expect "$phase" config:niri-bindings niri_bindings_satisfied
     if command -v niri >/dev/null 2>&1; then
         desktop_niri_expect "$phase" config:niri-valid \

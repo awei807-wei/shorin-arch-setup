@@ -61,31 +61,6 @@ niri_path_satisfied() {
     ' "$NIRI_CONFIG_FILE"
 }
 
-niri_file_has_legacy_swww() {
-    grep -Iq . "$1" &&
-        grep -Eq '(^|[^[:alnum:]_-])swww(-daemon)?([^[:alnum:]_-]|$)' "$1"
-}
-
-niri_tree_has_legacy_swww() {
-    local root=$1 file
-
-    [ -d "$root" ] || return 1
-    while IFS= read -r -d '' file; do
-        niri_file_has_legacy_swww "$file" && return 0
-    done < <(find "$root" -type f -print0)
-    return 1
-}
-
-niri_wallpaper_backend_satisfied() {
-    [ -s "$NIRI_CONFIG_FILE" ] &&
-        ! niri_file_has_legacy_swww "$NIRI_CONFIG_FILE"
-}
-
-niri_quickshell_wallpaper_backend_satisfied() {
-    [ -d "$NIRI_QUICKSHELL_DIR" ] &&
-        ! niri_tree_has_legacy_swww "$NIRI_QUICKSHELL_DIR"
-}
-
 niri_binding_contract() {
     case "$1" in
         clipboard)
@@ -174,35 +149,6 @@ ensure_niri_path() {
     rm -f "$temporary"
     chown "$user:$group" "$NIRI_CONFIG_FILE"
     niri_path_satisfied
-}
-
-ensure_awww_in_file() {
-    local file=$1 user=$2 temporary mode group
-
-    niri_file_has_legacy_swww "$file" || return 0
-    temporary=$(mktemp)
-    sed -E \
-        -e 's/(^|[^[:alnum:]_-])swww-daemon([^[:alnum:]_-]|$)/\1awww-daemon\2/g' \
-        -e 's/(^|[^[:alnum:]_-])swww([^[:alnum:]_-]|$)/\1awww\2/g' \
-        "$file" > "$temporary"
-    mode=$(stat -c '%a' "$file")
-    group=$(id -gn "$user")
-    install_if_changed "$temporary" "$file" "$mode"
-    rm -f "$temporary"
-    chown "$user:$group" "$file"
-}
-
-ensure_niri_wallpaper_backend() {
-    local user=$1 file
-
-    ensure_awww_in_file "$NIRI_CONFIG_FILE" "$user"
-    [ -d "$NIRI_QUICKSHELL_DIR" ] || return 1
-    while IFS= read -r -d '' file; do
-        grep -Iq . "$file" || continue
-        ensure_awww_in_file "$file" "$user"
-    done < <(find "$NIRI_QUICKSHELL_DIR" -type f -print0)
-    niri_wallpaper_backend_satisfied &&
-        niri_quickshell_wallpaper_backend_satisfied
 }
 
 ensure_niri_bindings() {

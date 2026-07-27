@@ -24,10 +24,26 @@ fail() {
 }
 
 source "$ROOT_DIR/scripts/modules/desktop-niri/targets.sh"
+source "$ROOT_DIR/scripts/modules/desktop-niri/dotfiles-apply.sh"
 
 niri_user_bus_is_available() {
     return 1
 }
+
+desktop_niri_contract_init
+DOTFILES_CHECKOUT="$TEST_DIR/dotfiles-checkout"
+mkdir -p "$DOTFILES_CHECKOUT/dotfiles/.config/fish/conf.d"
+printf 'source "$HOME/.cargo/env.fish"\n' \
+    > "$DOTFILES_CHECKOUT/dotfiles/.config/fish/conf.d/rustup.fish"
+printf 'source "$HOME/.local/bin/env.fish"\n' \
+    > "$DOTFILES_CHECKOUT/dotfiles/.config/fish/conf.d/uv.env.fish"
+printf 'format = "$directory$character"\n' \
+    > "$DOTFILES_CHECKOUT/dotfiles/.config/starship.toml"
+deploy_dotfiles "$DOTFILES_CHECKOUT"
+niri_fish_sources_satisfied ||
+    fail 'dotfile deployment must immediately remove unsafe Fish environment sources'
+niri_starship_config_deployed ||
+    fail 'dotfile deployment must restore the Starship configuration'
 
 LIST_FILE="$TEST_DIR/niri-applist.txt"
 MANIFEST="$TEST_DIR/niri-packages.list"
@@ -140,6 +156,7 @@ NIRI_GNOME_TERMINAL_TARGET="$TEST_DIR/bin/kitty"
 NIRI_PORTAL_CONFIG_FILE="$HOME_DIR/.config/xdg-desktop-portal/portals.conf"
 NIRI_GTK4_DIR="$HOME_DIR/.config/gtk-4.0"
 NIRI_GTK_THEME_DIR="$HOME_DIR/.themes/adw-gtk3-dark/gtk-4.0"
+NIRI_WAYPAPER_CONFIG_FILE="$HOME_DIR/.config/waypaper/config.ini"
 NIRI_BINDS_FILE="$HOME_DIR/.config/niri/binds.kdl"
 NIRI_QUICKSHELL_DIR="$HOME_DIR/.config/quickshell"
 NIRI_FISH_GUARD_FILE="$HOME_DIR/.config/fish/conf.d/shorin-env.fish"
@@ -153,6 +170,7 @@ export NIRI_FIREFOX_POLICY_FILE NIRI_NAUTILUS_VENDOR_FILE
 export NIRI_NAUTILUS_OVERRIDE_FILE NIRI_GNOME_TERMINAL_LINK
 export NIRI_GNOME_TERMINAL_TARGET NIRI_PORTAL_CONFIG_FILE
 export NIRI_GTK4_DIR NIRI_GTK_THEME_DIR
+export NIRI_WAYPAPER_CONFIG_FILE
 export NIRI_BINDS_FILE NIRI_QUICKSHELL_DIR NIRI_FISH_GUARD_FILE
 export NIRI_FISH_RUSTUP_FILE
 export NIRI_FISH_LOCAL_ENV_FILE NIRI_BASH_PROFILE NIRI_LEGACY_UNIT
@@ -166,6 +184,7 @@ mkdir -p "$(dirname "$NIRI_FIREFOX_POLICY_FILE")" \
     "$(dirname "$NIRI_GNOME_TERMINAL_TARGET")" \
     "$NIRI_GTK4_DIR" "$NIRI_GTK_THEME_DIR" \
     "$(dirname "$NIRI_PORTAL_CONFIG_FILE")" \
+    "$(dirname "$NIRI_WAYPAPER_CONFIG_FILE")" \
     "$NIRI_QUICKSHELL_DIR/lockscreen" \
     "$(dirname "$NIRI_FISH_RUSTUP_FILE")" \
     "$(dirname "$NIRI_LEGACY_UNIT_LINK")"
@@ -220,6 +239,12 @@ cat > "$NIRI_QUICKSHELL_DIR/lockscreen/shell.qml" <<'EOF'
 property string swwwTheme: "preserve-identifier"
 command: ["sh", "-c", "swww query"]
 EOF
+cat > "$NIRI_WAYPAPER_CONFIG_FILE" <<'EOF'
+[Settings]
+folder = ~/Pictures/Wallpapers
+backend = swww
+swww_transition_type = any
+EOF
 printf 'source "$HOME/.cargo/env.fish"\n' > "$NIRI_FISH_RUSTUP_FILE"
 printf 'test -f "$HOME/.local/bin/env.fish"; and source "$HOME/.local/bin/env.fish"\n' \
     > "$NIRI_FISH_LOCAL_ENV_FILE"
@@ -263,6 +288,8 @@ niri_path_satisfied || fail 'Niri PATH must contain the target user local bin'
 niri_wallpaper_backend_satisfied || fail 'Niri startup must migrate swww to awww'
 niri_quickshell_wallpaper_backend_satisfied ||
     fail 'QuickShell commands must migrate swww to awww'
+niri_waypaper_backend_satisfied ||
+    fail 'Waypaper must use the installed awww backend'
 niri_bindings_satisfied || fail 'Niri clipboard and FocusShift bindings must be exact'
 niri_fish_sources_satisfied || fail 'Fish environment sources must be conditional'
 [ -f "$NIRI_FISH_GUARD_FILE" ] ||
@@ -291,6 +318,10 @@ if grep -Fq '# shorin:niri-session:' "$NIRI_BASH_PROFILE"; then
 fi
 grep -Fq 'awww query' "$NIRI_QUICKSHELL_DIR/lockscreen/shell.qml" ||
     fail 'QuickShell wallpaper query must use awww'
+grep -Fqx 'backend = awww' "$NIRI_WAYPAPER_CONFIG_FILE" ||
+    fail 'Waypaper backend migration must write awww exactly once'
+grep -Fqx 'swww_transition_type = any' "$NIRI_WAYPAPER_CONFIG_FILE" ||
+    fail 'Waypaper backend migration must preserve backend option names'
 grep -Fqx 'property string swwwTheme: "preserve-identifier"' \
     "$NIRI_QUICKSHELL_DIR/lockscreen/shell.qml" ||
     fail 'swww migration must preserve non-command identifiers'
@@ -458,11 +489,13 @@ BIN_DIR="$TEST_DIR/mock-bin"
 PACKAGE_SOURCES="$TEST_DIR/package-sources"
 mkdir -p "$PROFILE_DIR" "$BIN_DIR" "$PACKAGE_SOURCES"
 mkdir -p "$HOME_DIR/Pictures/Wallpapers" "$HOME_DIR/Templates"
-printf 'wallpaper\n' > "$HOME_DIR/Pictures/Wallpapers/default.png"
+printf 'wallpaper\n' > "$NIRI_DEFAULT_WALLPAPER_FILE"
 touch "$HOME_DIR/Templates/new"
 printf '#!/usr/bin/env bash\n' > "$HOME_DIR/Templates/new.sh"
 niri_wallpapers_deployed ||
-    fail 'a deployed wallpaper tree must satisfy the wallpaper state'
+    fail 'the deployed default wallpaper must satisfy the wallpaper state'
+niri_starship_config_deployed ||
+    fail 'the deployed Starship configuration must satisfy the desktop state'
 niri_templates_deployed ||
     fail 'deployed template files must satisfy the template state'
 printf 'imv\n' > "$PROFILE_DIR/niri-packages.list"
@@ -487,6 +520,27 @@ output=$(PATH="$BIN_DIR:$PATH" SHORIN_PROFILE_DIR="$PROFILE_DIR" \
     PACKAGE_SOURCE_DIR="$PACKAGE_SOURCES" \
     bash "$ROOT_DIR/scripts/modules/desktop-niri.sh" check 2>&1) || status=$?
 [ "$status" -eq 0 ] || fail 'complete desktop managed state must check successfully'
+
+mv "$NIRI_STARSHIP_CONFIG_FILE" "$NIRI_STARSHIP_CONFIG_FILE.missing"
+status=0
+output=$(PATH="$BIN_DIR:$PATH" SHORIN_PROFILE_DIR="$PROFILE_DIR" \
+    PACKAGE_SOURCE_DIR="$PACKAGE_SOURCES" \
+    bash "$ROOT_DIR/scripts/modules/desktop-niri.sh" check 2>&1) || status=$?
+[ "$status" -eq 10 ] || fail 'a missing Starship config must report desktop drift'
+grep -Fq file:starship-config <<< "$output" ||
+    fail 'desktop check must identify a missing Starship configuration'
+mv "$NIRI_STARSHIP_CONFIG_FILE.missing" "$NIRI_STARSHIP_CONFIG_FILE"
+
+printf 'unrelated wallpaper\n' > "$NIRI_WALLPAPER_DIR/unrelated.png"
+mv "$NIRI_DEFAULT_WALLPAPER_FILE" "$NIRI_DEFAULT_WALLPAPER_FILE.missing"
+status=0
+output=$(PATH="$BIN_DIR:$PATH" SHORIN_PROFILE_DIR="$PROFILE_DIR" \
+    PACKAGE_SOURCE_DIR="$PACKAGE_SOURCES" \
+    bash "$ROOT_DIR/scripts/modules/desktop-niri.sh" check 2>&1) || status=$?
+[ "$status" -eq 10 ] || fail 'a missing default wallpaper must report desktop drift'
+grep -Fq file:wallpapers <<< "$output" ||
+    fail 'desktop check must identify a missing default wallpaper'
+mv "$NIRI_DEFAULT_WALLPAPER_FILE.missing" "$NIRI_DEFAULT_WALLPAPER_FILE"
 
 printf 'stale policy\n' > "$NIRI_FIREFOX_POLICY_FILE"
 status=0

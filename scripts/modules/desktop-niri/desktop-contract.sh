@@ -14,6 +14,9 @@ desktop_niri_contract_init() {
     NIRI_GTK4_DIR=${NIRI_GTK4_DIR:-$HOME_DIR/.config/gtk-4.0}
     NIRI_GTK_THEME_DIR=${NIRI_GTK_THEME_DIR:-$HOME_DIR/.themes/adw-gtk3-dark/gtk-4.0}
     NIRI_WALLPAPER_DIR=${NIRI_WALLPAPER_DIR:-$HOME_DIR/Pictures/Wallpapers}
+    NIRI_DEFAULT_WALLPAPER_FILE=${NIRI_DEFAULT_WALLPAPER_FILE:-$NIRI_WALLPAPER_DIR/black-and-white-3840x2160-21293.jpg}
+    NIRI_STARSHIP_CONFIG_FILE=${NIRI_STARSHIP_CONFIG_FILE:-$HOME_DIR/.config/starship.toml}
+    NIRI_WAYPAPER_CONFIG_FILE=${NIRI_WAYPAPER_CONFIG_FILE:-$HOME_DIR/.config/waypaper/config.ini}
     NIRI_TEMPLATES_DIR=${NIRI_TEMPLATES_DIR:-$HOME_DIR/Templates}
     NIRI_AUTOLOGIN_FILE=${NIRI_AUTOLOGIN_FILE:-/etc/systemd/system/getty@tty1.service.d/autologin.conf}
     niri_session_contract_init
@@ -182,8 +185,11 @@ niri_gtk_links_match() {
 }
 
 niri_wallpapers_deployed() {
-    [ -d "$NIRI_WALLPAPER_DIR" ] &&
-        find "$NIRI_WALLPAPER_DIR" -type f -print -quit 2>/dev/null | grep -q .
+    [ -s "$NIRI_DEFAULT_WALLPAPER_FILE" ]
+}
+
+niri_starship_config_deployed() {
+    [ -s "$NIRI_STARSHIP_CONFIG_FILE" ]
 }
 
 niri_templates_deployed() {

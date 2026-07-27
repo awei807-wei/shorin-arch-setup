@@ -33,6 +33,10 @@ deploy_dotfiles() {
         rm -f "$temporary"
     fi
     deploy_user_tree_once "$checkout/dotfiles" "$HOME_DIR" "$TARGET_USER"
+    # Upstream still ships unconditional sources for installer-generated files.
+    # Converge them immediately so a freshly restored terminal never observes
+    # a source error, even if a later desktop step fails.
+    ensure_niri_fish_sources "$TARGET_USER"
 }
 
 configure_desktop_theme() {
@@ -82,7 +86,7 @@ deploy_wallpapers_and_templates() {
 main() {
     local github=https://github.com/awei807-wei/ShorinArchExperience-ArchlinuxGuide.git
     local gitee=https://gitee.com/shorinkiwata/ShorinArchExperience-ArchlinuxGuide.git
-    local github_commit=e6074b8d35552884eb4d3fa2232462f80dc7053e
+    local github_commit=0cd1766e204185ad606f29af94a35a940cf77ac7
     local gitee_commit=47a18fac7c5e8bcb64a40bf6f194fa477e1c7639
     local checkout=/tmp/shorin-repo
 
@@ -99,4 +103,6 @@ main() {
     deploy_wallpapers_and_templates "$checkout"
 }
 
-main "$@"
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    main "$@"
+fi
