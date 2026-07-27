@@ -16,7 +16,9 @@ desktop_niri_contract_init() {
     NIRI_WALLPAPER_DIR=${NIRI_WALLPAPER_DIR:-$HOME_DIR/Pictures/Wallpapers}
     NIRI_DEFAULT_WALLPAPER_FILE=${NIRI_DEFAULT_WALLPAPER_FILE:-$NIRI_WALLPAPER_DIR/black-and-white-3840x2160-21293.jpg}
     NIRI_STARSHIP_CONFIG_FILE=${NIRI_STARSHIP_CONFIG_FILE:-$HOME_DIR/.config/starship.toml}
-    NIRI_LEGACY_STARSHIP_SHA256=${NIRI_LEGACY_STARSHIP_SHA256:-4fdc2b560ac1ef30be3556bda2d353aebdf8073ea1afd11d40742184174dba29}
+    NIRI_STARSHIP_CONFIG_SHA256=${NIRI_STARSHIP_CONFIG_SHA256:-e8f17a5a8130255e7819efd8cb73c8c13a3b262a3b578e5a1ebc5d6ee80dd86b}
+    NIRI_MATUGEN_CONFIG_FILE=${NIRI_MATUGEN_CONFIG_FILE:-$HOME_DIR/.config/matugen/config.toml}
+    NIRI_MATUGEN_STARSHIP_TEMPLATE_FILE=${NIRI_MATUGEN_STARSHIP_TEMPLATE_FILE:-$HOME_DIR/.config/matugen/templates/starship-colors.toml}
     NIRI_WAYPAPER_CONFIG_FILE=${NIRI_WAYPAPER_CONFIG_FILE:-$HOME_DIR/.config/waypaper/config.ini}
     NIRI_TEMPLATES_DIR=${NIRI_TEMPLATES_DIR:-$HOME_DIR/Templates}
     NIRI_AUTOLOGIN_FILE=${NIRI_AUTOLOGIN_FILE:-/etc/systemd/system/getty@tty1.service.d/autologin.conf}
@@ -190,18 +192,26 @@ niri_wallpapers_deployed() {
 }
 
 niri_starship_config_deployed() {
-    [ -s "$NIRI_STARSHIP_CONFIG_FILE" ] &&
-        ! niri_starship_config_is_legacy_seed
-}
-
-niri_starship_config_is_legacy_seed() {
     local actual
 
-    [ -f "$NIRI_STARSHIP_CONFIG_FILE" ] &&
+    [ -s "$NIRI_STARSHIP_CONFIG_FILE" ] &&
         [ ! -L "$NIRI_STARSHIP_CONFIG_FILE" ] || return 1
     actual=$(sha256sum "$NIRI_STARSHIP_CONFIG_FILE" | awk '{ print $1 }') ||
         return 1
-    [ "$actual" = "$NIRI_LEGACY_STARSHIP_SHA256" ]
+    [ "$actual" = "$NIRI_STARSHIP_CONFIG_SHA256" ] &&
+        [ "$(stat -c '%U' "$NIRI_STARSHIP_CONFIG_FILE")" = "$TARGET_USER" ]
+}
+
+niri_matugen_starship_output_disabled() {
+    [ -f "$NIRI_MATUGEN_CONFIG_FILE" ] || return 0
+    ! grep -Eq \
+        '^[[:space:]]*\[templates[.]starship\][[:space:]]*(#.*)?$' \
+        "$NIRI_MATUGEN_CONFIG_FILE"
+}
+
+niri_matugen_starship_template_absent() {
+    [ ! -e "$NIRI_MATUGEN_STARSHIP_TEMPLATE_FILE" ] &&
+        [ ! -L "$NIRI_MATUGEN_STARSHIP_TEMPLATE_FILE" ]
 }
 
 niri_templates_deployed() {

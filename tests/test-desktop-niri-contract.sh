@@ -30,15 +30,30 @@ niri_user_bus_is_available() {
     return 1
 }
 
-desktop_niri_contract_init
 DOTFILES_CHECKOUT="$TEST_DIR/dotfiles-checkout"
 mkdir -p "$DOTFILES_CHECKOUT/dotfiles/.config/fish/conf.d"
+mkdir -p "$DOTFILES_CHECKOUT/dotfiles/.config/matugen/templates"
 printf 'source "$HOME/.cargo/env.fish"\n' \
     > "$DOTFILES_CHECKOUT/dotfiles/.config/fish/conf.d/rustup.fish"
 printf '\nsource "$HOME/.local/bin/env.fish"\n' \
     > "$DOTFILES_CHECKOUT/dotfiles/.config/fish/conf.d/uv.env.fish"
 printf 'format = "$directory$character"\n' \
     > "$DOTFILES_CHECKOUT/dotfiles/.config/starship.toml"
+cat > "$DOTFILES_CHECKOUT/dotfiles/.config/matugen/config.toml" <<'EOF'
+[templates.starship]
+input_path = '~/.config/matugen/templates/starship-colors.toml'
+output_path = '~/.config/starship.toml'
+
+[templates.yazi]
+input_path = '~/.config/matugen/templates/yazi-theme.toml'
+output_path = '~/.config/yazi/theme.toml'
+EOF
+printf 'legacy Matugen Starship template\n' \
+    > "$DOTFILES_CHECKOUT/dotfiles/.config/matugen/templates/starship-colors.toml"
+NIRI_STARSHIP_CONFIG_SHA256=$(sha256sum \
+    "$DOTFILES_CHECKOUT/dotfiles/.config/starship.toml" | awk '{ print $1 }')
+export NIRI_STARSHIP_CONFIG_SHA256
+desktop_niri_contract_init
 deploy_dotfiles "$DOTFILES_CHECKOUT"
 niri_fish_sources_satisfied ||
     fail 'dotfile deployment must immediately remove unsafe Fish environment sources'
@@ -46,22 +61,33 @@ niri_fish_sources_satisfied ||
     fail 'the upstream Fish source with a leading blank line must be migrated'
 niri_starship_config_deployed ||
     fail 'dotfile deployment must restore the Starship configuration'
+niri_matugen_starship_output_disabled ||
+    fail 'dotfile deployment must disable Matugen Starship output'
+[ ! -e "$NIRI_MATUGEN_STARSHIP_TEMPLATE_FILE" ] ||
+    fail 'dotfile deployment must retire the unused Matugen Starship template'
+grep -Fqx '[templates.yazi]' "$NIRI_MATUGEN_CONFIG_FILE" ||
+    fail 'disabling Starship output must preserve later Matugen templates'
 
 STARSHIP_CURRENT_COPY="$TEST_DIR/starship-current.toml"
-STARSHIP_CUSTOM_COPY="$TEST_DIR/starship-custom.toml"
 cp "$HOME_DIR/.config/starship.toml" "$STARSHIP_CURRENT_COPY"
-printf 'legacy upstream Starship seed\n' > "$HOME_DIR/.config/starship.toml"
-NIRI_LEGACY_STARSHIP_SHA256=$(sha256sum "$HOME_DIR/.config/starship.toml" | awk '{ print $1 }')
+printf 'Matugen-generated Starship configuration\n' \
+    > "$HOME_DIR/.config/starship.toml"
+cat >> "$NIRI_MATUGEN_CONFIG_FILE" <<'EOF'
+
+[templates.starship]
+input_path = '~/.config/matugen/templates/starship-colors.toml'
+output_path = '~/.config/starship.toml'
+EOF
 deploy_dotfiles "$DOTFILES_CHECKOUT"
 cmp -s "$HOME_DIR/.config/starship.toml" "$STARSHIP_CURRENT_COPY" ||
-    fail 'an unmodified legacy Starship seed must upgrade from the pinned checkout'
+    fail 'the pinned Starship configuration must replace generated drift'
+niri_matugen_starship_output_disabled ||
+    fail 'reintroduced Matugen Starship output must be removed'
 printf 'user-owned Starship configuration\n' > "$HOME_DIR/.config/starship.toml"
-cp "$HOME_DIR/.config/starship.toml" "$STARSHIP_CUSTOM_COPY"
 deploy_dotfiles "$DOTFILES_CHECKOUT"
-cmp -s "$HOME_DIR/.config/starship.toml" "$STARSHIP_CUSTOM_COPY" ||
-    fail 'a custom Starship configuration must not be overwritten'
+cmp -s "$HOME_DIR/.config/starship.toml" "$STARSHIP_CURRENT_COPY" ||
+    fail 'Starship must remain managed by the pinned checkout'
 cp "$STARSHIP_CURRENT_COPY" "$HOME_DIR/.config/starship.toml"
-unset NIRI_LEGACY_STARSHIP_SHA256
 desktop_niri_contract_init
 
 LIST_FILE="$TEST_DIR/niri-applist.txt"
@@ -555,6 +581,32 @@ output=$(PATH="$BIN_DIR:$PATH" SHORIN_PROFILE_DIR="$PROFILE_DIR" \
 grep -Fq file:starship-config <<< "$output" ||
     fail 'desktop check must identify a missing Starship configuration'
 mv "$NIRI_STARSHIP_CONFIG_FILE.missing" "$NIRI_STARSHIP_CONFIG_FILE"
+
+cat >> "$NIRI_MATUGEN_CONFIG_FILE" <<'EOF'
+
+[templates.starship]
+input_path = '~/.config/matugen/templates/starship-colors.toml'
+output_path = '~/.config/starship.toml'
+EOF
+status=0
+output=$(PATH="$BIN_DIR:$PATH" SHORIN_PROFILE_DIR="$PROFILE_DIR" \
+    PACKAGE_SOURCE_DIR="$PACKAGE_SOURCES" \
+    bash "$ROOT_DIR/scripts/modules/desktop-niri.sh" check 2>&1) || status=$?
+[ "$status" -eq 10 ] ||
+    fail 'active Matugen Starship output must report desktop drift'
+grep -Fq config:matugen-starship-output <<< "$output" ||
+    fail 'desktop check must identify Matugen Starship output drift'
+disable_matugen_starship_output
+printf 'retired template\n' > "$NIRI_MATUGEN_STARSHIP_TEMPLATE_FILE"
+status=0
+output=$(PATH="$BIN_DIR:$PATH" SHORIN_PROFILE_DIR="$PROFILE_DIR" \
+    PACKAGE_SOURCE_DIR="$PACKAGE_SOURCES" \
+    bash "$ROOT_DIR/scripts/modules/desktop-niri.sh" check 2>&1) || status=$?
+[ "$status" -eq 10 ] ||
+    fail 'a retired Matugen Starship template must report desktop drift'
+grep -Fq legacy:matugen-starship-template-absent <<< "$output" ||
+    fail 'desktop check must identify the retired Matugen Starship template'
+disable_matugen_starship_output
 
 printf 'unrelated wallpaper\n' > "$NIRI_WALLPAPER_DIR/unrelated.png"
 mv "$NIRI_DEFAULT_WALLPAPER_FILE" "$NIRI_DEFAULT_WALLPAPER_FILE.missing"

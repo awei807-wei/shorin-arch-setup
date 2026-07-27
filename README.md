@@ -158,7 +158,7 @@ bash install.sh verify --user shorin grub
 
 `desktop-niri` 的必需目标包含 QuickShell、`qt6-wayland`、`qt6-multimedia`、`bluez-utils`、主题生成、锁屏/空闲管理及桌面核心依赖。模块会把必需集合与 `niri-packages.list` 中的用户选择合并，并确保 Niri 配置中分别只有一个有效的 QuickShell 和 Fcitx5 启动命令；已有带参数的 `spawn-sh-at-startup` 命令会被保留。旧 profile 中的 Waybar 及其两个扩展会被视为已由 QuickShell 取代，不再触发安装或修复，也不会主动卸载机器上已有的软件。
 
-桌面修复还会收敛以下持久状态：Niri 的 `PATH` 包含目标用户 `~/.local/bin`；`Mod+Alt+V` 调用 `niri-clip toggle`；`Mod+ALT+C` 调用 `focus-shift`；Fish 直接且幂等地加入 `~/.cargo/bin` 与 `~/.local/bin`，不依赖安装器生成的 `env.fish`；`~/.config/starship.toml` 和配置仓库声明的默认壁纸存在；Niri、QuickShell 和 Waypaper 中明确的旧 `swww` 配置迁移为 `awww`。Niri 配置修改后必须通过 `niri validate`，失败时会恢复原 `config.kdl` 和 `binds.kdl`。
+桌面修复还会收敛以下持久状态：Niri 的 `PATH` 包含目标用户 `~/.local/bin`；`Mod+Alt+V` 调用 `niri-clip toggle`；`Mod+ALT+C` 调用 `focus-shift`；Fish 直接且幂等地加入 `~/.cargo/bin` 与 `~/.local/bin`，不依赖安装器生成的 `env.fish`；`~/.config/starship.toml` 与配置仓库固定提交完全一致，且 Matugen 不再生成或覆盖该文件，旧 `starship-colors.toml` 模板会被清理；配置仓库声明的默认壁纸存在；Niri、QuickShell 和 Waypaper 中明确的旧 `swww` 配置迁移为 `awww`。Niri 配置修改后必须通过 `niri validate`，失败时会恢复原 `config.kdl` 和 `binds.kdl`。
 
 TTY1 会话由 `~/.bash_profile` 中的托管块启动 `niri-session -l`。`-l` 声明当前已处于登录 Shell；不带它时 `niri-session` 会重新拉起登录 Shell 导入环境，若登录 Shell 是 bash 会再次读取 `.bash_profile` 形成启动循环。旧版 `niri-autostart.service` 及 wants 链接会被清理；存在用户 bus 时同步执行 `daemon-reload` 和失败状态清理，避免后台重复启动一个没有 TTY 的 Niri 会话。
 
@@ -261,7 +261,7 @@ commit，审核后必须通过 `SHORIN_EXPECTED_COMMIT=<commit>` 再次运行。
 
 ## 重跑与外部条件
 
-软件包、服务、配置文件、用户单元、`fstab` 和 GRUB 都以当前状态为判断依据。Storage 会按挂载目标清理旧版本遗留的重复根分区、Home、EFI、包缓存和日志条目，同时保留同一 Btrfs 文件系统上的不同子卷；写回前必须通过 `findmnt --verify`。安装器管理的系统配置经校验后原子替换；用户可编辑的 dotfiles、Firefox 用户配置、Vicinae 用户配置、壁纸、模板和 XDG 目录配置默认只在首次创建或明确识别为旧空壳时部署，重跑不会无条件覆盖。Starship 配置和默认壁纸属于桌面恢复的必需种子文件：缺失会触发修复；已知且未修改的旧版 Starship 种子会升级到当前固定提交，其他已有用户文件仍会保留。
+软件包、服务、配置文件、用户单元、`fstab` 和 GRUB 都以当前状态为判断依据。Storage 会按挂载目标清理旧版本遗留的重复根分区、Home、EFI、包缓存和日志条目，同时保留同一 Btrfs 文件系统上的不同子卷；写回前必须通过 `findmnt --verify`。安装器管理的系统配置经校验后原子替换；用户可编辑的 dotfiles、Firefox 用户配置、Vicinae 用户配置、壁纸、模板和 XDG 目录配置默认只在首次创建或明确识别为旧空壳时部署，重跑不会无条件覆盖。Starship 配置属于桌面模块明确管理的例外：每次修复都会与固定提交逐字节对齐，并移除 Matugen 的 Starship 输出表；默认壁纸缺失时也会触发修复，其他已有用户文件仍会保留。
 
 每次可写安装都会创建新的 `Before Shorin Setup` 快照；真正进入 desktop-niri
 前再创建新的桌面检查点，不复用旧运行的同名快照。回滚脚本会在修改前解析并

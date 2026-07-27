@@ -8,8 +8,31 @@ SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." &&
 source "$SCRIPT_DIR/lib/core.sh"
 source "$SCRIPT_DIR/modules/desktop-niri/targets.sh"
 
+disable_matugen_starship_output() {
+    local temporary mode
+
+    if ! niri_matugen_starship_output_disabled; then
+        temporary=$(mktemp)
+        awk '
+            /^[[:space:]]*\[templates[.]starship\][[:space:]]*(#.*)?$/ {
+                skip=1
+                next
+            }
+            skip && /^[[:space:]]*\[[^]]+\][[:space:]]*(#.*)?$/ { skip=0 }
+            !skip { print }
+        ' "$NIRI_MATUGEN_CONFIG_FILE" > "$temporary"
+        mode=$(stat -c '%a' "$NIRI_MATUGEN_CONFIG_FILE")
+        install_if_changed "$temporary" "$NIRI_MATUGEN_CONFIG_FILE" "$mode"
+        rm -f "$temporary"
+        chown "$TARGET_USER:" "$NIRI_MATUGEN_CONFIG_FILE"
+    fi
+    rm -f "$NIRI_MATUGEN_STARSHIP_TEMPLATE_FILE"
+    niri_matugen_starship_output_disabled &&
+        niri_matugen_starship_template_absent
+}
+
 deploy_dotfiles() {
-    local checkout=$1 source_file temporary mode
+    local checkout=$1 source_file source_hash temporary mode
 
     [ -d "$checkout/dotfiles" ] || die 'Verified checkout has no dotfiles.'
     if [ "$TARGET_USER" != shorin ]; then
@@ -35,11 +58,13 @@ deploy_dotfiles() {
     deploy_user_tree_once "$checkout/dotfiles" "$HOME_DIR" "$TARGET_USER"
     source_file="$checkout/dotfiles/.config/starship.toml"
     [ -s "$source_file" ] || die 'Verified checkout has no Starship configuration.'
-    if niri_starship_config_is_legacy_seed; then
-        mode=$(stat -c '%a' "$source_file")
-        install_if_changed "$source_file" "$NIRI_STARSHIP_CONFIG_FILE" "$mode"
-        chown "$TARGET_USER:" "$NIRI_STARSHIP_CONFIG_FILE"
-    fi
+    source_hash=$(sha256sum "$source_file" | awk '{ print $1 }')
+    [ "$source_hash" = "$NIRI_STARSHIP_CONFIG_SHA256" ] ||
+        die 'Verified checkout has an unexpected Starship configuration.'
+    disable_matugen_starship_output
+    mode=$(stat -c '%a' "$source_file")
+    install_if_changed "$source_file" "$NIRI_STARSHIP_CONFIG_FILE" "$mode"
+    chown "$TARGET_USER:" "$NIRI_STARSHIP_CONFIG_FILE"
     niri_starship_config_deployed
     # Upstream still ships unconditional sources for installer-generated files.
     # Converge them immediately so a freshly restored terminal never observes

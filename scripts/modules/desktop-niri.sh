@@ -57,6 +57,10 @@ desktop_niri_inspect() {
     desktop_niri_expect "$phase" file:wallpapers niri_wallpapers_deployed
     desktop_niri_expect "$phase" file:starship-config \
         niri_starship_config_deployed
+    desktop_niri_expect "$phase" config:matugen-starship-output \
+        niri_matugen_starship_output_disabled
+    desktop_niri_expect "$phase" legacy:matugen-starship-template-absent \
+        niri_matugen_starship_template_absent
     desktop_niri_expect "$phase" file:templates niri_templates_deployed
     desktop_niri_expect "$phase" hardware:optional-tools \
         niri_optional_hardware_targets_match
