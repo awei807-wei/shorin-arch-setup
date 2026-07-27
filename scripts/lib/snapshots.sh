@@ -78,12 +78,26 @@ snapshot_latest_paired_record() {
 }
 
 snapshot_config_subvolume_matches() {
-    local config=$1 expected=$2 actual
+    local config=$1 expected=$2 output actual
 
-    actual=$(snapper --csvout --no-headers -c "$config" \
-        get-config --columns subvolume 2>/dev/null) || return 2
-    actual=${actual#\"}
-    actual=${actual%\"}
+    output=$(snapper --csvout --separator $'\t' --no-headers -c "$config" \
+        get-config --columns key,value) || return 2
+    actual=$(awk -F '\t' '
+        {
+            key=$1
+            value=$2
+            gsub(/^[[:space:]"]+|[[:space:]"]+$/, "", key)
+            gsub(/^[[:space:]"]+|[[:space:]"]+$/, "", value)
+            if (key == "SUBVOLUME") {
+                matches++
+                subvolume=value
+            }
+        }
+        END {
+            if (matches == 1) print subvolume
+            else exit 1
+        }
+    ' <<< "$output") || return 2
     [ "$actual" = "$expected" ]
 }
 

@@ -56,19 +56,24 @@ fi
 source "$ROOT_DIR/scripts/modules/storage/targets.sh"
 SNAPPER_CONFIG_DIR="$TEST_DIR/snapper"
 SNAPPER_HOME_TARGET=/home
+SNAPPER_GET_CONFIG_STATUS=0
 snapper() {
-    local config=""
-    while [ "$#" -gt 0 ]; do
-        if [ "$1" = -c ]; then
-            config=$2
-            shift 2
-        else
-            shift
-        fi
-    done
+    local config=${6:-}
+
+    [ "${1:-}" = --csvout ] &&
+        [ "${2:-}" = --separator ] &&
+        [ "${3:-}" = $'\t' ] &&
+        [ "${4:-}" = --no-headers ] &&
+        [ "${5:-}" = -c ] &&
+        [ "${7:-}" = get-config ] &&
+        [ "${8:-}" = --columns ] &&
+        [ "${9:-}" = key,value ] || return 64
+    [ "$SNAPPER_GET_CONFIG_STATUS" -eq 0 ] ||
+        return "$SNAPPER_GET_CONFIG_STATUS"
+    printf '"FSTYPE"\t"btrfs"\n'
     case "$config" in
-        root) printf '/\n' ;;
-        home) printf '%s\n' "$SNAPPER_HOME_TARGET" ;;
+        root) printf '"SUBVOLUME"\t"/"\n' ;;
+        home) printf '"SUBVOLUME"\t"%s"\n' "$SNAPPER_HOME_TARGET" ;;
         *) return 1 ;;
     esac
 }
@@ -89,6 +94,12 @@ sed -i 's/^NUMBER_LIMIT="20"/NUMBER_LIMIT="99"/' \
 if snapper_config_matches root; then
     fail 'incorrect Snapper values must be detected'
 fi
+SNAPPER_GET_CONFIG_STATUS=3
+status=0
+snapshot_config_subvolume_matches root / || status=$?
+[ "$status" -eq 2 ] ||
+    fail 'Snapper command failures must remain inspection errors'
+SNAPPER_GET_CONFIG_STATUS=0
 
 MOCK_BIN="$TEST_DIR/bin"
 mkdir -p "$MOCK_BIN"
