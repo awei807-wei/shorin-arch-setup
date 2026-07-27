@@ -26,8 +26,12 @@ ensure_wine_config() {
             "$font_destination/$(basename "$font")"
     done < <(find "$font_source" -maxdepth 1 -type f -print0)
     if command -v wineserver >/dev/null 2>&1; then
-        as_user env HOME="$HOME_DIR" WINEPREFIX="$wine_prefix" wineserver -k
+        if ! as_user env HOME="$HOME_DIR" WINEPREFIX="$wine_prefix" \
+            wineserver -k; then
+            warn 'Wine configuration completed, but wineserver did not stop cleanly.'
+        fi
     fi
+    return 0
 }
 
 ensure_lutris_config() {
@@ -174,25 +178,39 @@ ensure_vicinae_settings() {
 }
 
 ensure_application_entry_config() {
-    local entry=$1
+    local entry=$1 status=0
 
     case "$entry" in
-        wine) ensure_wine_config ;;
-        lutris) ensure_lutris_config ;;
-        steam) ensure_native_steam_locale ;;
-        flatpak:com.valvesoftware.Steam) ensure_flatpak_steam_locale ;;
-        lazyvim) ensure_lazyvim_config ;;
-        firefox) ensure_firefox_defaults_once ;;
-        AUR:vicinae|AUR:vicinae-bin) ensure_vicinae_settings ;;
+        wine) ensure_wine_config || status=$? ;;
+        lutris) ensure_lutris_config || status=$? ;;
+        steam) ensure_native_steam_locale || status=$? ;;
+        flatpak:com.valvesoftware.Steam)
+            ensure_flatpak_steam_locale || status=$?
+            ;;
+        lazyvim) ensure_lazyvim_config || status=$? ;;
+        firefox) ensure_firefox_defaults_once || status=$? ;;
+        AUR:vicinae|AUR:vicinae-bin)
+            ensure_vicinae_settings || status=$?
+            ;;
     esac
+    [ "$status" -eq 0 ] || return "$status"
     ensure_application_nodisplay "$entry"
 }
 
 converge_application_configs() {
-    local entries=$1 entry
+    local entries=$1 entry entry_status status=0
 
     while IFS= read -r entry; do
         [ -n "$entry" ] || continue
-        ensure_application_entry_config "$entry"
+        entry_status=0
+        ensure_application_entry_config "$entry" || entry_status=$?
+        [ "$entry_status" -eq 0 ] && continue
+
+        error "Failed to configure application: $entry"
+        if declare -p FAILED_PACKAGES >/dev/null 2>&1; then
+            FAILED_PACKAGES+=("config:$entry")
+        fi
+        status=1
     done <<< "$entries"
+    return "$status"
 }

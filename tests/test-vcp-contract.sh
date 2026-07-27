@@ -46,6 +46,16 @@ printf 'print("backup")\n' > "$VCP_BACKUP_SCRIPT"
 source "$ROOT_DIR/scripts/lib/core.sh"
 source "$ROOT_DIR/scripts/modules/vcp/contract.sh"
 vcp_contract_init
+
+status=0
+vcp_backup_timer_active_status 4 || status=$?
+[ "$status" -eq 1 ] ||
+    fail 'a missing VCP user timer must be repairable drift'
+status=0
+vcp_backup_timer_active_status 1 || status=$?
+[ "$status" -eq 2 ] ||
+    fail 'an unexpected user systemd failure must remain an inspection error'
+
 mkdir -p "$VCP_USER_UNIT_DIR/timers.target.wants"
 vcp_backup_service_contract > "$VCP_BACKUP_SERVICE"
 vcp_backup_timer_contract > "$VCP_BACKUP_TIMER"

@@ -33,6 +33,7 @@ LIST_FILE="$TEST_DIR/niri-applist.txt"
 MANIFEST="$TEST_DIR/niri-packages.list"
 printf 'waybar\n' > "$LIST_FILE"
 printf '%s\n' imv AUR:matugen waybar \
+    AUR:wlogout \
     AUR:waybar-niri-taskbar-git \
     AUR:waybar-module-pacman-updates-git > "$MANIFEST"
 
@@ -53,6 +54,11 @@ for REQUIRED_TARGET in quickshell qt6-wayland qt6-multimedia bluez-utils \
 done
 printf '%s\n' "${TARGETS[@]}" | grep -Fqx imv ||
     fail 'saved optional package choices must be preserved'
+printf '%s\n' "${TARGETS[@]}" | grep -Fqx AUR:wlogout-git ||
+    fail 'the legacy signed wlogout target must migrate to wlogout-git'
+if printf '%s\n' "${TARGETS[@]}" | grep -Fqx AUR:wlogout; then
+    fail 'the legacy wlogout target must not remain in the converged profile'
+fi
 printf '%s\n' "${TARGETS[@]}" | grep -Fqx matugen ||
     fail 'the required repository source must win over a stale AUR declaration'
 if printf '%s\n' "${TARGETS[@]}" | grep -Fqx AUR:matugen; then

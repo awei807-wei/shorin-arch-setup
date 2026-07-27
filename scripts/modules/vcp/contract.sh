@@ -104,15 +104,24 @@ vcp_backup_link_matches() {
     [ -L "$link" ] && [ "$(readlink "$link")" = ../vcp-backup.timer ]
 }
 
+vcp_backup_timer_active_status() {
+    case "$1" in
+        0) return 0 ;;
+        3|4) return 1 ;;
+        *) return 2 ;;
+    esac
+}
+
 vcp_backup_timer_is_active() {
-    local user=$1 uid runtime_dir
+    local user=$1 uid runtime_dir status=0
 
     uid=$(id -u "$user") || return 2
     runtime_dir="${SHORIN_USER_RUNTIME_ROOT:-/run/user}/$uid"
     [ -S "$runtime_dir/bus" ] || return 2
     runuser -u "$user" -- env XDG_RUNTIME_DIR="$runtime_dir" \
         DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime_dir/bus" \
-        systemctl --user is-active --quiet vcp-backup.timer
+        systemctl --user is-active --quiet vcp-backup.timer || status=$?
+    vcp_backup_timer_active_status "$status"
 }
 
 vcp_backup_artifacts_exist() {

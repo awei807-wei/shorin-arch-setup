@@ -60,8 +60,16 @@ niri_package_entries_from_file() {
     ' "$file"
 }
 
+niri_package_target_canonical() {
+    case "$1" in
+        AUR:wlogout) printf '%s\n' AUR:wlogout-git ;;
+        *) printf '%s\n' "$1" ;;
+    esac
+}
+
 # A saved profile records optional choices; it must never replace the required
-# package set added by a newer installer version.
+# package set added by a newer installer version. Canonicalization also migrates
+# saved targets whose upstream packaging path is no longer reliable.
 niri_all_package_targets() {
     local manifest=$1 list_file=$2 source target key
     local -A seen=()
@@ -76,6 +84,7 @@ niri_all_package_targets() {
 
     while IFS= read -r target; do
         [ -n "$target" ] || continue
+        target=$(niri_package_target_canonical "$target")
         niri_package_target_is_obsolete "$target" && continue
         key=$(niri_package_target_name "$target")
         [ -z "${seen[$key]:-}" ] || continue

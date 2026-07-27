@@ -41,7 +41,7 @@ cava                                     # Console-based Audio Visualizer
 bluetui                                  # tui for bluetooth
 
 # --- AUR Packages ---
-AUR:wlogout                              # Logout menu (Shutdown/Reboot/Lock)
+AUR:wlogout-git                          # Logout menu (Shutdown/Reboot/Lock)
 AUR:clipse                               # Clipboard manager
 AUR:clipse-gui                           # Clipboard manager (GUI binary)
 AUR:python-pywalfox                      # Pywal support for Firefox

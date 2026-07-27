@@ -37,10 +37,12 @@ GITHUB_REMOTE_OK=0
 NIRI_CLIP_UNIT_ENABLED=0
 LAZYVIM_CLONES=0
 LAZYVIM_CHECKOUT_FAIL=0
+WINE_SERVER_STOP_FAIL=0
 GITHUB_HEAD=0123456789abcdef0123456789abcdef01234567
 GITHUB_CHECKOUT_DIRTY=0
 GITHUB_USER_CONTEXT_LOG="$TEST_DIR/github-user-context.log"
 AS_USER_LOG="$TEST_DIR/as-user.log"
+FAILED_PACKAGES=()
 
 state_package_present() {
     [ "${INSTALLED_PACKAGES[$1]:-0}" -eq 1 ]
@@ -118,6 +120,10 @@ as_user() {
         return 0
     fi
     if [[ " $* " == *' wineserver '* ]]; then
+        if [[ " $* " == *' wineserver -k '* ]] &&
+            [ "$WINE_SERVER_STOP_FAIL" -eq 1 ]; then
+            return 1
+        fi
         return 0
     fi
     if [[ " $* " == *' cargo build '* ]]; then
@@ -212,6 +218,10 @@ while IFS= read -r -d '' FONT; do
     cp "$FONT" "$HOME_DIR/.wine/drive_c/windows/Fonts/$(basename "$FONT")"
 done < <(find "$WINDOWS_FONT_SOURCE" -maxdepth 1 -type f -print0)
 application_entry_satisfied wine || fail 'complete Wine configuration must pass'
+WINE_SERVER_STOP_FAIL=1
+ensure_wine_config ||
+    fail 'a failed wineserver cleanup must not invalidate converged Wine config'
+WINE_SERVER_STOP_FAIL=0
 
 for package in "${LUTRIS_CONFIG_PACKAGES[@]}"; do
     INSTALLED_PACKAGES["$package"]=1
@@ -315,6 +325,17 @@ if ensure_lazyvim_config 2>/dev/null; then
 fi
 [ ! -e "$HOME_DIR/.config/nvim" ] ||
     fail 'a failed pinned LazyVim checkout must remove the unverified clone'
+
+printf '[Desktop Entry]\nExec=mpv %%U\n' > \
+    "$APPLICATION_DESKTOP_DIR/mpv.desktop"
+FAILED_PACKAGES=()
+if converge_application_configs $'lazyvim\nmpv' 2>/dev/null; then
+    fail 'a failed application configuration must be reported to the caller'
+fi
+printf '%s\n' "${FAILED_PACKAGES[@]}" | grep -Fqx config:lazyvim ||
+    fail 'application configuration failures must identify their entry'
+application_entry_satisfied mpv ||
+    fail 'one failed application config must not block later entries'
 
 if grep -R -Fq 'NOPASSWD: /usr/bin/pacman' "$ROOT_DIR/scripts"; then
     fail 'AUR installation must not grant unrestricted pacman sudo privileges'

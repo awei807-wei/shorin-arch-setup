@@ -155,7 +155,19 @@ if [ ${#REPO_APPS[@]} -gt 0 ]; then
     section "Step 1/4" "Configured Binary Repository Packages"
     mapfile -t REPO_APPS < <(printf '%s\n' "${REPO_APPS[@]}" | sort -u)
     for pkg in "${REPO_APPS[@]}"; do
-        if ! ensure_package "$pkg"; then
+        install_success=false
+        for (( i=0; i<3; i++ )); do
+            if [ "$i" -gt 0 ]; then
+                warn "Retry $i/2 for repository package '$pkg' in 3 seconds..."
+                sleep 3
+            fi
+            if ensure_package "$pkg"; then
+                install_success=true
+                break
+            fi
+        done
+        if [ "$install_success" = false ]; then
+            error "Failed to install repository application: $pkg"
             FAILED_PACKAGES+=("repo:$pkg")
         fi
     done
@@ -235,7 +247,9 @@ fi
 # 4. Converge application-specific configuration
 # ------------------------------------------------------------------------------
 source "$SCRIPT_DIR/modules/applications/config-apply.sh"
-converge_application_configs "$SELECTED_RAW"
+if ! converge_application_configs "$SELECTED_RAW"; then
+    warn 'Some application-specific configuration steps failed.'
+fi
 
 # ------------------------------------------------------------------------------
 # 5. Generate Failure Report
