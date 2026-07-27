@@ -204,6 +204,76 @@ test_aur_source_routing() (
     }
 )
 
+test_aur_stale_database_recovery() (
+    local installed=0 aur_attempts=0 sync_recoveries=0
+    PACKAGE_SOURCE_DIR="$TEST_DIR/stale-sync-package-sources"
+    PACMAN_SYNC_RECOVERY_ATTEMPTED=0
+    PACMAN_SYNC_STAMP="$TEST_DIR/pacman-sync-recovered"
+
+    pacman() {
+        case "$1" in
+            -Si) return 1 ;;
+            -Q) [ "$installed" -eq 1 ] && printf 'aur-example 2.0\n' ;;
+            -Syyu)
+                [ "$*" = '-Syyu --noconfirm' ] || return 1
+                sync_recoveries=$((sync_recoveries + 1))
+                ;;
+            *) return 1 ;;
+        esac
+    }
+    runuser() {
+        aur_attempts=$((aur_attempts + 1))
+        if [ "$aur_attempts" -eq 1 ]; then
+            printf '%s\n' \
+                "error: failed retrieving file 'dependency-1.0.pkg.tar.zst' from mirror.example : The requested URL returned error: 404" \
+                'error: failed to commit transaction (failed to retrieve some files)' >&2
+            return 1
+        fi
+        installed=1
+    }
+
+    ensure_aur_package aur-example tester "$TEST_DIR/home"
+    assert_equal 2 "$aur_attempts" \
+        'stale repository metadata must retry the AUR command once'
+    assert_equal 1 "$sync_recoveries" \
+        'stale repository metadata must force one full synchronized upgrade'
+    assert_equal 1 "$PACMAN_SYNC_RECOVERY_ATTEMPTED" \
+        'database recovery must be bounded to one attempt'
+    assert_equal succeeded "$(< "$PACMAN_SYNC_STAMP")" \
+        'successful database recovery must be recorded for the installer run'
+)
+
+test_failed_package_sync_recovery_is_not_retried() (
+    local sync_recoveries=0
+    PACMAN_SYNC_RECOVERY_ATTEMPTED=0
+    PACMAN_SYNC_STAMP="$TEST_DIR/pacman-sync-failed"
+
+    pacman() {
+        case "$1" in
+            -Q) return 1 ;;
+            -Syyu)
+                sync_recoveries=$((sync_recoveries + 1))
+                return 1
+                ;;
+            -S)
+                printf '%s\n' \
+                    "error: failed retrieving file 'dependency.pkg.tar.zst' from mirror.example : The requested URL returned error: 404" \
+                    'error: failed to commit transaction (failed to retrieve some files)' >&2
+                return 1
+                ;;
+            *) return 1 ;;
+        esac
+    }
+
+    ensure_package stale-example >/dev/null 2>&1 || true
+    PACMAN_SYNC_RECOVERY_ATTEMPTED=0
+    ensure_package another-stale-example >/dev/null 2>&1 || true
+    assert_equal 1 "$sync_recoveries" \
+        'a failed full-upgrade recovery must not repeat in the installer run'
+    assert_equal attempted "$(< "$PACMAN_SYNC_STAMP")" \
+        'failed database recovery must retain a shared attempted marker'
+)
+
 test_package_trust_recovery() {
     local package_log="$TEST_DIR/package-trust.log"
     PACMAN_INSTALLED=0
@@ -277,6 +347,7 @@ test_failed_package_trust_recovery_is_not_retried() {
 
 test_package_non_trust_failure_does_not_recover() {
     PACMAN_TRUST_RECOVERY_ATTEMPTED=0
+    PACMAN_SYNC_RECOVERY_ATTEMPTED=0
     PACMAN_RECOVERIES=0
     PACMAN_TRUST_STAMP="$TEST_DIR/non-trust-recovery"
     pacman() {
@@ -293,6 +364,8 @@ test_package_non_trust_failure_does_not_recover() {
     fi
     assert_equal 0 "$PACMAN_RECOVERIES" \
         'non-signature failure must not trigger trust recovery'
+    assert_equal 0 "$PACMAN_SYNC_RECOVERY_ATTEMPTED" \
+        'an unrelated package failure must not trigger database recovery'
 }
 
 test_corrupt_signature_without_trust_error_does_not_recover() {
@@ -465,6 +538,8 @@ test_checkout_preserves_shared_parent_mode
 test_git_state_uses_target_user_context
 test_package_convergence
 test_aur_source_routing
+test_aur_stale_database_recovery
+test_failed_package_sync_recovery_is_not_retried
 test_package_trust_recovery
 test_failed_package_trust_recovery_is_not_retried
 test_package_non_trust_failure_does_not_recover

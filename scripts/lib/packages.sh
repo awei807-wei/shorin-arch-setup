@@ -31,6 +31,8 @@ flatpak_is_installed() {
 
 PACMAN_TRUST_RECOVERY_ATTEMPTED=${PACMAN_TRUST_RECOVERY_ATTEMPTED:-0}
 PACMAN_TRUST_STAMP=${PACMAN_TRUST_STAMP:-/run/lock/shorin-pacman-trust-${SHORIN_RUN_TOKEN:-$$}}
+PACMAN_SYNC_RECOVERY_ATTEMPTED=${PACMAN_SYNC_RECOVERY_ATTEMPTED:-0}
+PACMAN_SYNC_STAMP=${PACMAN_SYNC_STAMP:-/run/lock/shorin-pacman-sync-${SHORIN_RUN_TOKEN:-$$}}
 PACKAGE_SOURCE_DIR=${PACKAGE_SOURCE_DIR:-/var/lib/shorin-arch-setup/package-sources}
 
 package_source_matches() {
@@ -64,6 +66,13 @@ pacman_log_has_trust_error() {
         "$log_file"
 }
 
+pacman_log_has_stale_sync_error() {
+    local log_file=$1
+
+    grep -Fqi 'failed to commit transaction (failed to retrieve some files)' \
+        "$log_file" && grep -Eqi 'returned error:[[:space:]]*404' "$log_file"
+}
+
 recover_pacman_trust() {
     local recovery_state
 
@@ -90,30 +99,72 @@ recover_pacman_trust() {
     printf 'succeeded\n' > "$PACMAN_TRUST_STAMP"
 }
 
-run_with_pacman_trust_recovery() {
+recover_pacman_sync() {
+    local recovery_state
+
+    require_writable_mode || return
+
+    if [ -f "$PACMAN_SYNC_STAMP" ]; then
+        recovery_state=$(< "$PACMAN_SYNC_STAMP")
+        [ "$recovery_state" = succeeded ]
+        return
+    fi
+    if [ "$PACMAN_SYNC_RECOVERY_ATTEMPTED" -eq 1 ]; then
+        printf 'ERROR: pacman database recovery was already attempted in this module\n' >&2
+        return 1
+    fi
+    PACMAN_SYNC_RECOVERY_ATTEMPTED=1
+    install -D -m 600 /dev/null "$PACMAN_SYNC_STAMP"
+    printf 'attempted\n' > "$PACMAN_SYNC_STAMP"
+
+    printf 'WARNING: stale pacman database detected; forcing a database refresh and full system upgrade before one retry\n' >&2
+    pacman -Syyu --noconfirm || return
+    printf 'succeeded\n' > "$PACMAN_SYNC_STAMP"
+}
+
+run_with_pacman_recovery() {
     local label=$1 log_file status=0
+    local trust_handled=0 sync_handled=0
     shift
 
-    log_file=$(mktemp)
-    if "$@" >"$log_file" 2>&1; then
-        cat "$log_file"
-        rm -f "$log_file"
-        return 0
-    else
-        status=$?
-    fi
-    cat "$log_file" >&2
-    if ! pacman_log_has_trust_error "$log_file"; then
+    while :; do
+        log_file=$(mktemp)
+        status=0
+        if "$@" >"$log_file" 2>&1; then
+            cat "$log_file"
+            rm -f "$log_file"
+            return 0
+        else
+            status=$?
+        fi
+        cat "$log_file" >&2
+
+        if [ "$trust_handled" -eq 0 ] &&
+            pacman_log_has_trust_error "$log_file"; then
+            trust_handled=1
+            rm -f "$log_file"
+            recover_pacman_trust || {
+                printf 'ERROR: pacman trust recovery failed while installing %s\n' \
+                    "$label" >&2
+                return 1
+            }
+            continue
+        fi
+        if [ "$sync_handled" -eq 0 ] &&
+            pacman_log_has_stale_sync_error "$log_file"; then
+            sync_handled=1
+            rm -f "$log_file"
+            recover_pacman_sync || {
+                printf 'ERROR: pacman database recovery failed while installing %s\n' \
+                    "$label" >&2
+                return 1
+            }
+            continue
+        fi
+
         rm -f "$log_file"
         return "$status"
-    fi
-    rm -f "$log_file"
-
-    recover_pacman_trust || {
-        printf 'ERROR: pacman trust recovery failed while installing %s\n' "$label" >&2
-        return 1
-    }
-    "$@"
+    done
 }
 
 ensure_package() {
@@ -121,7 +172,7 @@ ensure_package() {
     local package=$1
 
     package_is_installed "$package" ||
-        run_with_pacman_trust_recovery "$package" \
+        run_with_pacman_recovery "$package" \
             pacman -S --noconfirm --needed "$package"
     package_is_installed "$package"
 }
@@ -151,7 +202,7 @@ ensure_official_package() {
     require_writable_mode || return
     local repository=$1 package=$2
 
-    run_with_pacman_trust_recovery "$repository/$package" \
+    run_with_pacman_recovery "$repository/$package" \
         pacman -S --noconfirm "$repository/$package"
     package_is_installed "$package"
     record_package_source "$package" "official:$repository"
@@ -204,7 +255,8 @@ ensure_aur_package() {
     fi
 
     package_source_matches "$package" aur ||
-        runuser -u "$user" -- env HOME="$home" \
+        run_with_pacman_recovery "AUR:$package" \
+            runuser -u "$user" -- env HOME="$home" \
             yay -S --aur --rebuild --noconfirm \
                 --answerdiff None --answerclean None --answeredit None "$package"
     package_is_installed "$package"
