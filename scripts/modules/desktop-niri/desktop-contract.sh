@@ -16,6 +16,7 @@ desktop_niri_contract_init() {
     NIRI_WALLPAPER_DIR=${NIRI_WALLPAPER_DIR:-$HOME_DIR/Pictures/Wallpapers}
     NIRI_DEFAULT_WALLPAPER_FILE=${NIRI_DEFAULT_WALLPAPER_FILE:-$NIRI_WALLPAPER_DIR/black-and-white-3840x2160-21293.jpg}
     NIRI_STARSHIP_CONFIG_FILE=${NIRI_STARSHIP_CONFIG_FILE:-$HOME_DIR/.config/starship.toml}
+    NIRI_LEGACY_STARSHIP_SHA256=${NIRI_LEGACY_STARSHIP_SHA256:-4fdc2b560ac1ef30be3556bda2d353aebdf8073ea1afd11d40742184174dba29}
     NIRI_WAYPAPER_CONFIG_FILE=${NIRI_WAYPAPER_CONFIG_FILE:-$HOME_DIR/.config/waypaper/config.ini}
     NIRI_TEMPLATES_DIR=${NIRI_TEMPLATES_DIR:-$HOME_DIR/Templates}
     NIRI_AUTOLOGIN_FILE=${NIRI_AUTOLOGIN_FILE:-/etc/systemd/system/getty@tty1.service.d/autologin.conf}
@@ -189,7 +190,18 @@ niri_wallpapers_deployed() {
 }
 
 niri_starship_config_deployed() {
-    [ -s "$NIRI_STARSHIP_CONFIG_FILE" ]
+    [ -s "$NIRI_STARSHIP_CONFIG_FILE" ] &&
+        ! niri_starship_config_is_legacy_seed
+}
+
+niri_starship_config_is_legacy_seed() {
+    local actual
+
+    [ -f "$NIRI_STARSHIP_CONFIG_FILE" ] &&
+        [ ! -L "$NIRI_STARSHIP_CONFIG_FILE" ] || return 1
+    actual=$(sha256sum "$NIRI_STARSHIP_CONFIG_FILE" | awk '{ print $1 }') ||
+        return 1
+    [ "$actual" = "$NIRI_LEGACY_STARSHIP_SHA256" ]
 }
 
 niri_templates_deployed() {

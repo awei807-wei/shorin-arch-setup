@@ -9,7 +9,7 @@ source "$SCRIPT_DIR/lib/core.sh"
 source "$SCRIPT_DIR/modules/desktop-niri/targets.sh"
 
 deploy_dotfiles() {
-    local checkout=$1 source_file temporary
+    local checkout=$1 source_file temporary mode
 
     [ -d "$checkout/dotfiles" ] || die 'Verified checkout has no dotfiles.'
     if [ "$TARGET_USER" != shorin ]; then
@@ -33,6 +33,14 @@ deploy_dotfiles() {
         rm -f "$temporary"
     fi
     deploy_user_tree_once "$checkout/dotfiles" "$HOME_DIR" "$TARGET_USER"
+    source_file="$checkout/dotfiles/.config/starship.toml"
+    [ -s "$source_file" ] || die 'Verified checkout has no Starship configuration.'
+    if niri_starship_config_is_legacy_seed; then
+        mode=$(stat -c '%a' "$source_file")
+        install_if_changed "$source_file" "$NIRI_STARSHIP_CONFIG_FILE" "$mode"
+        chown "$TARGET_USER:" "$NIRI_STARSHIP_CONFIG_FILE"
+    fi
+    niri_starship_config_deployed
     # Upstream still ships unconditional sources for installer-generated files.
     # Converge them immediately so a freshly restored terminal never observes
     # a source error, even if a later desktop step fails.

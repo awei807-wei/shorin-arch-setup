@@ -16,12 +16,19 @@ end
 EOF
 }
 
+niri_normalize_fish_contract() {
+    awk '{
+        sub(/\r$/, "")
+        if ($0 !~ /^[[:space:]]*$/) print
+    }'
+}
+
 niri_legacy_fish_file_is_managed() {
     local file=$1 renderer=$2 legacy_line=$3 guarded_line=$4 actual expected
 
     [ -f "$file" ] && [ ! -L "$file" ] || return 1
-    actual=$(cat "$file")
-    expected=$("$renderer")
+    actual=$(niri_normalize_fish_contract < "$file")
+    expected=$("$renderer" | niri_normalize_fish_contract)
     [ "$actual" = "$expected" ] || [ "$actual" = "$legacy_line" ] ||
         [ "$actual" = "$guarded_line" ]
 }

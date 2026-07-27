@@ -35,15 +35,34 @@ DOTFILES_CHECKOUT="$TEST_DIR/dotfiles-checkout"
 mkdir -p "$DOTFILES_CHECKOUT/dotfiles/.config/fish/conf.d"
 printf 'source "$HOME/.cargo/env.fish"\n' \
     > "$DOTFILES_CHECKOUT/dotfiles/.config/fish/conf.d/rustup.fish"
-printf 'source "$HOME/.local/bin/env.fish"\n' \
+printf '\nsource "$HOME/.local/bin/env.fish"\n' \
     > "$DOTFILES_CHECKOUT/dotfiles/.config/fish/conf.d/uv.env.fish"
 printf 'format = "$directory$character"\n' \
     > "$DOTFILES_CHECKOUT/dotfiles/.config/starship.toml"
 deploy_dotfiles "$DOTFILES_CHECKOUT"
 niri_fish_sources_satisfied ||
     fail 'dotfile deployment must immediately remove unsafe Fish environment sources'
+[ ! -e "$HOME_DIR/.config/fish/conf.d/uv.env.fish" ] ||
+    fail 'the upstream Fish source with a leading blank line must be migrated'
 niri_starship_config_deployed ||
     fail 'dotfile deployment must restore the Starship configuration'
+
+STARSHIP_CURRENT_COPY="$TEST_DIR/starship-current.toml"
+STARSHIP_CUSTOM_COPY="$TEST_DIR/starship-custom.toml"
+cp "$HOME_DIR/.config/starship.toml" "$STARSHIP_CURRENT_COPY"
+printf 'legacy upstream Starship seed\n' > "$HOME_DIR/.config/starship.toml"
+NIRI_LEGACY_STARSHIP_SHA256=$(sha256sum "$HOME_DIR/.config/starship.toml" | awk '{ print $1 }')
+deploy_dotfiles "$DOTFILES_CHECKOUT"
+cmp -s "$HOME_DIR/.config/starship.toml" "$STARSHIP_CURRENT_COPY" ||
+    fail 'an unmodified legacy Starship seed must upgrade from the pinned checkout'
+printf 'user-owned Starship configuration\n' > "$HOME_DIR/.config/starship.toml"
+cp "$HOME_DIR/.config/starship.toml" "$STARSHIP_CUSTOM_COPY"
+deploy_dotfiles "$DOTFILES_CHECKOUT"
+cmp -s "$HOME_DIR/.config/starship.toml" "$STARSHIP_CUSTOM_COPY" ||
+    fail 'a custom Starship configuration must not be overwritten'
+cp "$STARSHIP_CURRENT_COPY" "$HOME_DIR/.config/starship.toml"
+unset NIRI_LEGACY_STARSHIP_SHA256
+desktop_niri_contract_init
 
 LIST_FILE="$TEST_DIR/niri-applist.txt"
 MANIFEST="$TEST_DIR/niri-packages.list"
@@ -209,6 +228,12 @@ niri_user_terminal_link_matches || status=$?
     fail 'a missing Kitty target must be repairable desktop drift'
 printf '#!/usr/bin/env bash\n' > "$NIRI_GNOME_TERMINAL_TARGET"
 chmod 755 "$NIRI_GNOME_TERMINAL_TARGET"
+
+# Keep the fixture independent of the host GPU topology.
+lspci() {
+    return 0
+}
+export -f lspci
 
 niri_firefox_policy_contract > "$NIRI_FIREFOX_POLICY_FILE"
 niri_nautilus_override_contract > "$NIRI_NAUTILUS_OVERRIDE_FILE"
