@@ -72,10 +72,41 @@ assert_selected_grub_is_required() {
         fail "a selected GRUB verification failure must be fatal (actual=$result)"
 }
 
+assert_invalid_terminal_is_normalized() {
+    local output
+
+    output=$(TERM=xterm-kitty ENTRYPOINT="$ENTRYPOINT" bash -Eeuo pipefail -c '
+        source "$ENTRYPOINT"
+        infocmp() { [ "${1:-}" = xterm-256color ]; }
+        preflight_readonly repair
+        printf "TERM=%s\n" "$TERM"
+    ' 2>&1)
+    grep -Fq \
+        'WARNING: TERM=xterm-kitty has no usable terminfo; using TERM=xterm-256color for this run.' \
+        <<< "$output" || fail "invalid TERM fallback must emit a diagnostic: $output"
+    grep -Fqx 'TERM=xterm-256color' <<< "$output" ||
+        fail "invalid TERM must fall back before module execution: $output"
+}
+
+assert_valid_terminal_is_preserved() {
+    local output
+
+    output=$(TERM=xterm-kitty ENTRYPOINT="$ENTRYPOINT" bash -Eeuo pipefail -c '
+        source "$ENTRYPOINT"
+        infocmp() { [ "${1:-}" = xterm-kitty ]; }
+        normalize_terminal_environment
+        printf "%s\n" "$TERM"
+    ' 2>&1)
+    [ "$output" = xterm-kitty ] ||
+        fail "a valid inherited TERM must be preserved without warnings: $output"
+}
+
 assert_entrypoint_size
 assert_no_implementation_commands
 assert_main_guard
 assert_source_safe
 assert_selected_grub_is_required
+assert_invalid_terminal_is_normalized
+assert_valid_terminal_is_preserved
 
 printf 'PASS: entrypoint boundary contract\n'

@@ -31,6 +31,11 @@ sudo bash install.sh install --user shorin
 不能填写 `root`；Git checkout、AUR 构建和用户配置操作会降权到该用户，
 只有系统状态写入保留 root 权限。`audit` 和 `verify` 是只读模式，不要求 root。
 
+入口预检会验证当前 `TERM` 是否存在可用的 terminfo。若从尚未完整安装的
+Kitty 等终端继承了无效终端类型，安装器会仅在本次进程中依次回退到
+`xterm-256color`、`xterm` 或 `dumb`，并输出警告；不会修改用户或系统的终端配置。
+这可避免 Snapper 等系统工具在桌面终端包安装前反向阻断 `repair`。
+
 `install` 是默认模式，因此也可以执行：
 
 ```bash

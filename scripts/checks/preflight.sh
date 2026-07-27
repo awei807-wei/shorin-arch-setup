@@ -7,9 +7,43 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 SHORIN_CHECKS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$SHORIN_CHECKS_DIR/../lib/state.sh"
 
+_terminal_type_available() {
+    local terminal=$1
+
+    [[ "$terminal" =~ ^[[:alnum:]][[:alnum:]+._-]*$ ]] || return 1
+    if command -v infocmp >/dev/null 2>&1; then
+        infocmp "$terminal" >/dev/null 2>&1
+    else
+        tput -T "$terminal" longname >/dev/null 2>&1
+    fi
+}
+
+# Keep recovery commands usable when the invoking terminal is not installed yet.
+normalize_terminal_environment() {
+    local inherited=${TERM:-} fallback
+
+    if ! command -v infocmp >/dev/null 2>&1 &&
+        ! command -v tput >/dev/null 2>&1; then
+        warn "Cannot validate TERM=${inherited:-unset}; using TERM=dumb for this run."
+        export TERM=dumb
+        return 0
+    fi
+    _terminal_type_available "$inherited" && return 0
+    for fallback in xterm-256color xterm dumb; do
+        if _terminal_type_available "$fallback"; then
+            warn "TERM=${inherited:-unset} has no usable terminfo; using TERM=$fallback for this run."
+            export TERM=$fallback
+            return 0
+        fi
+    done
+    warn "No usable terminfo entry was found; using TERM=dumb for this run."
+    export TERM=dumb
+}
+
 preflight_readonly() {
     local mode=$1
 
+    normalize_terminal_environment
     case "$mode" in
         install|repair|audit|verify) ;;
         *) die "Unsupported mode: $mode" ;;
