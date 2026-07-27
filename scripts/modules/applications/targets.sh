@@ -124,12 +124,15 @@ github_provenance_satisfied() {
     local app=$1 source_dir=$2 binary=$3
     local provenance_dir=${GITHUB_PROVENANCE_DIR:-$HOME_DIR/.local/share/shorin-arch-setup/github}
     local provenance="$provenance_dir/$app.build" checkout_head checkout_status
-    local recorded_app recorded_commit recorded_sha binary_sha
+    local recorded_app recorded_commit recorded_sha binary_sha status=0
 
     [ -x "$binary" ] && [ -s "$provenance" ] || return 1
-    checkout_head=$(git -C "$source_dir" rev-parse HEAD 2>/dev/null) || return 1
-    checkout_status=$(git -C "$source_dir" status --porcelain 2>/dev/null) ||
-        return 1
+    checkout_head=$(state_git_command "$source_dir" "$TARGET_USER" "$HOME_DIR" \
+        rev-parse HEAD 2>/dev/null) || status=$?
+    [ "$status" -eq 0 ] || return "$status"
+    checkout_status=$(state_git_command "$source_dir" "$TARGET_USER" "$HOME_DIR" \
+        status --porcelain 2>/dev/null) || status=$?
+    [ "$status" -eq 0 ] || return "$status"
     [ -z "$checkout_status" ] || return 1
     recorded_app=$(awk -F= '$1 == "app" { print substr($0, 5) }' "$provenance")
     recorded_commit=$(awk -F= '$1 == "commit" { print substr($0, 8) }' "$provenance")
@@ -148,12 +151,12 @@ github_application_satisfied() {
     case "$app" in
         focus-shift)
             state_git_checkout "$source_dir" "$FOCUS_SHIFT_REPO_URL" main \
-                "$FOCUS_SHIFT_COMMIT" &&
+                "$FOCUS_SHIFT_COMMIT" "$TARGET_USER" "$HOME_DIR" &&
                 github_provenance_satisfied "$app" "$source_dir" "$binary"
             ;;
         niri-clip)
             state_git_checkout "$source_dir" "$NIRI_CLIP_REPO_URL" main \
-                "$NIRI_CLIP_COMMIT" &&
+                "$NIRI_CLIP_COMMIT" "$TARGET_USER" "$HOME_DIR" &&
                 github_provenance_satisfied "$app" "$source_dir" "$binary" &&
                 state_file_matches \
                     "$source_dir/systemd/niri-clip.service" \

@@ -153,18 +153,50 @@ state_grub_config_valid() {
     [ -s "$file" ] && grub-script-check "$file" >/dev/null 2>&1
 }
 
+# Run read-only Git inspection in the checkout owner's user context.
+state_git_command() {
+    local directory=$1 user=${2:-} home=${3:-}
+    local current_uid target_uid
+    shift 3
+
+    state_command_exists git || return 2
+    if [ -z "$user" ]; then
+        git -C "$directory" "$@"
+        return
+    fi
+    state_command_exists id || return 2
+    [ -n "$home" ] || return 2
+    current_uid=$(id -u) || return 2
+    target_uid=$(id -u "$user") || return 2
+    if [ "$current_uid" -eq "$target_uid" ]; then
+        env HOME="$home" git -C "$directory" "$@"
+    elif [ "$current_uid" -eq 0 ]; then
+        state_command_exists runuser || return 2
+        runuser -u "$user" -- env HOME="$home" git -C "$directory" "$@"
+    else
+        return 2
+    fi
+}
+
 state_git_checkout() {
     local directory=$1 remote=$2 branch=$3 expected_commit=${4:-}
-    local actual_remote actual_branch actual_commit
-    state_command_exists git || return 2
+    local user=${5:-} home=${6:-}
+    local actual_remote actual_branch actual_commit status=0
+
     [ -d "$directory/.git" ] || return 1
-    actual_remote=$(git -C "$directory" remote get-url origin 2>/dev/null) || return 1
+    actual_remote=$(state_git_command "$directory" "$user" "$home" \
+        remote get-url origin 2>/dev/null) || status=$?
+    [ "$status" -eq 0 ] || return "$status"
     [ "$actual_remote" = "$remote" ] || return 1
     if [ -n "$expected_commit" ]; then
-        actual_commit=$(git -C "$directory" rev-parse HEAD 2>/dev/null) || return 1
+        actual_commit=$(state_git_command "$directory" "$user" "$home" \
+            rev-parse HEAD 2>/dev/null) || status=$?
+        [ "$status" -eq 0 ] || return "$status"
         [ "$actual_commit" = "$expected_commit" ]
     else
-        actual_branch=$(git -C "$directory" branch --show-current 2>/dev/null) || return 1
+        actual_branch=$(state_git_command "$directory" "$user" "$home" \
+            branch --show-current 2>/dev/null) || status=$?
+        [ "$status" -eq 0 ] || return "$status"
         [ "$actual_branch" = "$branch" ]
     fi
 }

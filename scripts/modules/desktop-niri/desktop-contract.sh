@@ -135,7 +135,7 @@ niri_nautilus_exec_prefix() {
 niri_nautilus_override_contract() {
     local prefix
 
-    [ -r "$NIRI_NAUTILUS_VENDOR_FILE" ] || return 2
+    [ -r "$NIRI_NAUTILUS_VENDOR_FILE" ] || return 1
     prefix=$(niri_nautilus_exec_prefix)
     awk -v prefix="$prefix" '
         /^\[Desktop Entry\]$/ {
@@ -166,7 +166,7 @@ niri_nautilus_override_matches() {
 }
 
 niri_user_terminal_link_matches() {
-    [ -x "$NIRI_GNOME_TERMINAL_TARGET" ] || return 2
+    [ -x "$NIRI_GNOME_TERMINAL_TARGET" ] || return 1
     [ -L "$NIRI_GNOME_TERMINAL_LINK" ] &&
         [ "$(readlink "$NIRI_GNOME_TERMINAL_LINK")" = "$NIRI_GNOME_TERMINAL_TARGET" ] &&
         [ "$(stat -c '%U' "$NIRI_GNOME_TERMINAL_LINK")" = "$TARGET_USER" ]

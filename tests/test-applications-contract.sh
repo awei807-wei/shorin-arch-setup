@@ -39,6 +39,7 @@ LAZYVIM_CLONES=0
 LAZYVIM_CHECKOUT_FAIL=0
 GITHUB_HEAD=0123456789abcdef0123456789abcdef01234567
 GITHUB_CHECKOUT_DIRTY=0
+GITHUB_USER_CONTEXT_LOG="$TEST_DIR/github-user-context.log"
 AS_USER_LOG="$TEST_DIR/as-user.log"
 
 state_package_present() {
@@ -51,7 +52,17 @@ state_flatpak_present() {
 }
 
 state_git_checkout() {
-    [ "$GITHUB_REMOTE_OK" -eq 1 ] && [ "$3" = main ]
+    [ "$GITHUB_REMOTE_OK" -eq 1 ] && [ "$3" = main ] &&
+        [ "${5:-}" = "$TARGET_USER" ] && [ "${6:-}" = "$HOME_DIR" ]
+}
+
+state_git_command() {
+    local directory=$1 user=$2 home=$3
+    shift 3
+
+    [ "$user" = "$TARGET_USER" ] && [ "$home" = "$HOME_DIR" ] || return 2
+    printf '%s:%s\n' "$user" "$home" >> "$GITHUB_USER_CONTEXT_LOG"
+    git -C "$directory" "$@"
 }
 
 state_user_unit_enabled() {
@@ -258,6 +269,8 @@ application_entry_satisfied GitHub:focus-shift &&
 _build_and_install_cargo_binary \
     "$HOME_DIR/.local/src/focus-shift" focus-shift ||
     fail 'GitHub build must atomically install a binary and its provenance'
+grep -Fqx "$TARGET_USER:$HOME_DIR" "$GITHUB_USER_CONTEXT_LOG" ||
+    fail 'GitHub provenance inspection must use the target user context'
 application_entry_satisfied GitHub:focus-shift ||
     fail 'GitHub target must accept matching checkout, binary and provenance'
 GITHUB_CHECKOUT_DIRTY=1

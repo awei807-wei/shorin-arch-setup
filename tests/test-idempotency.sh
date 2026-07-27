@@ -102,6 +102,45 @@ test_checkout_preserves_shared_parent_mode() {
     unset -f runuser
 }
 
+test_git_state_uses_target_user_context() (
+    local repository="$TEST_DIR/user-owned-repository"
+    local runuser_log="$TEST_DIR/state-git-runuser.log"
+    local expected_commit
+
+    mkdir -p "$repository"
+    command git init -q -b main "$repository"
+    printf 'fixture\n' > "$repository/file.txt"
+    command git -C "$repository" add file.txt
+    command git -C "$repository" -c user.name=Fixture \
+        -c user.email=fixture@example.invalid commit -q -m fixture
+    command git -C "$repository" remote add origin \
+        https://example.invalid/user-owned.git
+    expected_commit=$(command git -C "$repository" rev-parse HEAD)
+
+    id() {
+        if [ "$1" = -u ] && [ "$#" -eq 1 ]; then
+            printf '0\n'
+        elif [ "$1" = -u ] && [ "$2" = tester ]; then
+            printf '1000\n'
+        else
+            command id "$@"
+        fi
+    }
+    runuser() {
+        [ "$1" = -u ] && [ "$2" = tester ] && [ "$3" = -- ] || return 1
+        shift 3
+        printf 'called\n' >> "$runuser_log"
+        "$@"
+    }
+
+    state_git_checkout "$repository" \
+        https://example.invalid/user-owned.git main "$expected_commit" \
+        tester "$TEST_DIR/home" ||
+        fail 'Git state inspection must succeed through the target user'
+    [ "$(wc -l < "$runuser_log")" -ge 2 ] ||
+        fail 'root Git inspection must be delegated to the target user'
+)
+
 test_package_convergence() {
     PACMAN_INSTALLED=0
     PACMAN_INSTALLS=0
@@ -423,6 +462,7 @@ test_script_contract() {
 test_atomic_text_convergence
 test_file_metadata_convergence
 test_checkout_preserves_shared_parent_mode
+test_git_state_uses_target_user_context
 test_package_convergence
 test_aur_source_routing
 test_package_trust_recovery

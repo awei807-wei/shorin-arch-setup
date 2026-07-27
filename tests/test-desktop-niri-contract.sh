@@ -163,6 +163,12 @@ mkdir -p "$(dirname "$NIRI_FIREFOX_POLICY_FILE")" \
     "$NIRI_QUICKSHELL_DIR/lockscreen" \
     "$(dirname "$NIRI_FISH_RUSTUP_FILE")" \
     "$(dirname "$NIRI_LEGACY_UNIT_LINK")"
+printf 'stale override\n' > "$NIRI_NAUTILUS_OVERRIDE_FILE"
+status=0
+niri_nautilus_override_matches || status=$?
+[ "$status" -eq 1 ] ||
+    fail 'a missing Nautilus vendor file must be repairable desktop drift'
+rm -f "$NIRI_NAUTILUS_OVERRIDE_FILE"
 cat > "$NIRI_NAUTILUS_VENDOR_FILE" <<'EOF'
 [Desktop Entry]
 Name=Files
@@ -172,6 +178,10 @@ Exec=nautilus --new-window %U
 [Desktop Action new-window]
 Exec=nautilus --new-window
 EOF
+status=0
+niri_user_terminal_link_matches || status=$?
+[ "$status" -eq 1 ] ||
+    fail 'a missing Kitty target must be repairable desktop drift'
 printf '#!/usr/bin/env bash\n' > "$NIRI_GNOME_TERMINAL_TARGET"
 chmod 755 "$NIRI_GNOME_TERMINAL_TARGET"
 
