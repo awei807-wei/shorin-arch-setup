@@ -92,6 +92,16 @@ grub_inspect() {
         *) grub_prerequisite_failed "$phase" grub-default-config-missing; return ;;
     esac
 
+    if platform_is_fedora; then
+        grub_expect "$phase" grub:config state_grub_config_valid "$GRUB_CONFIG_FILE"
+        grub_expect "$phase" package:grub2-tools state_package_present grub2-tools
+        grub_expect "$phase" package:os-prober state_package_present os-prober
+        grub_expect "$phase" package:exfatprogs state_package_present exfatprogs
+        grub_expect "$phase" grub:os-prober \
+            grub_key_matches GRUB_DISABLE_OS_PROBER '"false"'
+        return
+    fi
+
     grub_expect "$phase" grub:config state_grub_config_valid "$GRUB_CONFIG_FILE"
     grub_expect "$phase" package:os-prober state_package_present os-prober
     grub_expect "$phase" package:exfatprogs state_package_present exfatprogs
@@ -105,6 +115,11 @@ grub_check() { grub_inspect check; }
 
 grub_apply() {
     local status=0
+
+    if platform_is_fedora; then
+        bash "$SHORIN_ROOT/scripts/modules/grub/fedora-apply.sh"
+        return
+    fi
     local -a contract_env=(
         "GRUB_DEFAULT_FILE=$GRUB_DEFAULT_FILE"
         "GRUB_CONFIG_FILE=$GRUB_CONFIG_FILE"

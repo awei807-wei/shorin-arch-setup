@@ -43,6 +43,19 @@ NIRI_REQUIRED_PACKAGE_TARGETS=(
     AUR:swaylock-effects
 )
 
+if platform_is_fedora; then
+    # Keep logical desktop targets stable while routing the two Arch-only
+    # entries through Fedora's package/RPM mapping layer below.
+    NIRI_REQUIRED_PACKAGE_TARGETS=(
+        niri xdg-desktop-portal-gnome xdg-desktop-portal-gtk fuzzel kitty
+        firefox libnotify mako polkit-gnome ffmpegthumbnailer gvfs-smb
+        AUR:nautilus-open-any-terminal file-roller gnome-keyring
+        gst-plugins-base gst-plugins-good gst-libav nautilus quickshell
+        qt6-wayland qt6-multimedia bluez-utils matugen awww swayidle
+        AUR:swaylock-effects
+    )
+fi
+
 niri_required_package_targets() {
     printf '%s\n' "${NIRI_REQUIRED_PACKAGE_TARGETS[@]}"
 }
@@ -134,7 +147,14 @@ ensure_niri_package_target() {
     for attempt in 1 2 3; do
         [ "$attempt" -eq 1 ] || sleep 3
         case "$target" in
-            AUR:*) ensure_aur_package "${target#AUR:}" "$TARGET_USER" "$HOME_DIR" ;;
+            AUR:*)
+                if platform_is_fedora; then
+                    fedora_install_application_target "${target#AUR:}" \
+                        "$TARGET_USER" "$HOME_DIR"
+                else
+                    ensure_aur_package "${target#AUR:}" "$TARGET_USER" "$HOME_DIR"
+                fi
+                ;;
             flatpak:*) ensure_flatpak "${target#flatpak:}" ;;
             GitHub:*) die "Unsupported GitHub desktop target: $target" ;;
             imagemagic) ensure_package imagemagick ;;

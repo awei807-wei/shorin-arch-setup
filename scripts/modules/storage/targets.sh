@@ -4,10 +4,17 @@ set -Eeuo pipefail
 trap 'printf "ERROR: %s:%s: %s\n" \
   "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
-readonly -a STORAGE_PACKAGES=(btrfs-progs snapper snap-pac btrfs-assistant less)
-readonly -a STORAGE_FSTAB_UNIQUE_TARGETS=(
-    / /home /boot /boot/efi /var/cache/pacman/pkg /var/log
-)
+if declare -F platform_is_fedora >/dev/null 2>&1 && platform_is_fedora; then
+    readonly -a STORAGE_PACKAGES=(btrfs-progs snapper btrfs-assistant less)
+    readonly -a STORAGE_FSTAB_UNIQUE_TARGETS=(
+        / /home /boot /boot/efi /var/log
+    )
+else
+    readonly -a STORAGE_PACKAGES=(btrfs-progs snapper snap-pac btrfs-assistant less)
+    readonly -a STORAGE_FSTAB_UNIQUE_TARGETS=(
+        / /home /boot /boot/efi /var/cache/pacman/pkg /var/log
+    )
+fi
 readonly -a SNAPPER_TARGET_SETTINGS=(
     'ALLOW_GROUPS=wheel'
     'TIMELINE_CREATE=no'

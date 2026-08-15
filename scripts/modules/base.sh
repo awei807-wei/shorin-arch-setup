@@ -8,16 +8,29 @@ SHORIN_ROOT=${SHORIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 source "$SHORIN_ROOT/scripts/lib/verify.sh"
 source "$SHORIN_ROOT/scripts/modules/base/targets.sh"
 
-BASE_PACKAGES=(
-    adobe-source-han-sans-cn-fonts adobe-source-han-serif-cn-fonts
-    alsa-firmware alsa-ucm-conf archlinuxcn-keyring base-devel fastfetch
-    fcitx5 fcitx5-chinese-addons fcitx5-configtool fcitx5-gtk fcitx5-mozc
-    fcitx5-qt fcitx5-rime flatpak libva-utils noto-fonts noto-fonts-cjk
-    noto-fonts-emoji pavucontrol pciutils pipewire pipewire-alsa
-    pipewire-jack pipewire-pulse power-profiles-daemon sof-firmware
-    terminus-font ttf-jetbrains-mono-nerd usbutils wireplumber xdg-user-dirs
-    yay
-)
+if platform_is_fedora; then
+    BASE_PACKAGES=(
+        adobe-source-han-sans-cn-fonts adobe-source-han-serif-cn-fonts
+        alsa-firmware alsa-ucm-conf base-devel fastfetch fcitx5
+        fcitx5-chinese-addons fcitx5-configtool fcitx5-gtk fcitx5-mozc
+        fcitx5-qt fcitx5-rime flatpak libva-utils noto-fonts noto-fonts-cjk
+        noto-fonts-emoji pavucontrol pciutils pipewire pipewire-alsa
+        pipewire-jack pipewire-pulse power-profiles-daemon sof-firmware
+        terminus-font ttf-jetbrains-mono-nerd usbutils vim wireplumber
+        xdg-user-dirs
+    )
+else
+    BASE_PACKAGES=(
+        adobe-source-han-sans-cn-fonts adobe-source-han-serif-cn-fonts
+        alsa-firmware alsa-ucm-conf archlinuxcn-keyring base-devel fastfetch
+        fcitx5 fcitx5-chinese-addons fcitx5-configtool fcitx5-gtk fcitx5-mozc
+        fcitx5-qt fcitx5-rime flatpak libva-utils noto-fonts noto-fonts-cjk
+        noto-fonts-emoji pavucontrol pciutils pipewire pipewire-alsa
+        pipewire-jack pipewire-pulse power-profiles-daemon sof-firmware
+        terminus-font ttf-jetbrains-mono-nerd usbutils wireplumber xdg-user-dirs
+        yay
+    )
+fi
 
 ARCHLINUXCN_BODY='Server = https://mirrors.ustc.edu.cn/archlinuxcn/$arch
 Server = https://mirrors.tuna.tsinghua.edu.cn/archlinuxcn/$arch
@@ -51,14 +64,18 @@ base_inspect() {
         state_service_enabled power-profiles-daemon.service
     base_expect "$phase" service:power-profiles-daemon-active \
         state_service_active power-profiles-daemon.service
-    for unit in pipewire.service pipewire-pulse.service wireplumber.service; do
+    while IFS= read -r unit; do
         base_expect "$phase" "global-unit:$unit" \
             state_global_service_enabled "$unit"
-    done
-    base_expect "$phase" pacman:multilib pacman_section_matches \
-        /etc/pacman.conf multilib 'Include = /etc/pacman.d/mirrorlist'
-    base_expect "$phase" pacman:archlinuxcn pacman_section_matches \
-        /etc/pacman.conf archlinuxcn "$ARCHLINUXCN_BODY"
+    done < <(base_global_service_units)
+    if platform_is_fedora; then
+        base_expect "$phase" fedora:release-file state_file_nonempty /etc/os-release
+    else
+        base_expect "$phase" pacman:multilib pacman_section_matches \
+            /etc/pacman.conf multilib 'Include = /etc/pacman.d/mirrorlist'
+        base_expect "$phase" pacman:archlinuxcn pacman_section_matches \
+            /etc/pacman.conf archlinuxcn "$ARCHLINUXCN_BODY"
+    fi
     editor=$(base_target_editor)
     base_expect "$phase" "command:$editor" command -v "$editor"
     base_expect "$phase" environment:EDITOR key_value_matches \

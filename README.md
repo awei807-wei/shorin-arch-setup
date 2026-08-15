@@ -2,6 +2,11 @@
 
 Shorin Arch Setup 是面向 Arch Linux 的声明式系统配置工具。入口脚本只负责解析模式、执行预检、按依赖顺序调度模块、运行最终验收并汇总状态；具体变更由独立收敛模块完成。
 
+安装器也支持 Fedora + niri。发行版默认从 `/etc/os-release` 检测，也可以显式指定
+`--distro fedora`；Fedora 路径只使用 `dnf`、Flatpak、COPR、官方 RPM 和官方
+AppImage，不会调用 AUR、`yay` 或 `paru`。`common-applist.txt` 是跨发行版的逻辑清单，
+Fedora 映射在 `scripts/lib/platform.sh` 与 `scripts/lib/fedora.sh` 中维护，不会修改该文件。
+
 执行模型如下：
 
 ```text
@@ -26,7 +31,28 @@ cd shorin-arch-setup
 sudo bash install.sh install --user shorin
 ```
 
-`install` 和 `repair` 必须由 root 启动，因为它们需要调用 pacman、写入
+Fedora + niri：
+
+```bash
+sudo bash install.sh install --distro fedora --user shorin
+```
+
+Fedora 的第三方目标按以下方式收敛：Heroic、Upscaler、MangoJuice 使用 Flathub；
+Clash Verge、Linux QQ、微信、Thorium 和 Mark Shot 从 `FEDORA_RPM_DIR`（或目标用户
+`Downloads`、`/tmp`）发现官方 RPM；`tsukimi-bin` 使用 `walker874/tsukimi` COPR；
+Vicinae 使用官方 AppImage，同时确保 Gear Lever Flatpak 可用；`lsfg-vk-bin` 先收敛
+`qt6-qtdeclarative` 和 `qt6-qtbase`，再安装本地官方 RPM；`fd-rdd-git` 使用可配置的
+官方 `install.sh`。找不到外部 artifact 时安装器会输出来源、glob 和可执行的交接路径，
+不会把“依赖已安装”冒充为主程序已安装。
+
+Vicinae 的自动收敛路径是目标用户 `~/.local/bin/vicinae.AppImage` 加托管的
+`~/.local/share/applications/vicinae.desktop`，并要求 Gear Lever Flatpak 已安装；
+只有这三个状态同时满足时才报告已集成。也可以通过 `FEDORA_VICINAE_APPIMAGE`
+指定本地官方 AppImage；`fd-rdd` 可通过 `FEDORA_FD_RDD_INSTALL_SCRIPT` 交接本地官方
+`install.sh`，避免在网络受限时把下载失败误报为成功。
+
+`install` 和 `repair` 必须由 root 启动，因为它们需要调用发行版包管理器（Arch 为
+`pacman`，Fedora 为 `dnf`）、写入
 `/etc`、管理 systemd、fstab 和 GRUB。`--user` 必须指向实际桌面普通用户，
 不能填写 `root`；Git checkout、AUR 构建和用户配置操作会降权到该用户，
 只有系统状态写入保留 root 权限。`audit` 和 `verify` 是只读模式，不要求 root。
@@ -195,6 +221,8 @@ scripts/
     runner.sh                    # 模块执行、依赖结果与状态汇总
     state.sh                     # 只读状态谓词
     packages.sh                  # pacman、AUR 与系统级 Flatpak
+    platform.sh                  # Arch/Fedora 检测与 Fedora 包名翻译
+    fedora.sh                    # Fedora Flatpak、COPR、RPM/AppImage 目标
     files.sh                     # 原子写入、模板和结构化文件原语
     git.sh                       # 降权、固定版本的 Git checkout
     snapshots.sh                 # 成对快照查找与回滚标识
@@ -246,6 +274,10 @@ tests/                           # 原语、runner、入口及真实模块合同
 - `AUR:`：AUR 软件包。
 - `flatpak:`：系统级 Flathub 应用。
 - `GitHub:`：仓库内已登记的源码应用。
+
+在 Fedora 目标上，无前缀条目会经过显式 Fedora 包名白名单翻译；`AUR:` 条目不会
+进入 `dnf` 的原始 Arch 包名路径，而是交给 Fedora 映射器处理。未登记可靠来源的
+目标会失败并给出人工交接提示，不会静默跳过。
 
 当前 `GitHub:` 应用包括 `focus-shift` 和 `niri-clip`。源码位于目标用户的 `~/.local/src/`，可执行文件安装到 `~/.local/bin/`；`niri-clip` 同时部署并启用用户级 systemd 服务。
 

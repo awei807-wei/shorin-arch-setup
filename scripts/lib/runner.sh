@@ -180,6 +180,7 @@ run_module_phase() {
     env SHORIN_ROOT="$SHORIN_ROOT" \
         SHORIN_SCRIPTS_DIR="${SHORIN_SCRIPTS_DIR:-$SHORIN_ROOT/scripts}" \
         SHORIN_MODE="${SHORIN_MODE:-install}" \
+        SHORIN_DISTRO="${SHORIN_DISTRO:-}" \
         SHORIN_PROFILE_DIR="${SHORIN_PROFILE_DIR:-/etc/shorin-arch-setup}" \
         SHORIN_RUN_TOKEN="${SHORIN_RUN_TOKEN:-$$}" \
         SHORIN_READ_ONLY="$readonly" \

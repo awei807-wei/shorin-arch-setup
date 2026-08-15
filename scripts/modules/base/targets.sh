@@ -9,6 +9,18 @@ source "$SHORIN_ROOT/scripts/lib/core.sh"
 
 FLATHUB_REPO_URL=${FLATHUB_REPO_URL:-https://dl.flathub.org/repo/}
 
+base_global_service_units() {
+    if platform_is_fedora; then
+        # Fedora enables the user session manager through PipeWire socket
+        # activation; wireplumber is intentionally not forced as a global
+        # service because its unit may be preset/static on different Fedora
+        # releases.
+        printf '%s\n' pipewire.socket pipewire-pulse.socket
+    else
+        printf '%s\n' pipewire.service pipewire-pulse.service wireplumber.service
+    fi
+}
+
 base_gpu_info() {
     local output
 
@@ -52,6 +64,20 @@ base_gpu_target_packages() {
 
     if [ -z "$info" ]; then
         info=$(base_gpu_info) || return 2
+    fi
+    if platform_is_fedora; then
+        packages=(libva-utils mesa mesa-dri-drivers mesa-vulkan-drivers)
+        if base_gpu_has_vendor 'AMD|ATI' "$info"; then
+            packages+=(mesa-va-drivers mesa-libOpenCL)
+        fi
+        if base_gpu_has_vendor Intel "$info"; then
+            packages+=(intel-media-driver intel-compute-runtime)
+        fi
+        if base_gpu_has_vendor NVIDIA "$info"; then
+            packages+=(akmod-nvidia xorg-x11-drv-nvidia-cuda)
+        fi
+        printf '%s\n' "${packages[@]}" | sort -u
+        return 0
     fi
     if base_gpu_has_vendor 'AMD|ATI' "$info"; then
         packages+=(mesa lib32-mesa xf86-video-amdgpu vulkan-radeon

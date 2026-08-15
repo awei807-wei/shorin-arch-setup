@@ -15,6 +15,38 @@ check_root
 
 log "Starting Phase 1: Base System Configuration..."
 
+if platform_is_fedora; then
+    FEDORA_BASE_PACKAGES=(
+        adobe-source-han-sans-cn-fonts adobe-source-han-serif-cn-fonts
+        alsa-firmware alsa-ucm-conf base-devel fastfetch fcitx5 glibc-langpack-zh
+        fcitx5-chinese-addons fcitx5-configtool fcitx5-gtk fcitx5-mozc
+        fcitx5-qt fcitx5-rime flatpak libva-utils noto-fonts noto-fonts-cjk
+        noto-fonts-emoji pavucontrol pciutils pipewire pipewire-alsa
+        pipewire-jack pipewire-pulse power-profiles-daemon sof-firmware
+        terminus-font ttf-jetbrains-mono-nerd usbutils vim wireplumber
+        xdg-user-dirs
+    )
+    section "Fedora" "Base System Packages"
+    # Fedora intentionally has no pacman.conf/multilib/ArchLinuxCN mutation.
+    # The package wrapper translates logical manifest names to Fedora names and
+    # dnf never receives an unapproved Arch-only target.
+    ensure_packages "${FEDORA_BASE_PACKAGES[@]}"
+    TARGET_EDITOR=${BASE_EDITOR:-vim}
+    ensure_package "$TARGET_EDITOR"
+    ensure_key_value /etc/environment EDITOR "$TARGET_EDITOR"
+    if ! key_value_matches /etc/vconsole.conf FONT ter-v28n; then
+        ensure_key_value /etc/vconsole.conf FONT ter-v28n
+        systemctl restart systemd-vconsole-setup.service ||
+            warn 'Unable to restart systemd-vconsole-setup; the vconsole font will apply on reboot.'
+    fi
+    if command -v localectl >/dev/null 2>&1; then
+        localectl set-locale LANG=zh_CN.UTF-8 ||
+            warn 'Unable to set zh_CN.UTF-8 with localectl; continuing with package convergence.'
+    fi
+    success 'Fedora base packages and locale prerequisites converged.'
+    exit 0
+fi
+
 # ------------------------------------------------------------------------------
 # 1. Set Global Default Editor
 # ------------------------------------------------------------------------------

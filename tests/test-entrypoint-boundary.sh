@@ -56,6 +56,17 @@ assert_main_guard() {
         "$ENTRYPOINT" || fail 'install.sh must guard main with BASH_SOURCE[0] == $0'
 }
 
+assert_distro_option_is_documented() {
+    local output
+
+    output=$(ENTRYPOINT="$ENTRYPOINT" bash -Eeuo pipefail -c '
+        source "$ENTRYPOINT"
+        usage
+    ')
+    grep -Fq -- '--distro NAME' <<< "$output" ||
+        fail 'install help must document explicit Arch/Fedora selection'
+}
+
 assert_selected_grub_is_required() {
     local result
 
@@ -104,6 +115,7 @@ assert_valid_terminal_is_preserved() {
 assert_entrypoint_size
 assert_no_implementation_commands
 assert_main_guard
+assert_distro_option_is_documented
 assert_source_safe
 assert_selected_grub_is_required
 assert_invalid_terminal_is_normalized

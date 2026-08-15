@@ -113,12 +113,20 @@ ensure_niri_session_config "$TARGET_USER" || APPLY_STATUS=$?
 # STEP 8: Hardware Tools
 # ==============================================================================
 section "Step 7/9" "Hardware"
-if pacman -Q ddcutil &>/dev/null; then
-  gpasswd -a "$TARGET_USER" i2c
-  ensure_line /etc/modules-load.d/i2c-dev.conf i2c-dev
+if package_is_installed ddcutil; then
+  if getent group i2c >/dev/null 2>&1; then
+    gpasswd -a "$TARGET_USER" i2c
+    ensure_line /etc/modules-load.d/i2c-dev.conf i2c-dev
+  else
+    warn "ddcutil is installed but the Fedora i2c group is unavailable; skipping group assignment."
+  fi
 fi
-if pacman -Q swayosd &>/dev/null; then
-  ensure_service_started swayosd-libinput-backend.service
+if package_is_installed swayosd; then
+  if systemctl list-unit-files swayosd-libinput-backend.service >/dev/null 2>&1; then
+    ensure_service_started swayosd-libinput-backend.service
+  else
+    warn "swayosd is installed but swayosd-libinput-backend.service is unavailable; skipping service activation."
+  fi
 fi
 success "Tools configured."
 

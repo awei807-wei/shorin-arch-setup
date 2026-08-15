@@ -18,6 +18,13 @@ LUTRIS_CONFIG_PACKAGES=(
     lib32-libjpeg-turbo lib32-libva lib32-mpg123 lib32-openal
     libjpeg-turbo libva libxslt mpg123 openal ttf-liberation
 )
+if platform_is_fedora; then
+    WINE_CONFIG_PACKAGES=(wine wine-gecko wine-mono)
+    LUTRIS_CONFIG_PACKAGES=(
+        alsa-plugins giflib glfw gst-plugins-base-libs gtk3
+        libjpeg-turbo libva libxslt mpg123 openal ttf-liberation
+    )
+fi
 APPLICATION_DESKTOP_DIR=${APPLICATION_DESKTOP_DIR:-/usr/share/applications}
 WINDOWS_FONT_SOURCE=${WINDOWS_FONT_SOURCE:-$SHORIN_ROOT/resources/windows-sim-fonts}
 FIREFOX_DEFAULT_SOURCE=${FIREFOX_DEFAULT_SOURCE:-$SHORIN_ROOT/resources/firefox}
@@ -250,7 +257,14 @@ application_entry_detected() {
     local entry=$1
 
     case "$entry" in
-        AUR:*) state_package_present "${entry#AUR:}" ;;
+        AUR:*)
+            if platform_is_fedora; then
+                fedora_application_target_satisfied "${entry#AUR:}" \
+                    "$TARGET_USER" "$HOME_DIR"
+            else
+                state_package_present "${entry#AUR:}"
+            fi
+            ;;
         GitHub:focus-shift)
             [ -x "$HOME_DIR/.local/bin/focus-shift" ] ||
                 [ -d "$HOME_DIR/.local/src/focus-shift/.git" ]

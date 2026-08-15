@@ -6,15 +6,44 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 
 grub_contract_init() {
     GRUB_DEFAULT_FILE=${GRUB_DEFAULT_FILE:-/etc/default/grub}
-    GRUB_CONFIG_FILE=${GRUB_CONFIG_FILE:-/boot/grub/grub.cfg}
-    GRUB_CUSTOM_FILE=${GRUB_CUSTOM_FILE:-/etc/grub.d/99_custom}
-    GRUB_MKINITCPIO_FILE=${GRUB_MKINITCPIO_FILE:-/etc/mkinitcpio.conf}
+    if platform_is_fedora; then
+        if [ -z "${GRUB_CONFIG_FILE:-}" ]; then
+            if [ -f /boot/efi/EFI/fedora/grub.cfg ] ||
+                [ -d /sys/firmware/efi ]; then
+                GRUB_CONFIG_FILE=/boot/efi/EFI/fedora/grub.cfg
+            else
+                GRUB_CONFIG_FILE=/boot/grub2/grub.cfg
+            fi
+        fi
+        GRUB_CUSTOM_FILE=${GRUB_CUSTOM_FILE:-/etc/grub.d/99_custom}
+        GRUB_MKINITCPIO_FILE=${GRUB_MKINITCPIO_FILE:-/etc/default/grub}
+    else
+        GRUB_CONFIG_FILE=${GRUB_CONFIG_FILE:-/boot/grub/grub.cfg}
+        GRUB_CUSTOM_FILE=${GRUB_CUSTOM_FILE:-/etc/grub.d/99_custom}
+        GRUB_MKINITCPIO_FILE=${GRUB_MKINITCPIO_FILE:-/etc/mkinitcpio.conf}
+    fi
     GRUB_THEME_SOURCE_ROOT=${GRUB_THEME_SOURCE_ROOT:-$SHORIN_ROOT/grub-themes}
     GRUB_THEME_DEST_ROOT=${GRUB_THEME_DEST_ROOT:-/boot/grub/themes}
 }
 
+grub_config_generator() {
+    if platform_is_fedora && command -v grub2-mkconfig >/dev/null 2>&1; then
+        command -v grub2-mkconfig
+    else
+        command -v grub-mkconfig
+    fi
+}
+
+grub_config_checker() {
+    if platform_is_fedora && command -v grub2-script-check >/dev/null 2>&1; then
+        command -v grub2-script-check
+    else
+        command -v grub-script-check
+    fi
+}
+
 grub_installation_state() {
-    command -v grub-mkconfig >/dev/null 2>&1 || return 1
+    grub_config_generator >/dev/null 2>&1 || return 1
     [ -f "$GRUB_DEFAULT_FILE" ] || return 2
 }
 

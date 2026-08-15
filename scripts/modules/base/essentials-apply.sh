@@ -16,6 +16,38 @@ check_root
 
 log ">>> Starting Phase 2: Essential (Must-have) Software & Drivers"
 
+if platform_is_fedora; then
+    section "Fedora" "Audio, Locale, Bluetooth, and Flatpak"
+    ensure_packages sof-firmware alsa-ucm-conf alsa-firmware glibc-langpack-zh \
+        pipewire wireplumber pipewire-pulse pipewire-alsa pipewire-jack \
+        pavucontrol fcitx5 fcitx5-gtk fcitx5-qt fcitx5-configtool \
+        fcitx5-chinese-addons fcitx5-rime fcitx5-mozc usbutils pciutils \
+        power-profiles-daemon fastfetch flatpak
+    while IFS= read -r unit; do
+        systemctl --global is-enabled --quiet "$unit" ||
+            systemctl --global enable "$unit"
+    done < <(base_global_service_units)
+    BLUETOOTH_STATUS=0
+    base_bluetooth_present || BLUETOOTH_STATUS=$?
+    if [ "$BLUETOOTH_STATUS" -eq 0 ]; then
+        ensure_package bluez
+        ensure_service_started bluetooth.service
+    elif [ "$BLUETOOTH_STATUS" -eq 2 ]; then
+        warn 'Bluetooth hardware inspection unavailable; continuing without bluez.'
+    fi
+    ensure_service_started power-profiles-daemon.service
+    if flatpak remotes --system --columns=name 2>/dev/null | grep -Fqx flathub; then
+        base_flathub_system_remote_present ||
+            flatpak remote-modify --system --url="$FLATHUB_REPO_URL" flathub
+    else
+        flatpak remote-add --system flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+    fi
+    base_flathub_system_remote_present
+    success 'Fedora essentials converged.'
+    exit 0
+fi
+
 # ------------------------------------------------------------------------------
 # 2. Audio & Video
 # ------------------------------------------------------------------------------

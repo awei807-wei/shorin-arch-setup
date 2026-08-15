@@ -21,6 +21,16 @@ fi
 
 package_is_installed() {
     local package=$1
+    if platform_is_fedora; then
+        local mapped
+        mapped=$(fedora_arch_target_name "$package") || return 1
+        if [ "$mapped" = '@development-tools' ]; then
+            rpm -qa 2>/dev/null | grep -Eqi '(^|-)gcc|(^|-)make|(^|-)binutils'
+            return
+        fi
+        platform_rpm_installed "$mapped"
+        return
+    fi
     pacman -Q "$package" >/dev/null 2>&1
 }
 
@@ -29,10 +39,17 @@ flatpak_is_installed() {
     flatpak info --system "$app" >/dev/null 2>&1
 }
 
-PACMAN_TRUST_RECOVERY_ATTEMPTED=${PACMAN_TRUST_RECOVERY_ATTEMPTED:-0}
-PACMAN_TRUST_STAMP=${PACMAN_TRUST_STAMP:-/run/lock/shorin-pacman-trust-${SHORIN_RUN_TOKEN:-$$}}
-PACMAN_SYNC_RECOVERY_ATTEMPTED=${PACMAN_SYNC_RECOVERY_ATTEMPTED:-0}
-PACMAN_SYNC_STAMP=${PACMAN_SYNC_STAMP:-/run/lock/shorin-pacman-sync-${SHORIN_RUN_TOKEN:-$$}}
+if platform_is_arch; then
+    PACMAN_TRUST_RECOVERY_ATTEMPTED=${PACMAN_TRUST_RECOVERY_ATTEMPTED:-0}
+    PACMAN_TRUST_STAMP=${PACMAN_TRUST_STAMP:-/run/lock/shorin-pacman-trust-${SHORIN_RUN_TOKEN:-$$}}
+    PACMAN_SYNC_RECOVERY_ATTEMPTED=${PACMAN_SYNC_RECOVERY_ATTEMPTED:-0}
+    PACMAN_SYNC_STAMP=${PACMAN_SYNC_STAMP:-/run/lock/shorin-pacman-sync-${SHORIN_RUN_TOKEN:-$$}}
+else
+    PACMAN_TRUST_RECOVERY_ATTEMPTED=0
+    PACMAN_TRUST_STAMP=${PACMAN_TRUST_STAMP:-}
+    PACMAN_SYNC_RECOVERY_ATTEMPTED=0
+    PACMAN_SYNC_STAMP=${PACMAN_SYNC_STAMP:-}
+fi
 PACKAGE_SOURCE_DIR=${PACKAGE_SOURCE_DIR:-/var/lib/shorin-arch-setup/package-sources}
 
 package_source_matches() {
@@ -40,8 +57,13 @@ package_source_matches() {
     local installed_version recorded_source recorded_version
 
     [ -r "$file" ] || return 1
-    installed_version=$(pacman -Q "$package" 2>/dev/null | awk '{ print $2 }') ||
-        return 1
+    if platform_is_fedora; then
+        installed_version=$(rpm -q --qf '%{VERSION}-%{RELEASE}\n' \
+            "$(fedora_arch_target_name "$package")" 2>/dev/null) || return 1
+    else
+        installed_version=$(pacman -Q "$package" 2>/dev/null | awk '{ print $2 }') ||
+            return 1
+    fi
     recorded_source=$(awk -F= '$1 == "source" { print $2 }' "$file")
     recorded_version=$(awk -F= '$1 == "version" { print $2 }' "$file")
     [ "$recorded_source" = "$expected_source" ] &&
@@ -51,7 +73,12 @@ package_source_matches() {
 record_package_source() {
     local package=$1 source=$2 version temporary
 
-    version=$(pacman -Q "$package" | awk '{ print $2 }') || return 1
+    if platform_is_fedora; then
+        version=$(rpm -q --qf '%{VERSION}-%{RELEASE}\n' \
+            "$(fedora_arch_target_name "$package")") || return 1
+    else
+        version=$(pacman -Q "$package" | awk '{ print $2 }') || return 1
+    fi
     install -d -m 755 "$PACKAGE_SOURCE_DIR"
     temporary=$(mktemp)
     printf 'source=%s\nversion=%s\n' "$source" "$version" > "$temporary"
@@ -171,6 +198,24 @@ ensure_package() {
     require_writable_mode || return
     local package=$1
 
+    if platform_is_fedora; then
+        local mapped
+        mapped=$(fedora_arch_target_name "$package") || {
+            error "No Fedora package mapping exists for Arch target: $package"
+            return 1
+        }
+        if ! package_is_installed "$package"; then
+            platform_dnf_install "$mapped" || return
+        fi
+        package_is_installed "$package" && {
+            if [ "$mapped" != '@development-tools' ]; then
+                record_package_source "$package" "fedora:$mapped" || return
+            fi
+            return 0
+        }
+        return 1
+    fi
+
     package_is_installed "$package" ||
         run_with_pacman_recovery "$package" \
             pacman -S --noconfirm --needed "$package"
@@ -182,12 +227,14 @@ ensure_packages() {
     local package
 
     for package in "$@"; do
-        ensure_package "$package"
+        ensure_package "$package" || return
     done
 }
 
 official_package_repository() {
     local package=$1 repository
+
+    platform_is_fedora && return 1
 
     for repository in core extra multilib; do
         if pacman -Si "$repository/$package" >/dev/null 2>&1; then
@@ -214,6 +261,11 @@ declared_package_target_satisfied() {
     case "$target" in
         AUR:*)
             package=${target#AUR:}
+            if platform_is_fedora; then
+                fedora_application_target_satisfied "$package" \
+                    "${TARGET_USER:-}" "${HOME_DIR:-}"
+                return
+            fi
             repository=$(official_package_repository "$package") || true
             if [ -n "$repository" ]; then
                 package_source_matches "$package" "official:$repository"
@@ -231,6 +283,11 @@ ensure_aur_package() {
     local user=${2:-${TARGET_USER:-}}
     local home=${3:-${HOME_DIR:-}}
     local repository
+
+    if platform_is_fedora; then
+        fedora_install_application_target "$package" "$user" "$home"
+        return
+    fi
 
     repository=$(official_package_repository "$package") || true
     if [ -n "$repository" ]; then

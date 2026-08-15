@@ -49,6 +49,7 @@ preflight_readonly() {
         *) die "Unsupported mode: $mode" ;;
     esac
     [ "${BASH_VERSINFO[0]}" -ge 4 ] || die 'Bash 4 or newer is required.'
+    platform_preflight || die 'Unsupported or incomplete target distribution.'
     state_command_exists getent || die 'getent is required.'
     state_command_exists awk || die 'awk is required.'
     state_command_exists id || die 'id is required.'

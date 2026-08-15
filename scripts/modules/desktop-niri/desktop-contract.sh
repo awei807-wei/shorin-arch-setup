@@ -29,7 +29,7 @@ niri_detect_display_manager() {
     local dm
 
     for dm in gdm sddm lightdm lxdm slim xorg-xdm ly greetd; do
-        if pacman -Q "$dm" >/dev/null 2>&1; then
+        if package_is_installed "$dm"; then
             printf '%s\n' "$dm"
             return 0
         fi

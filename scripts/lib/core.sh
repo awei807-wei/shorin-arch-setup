@@ -24,9 +24,11 @@ SHORIN_READ_ONLY=${SHORIN_READ_ONLY:-0}
 export SHORIN_ROOT SHORIN_SCRIPTS_DIR MODULES_PATH SHORIN_READ_ONLY
 
 SHORIN_LIB_DIR="$SHORIN_SCRIPTS_DIR/lib"
+source "$SHORIN_LIB_DIR/platform.sh"
 source "$SHORIN_LIB_DIR/files.sh"
 source "$SHORIN_LIB_DIR/git.sh"
 source "$SHORIN_LIB_DIR/packages.sh"
+source "$SHORIN_LIB_DIR/fedora.sh"
 source "$SHORIN_LIB_DIR/snapshots.sh"
 source "$SHORIN_LIB_DIR/systemd.sh"
 source "$SHORIN_LIB_DIR/compat.sh"
@@ -76,8 +78,9 @@ release_run_lock() {
         exec {SHORIN_LOCK_FD}>&-
         unset SHORIN_LOCK_FD
     fi
-    [ -z "${SHORIN_RUN_TOKEN:-}" ] ||
+    if platform_is_arch && [ -n "${SHORIN_RUN_TOKEN:-}" ]; then
         rm -f "/run/lock/shorin-pacman-trust-$SHORIN_RUN_TOKEN"
+    fi
     [ -z "${SHORIN_RUN_TOKEN:-}" ] ||
         rm -f "/run/lock/shorin-storage-snapshot-$SHORIN_RUN_TOKEN"
 }

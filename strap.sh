@@ -17,11 +17,28 @@ DIR_NAME="shorin-arch-setup"
 
 echo -e "\033[0;34m>>> Preparing to install from branch: $TARGET_BRANCH\033[0m"
 
-# 1. 检查并安装 git
+# 1. 检查并安装 git。Arch 使用 pacman，Fedora 使用 dnf；不在 Fedora
+#    路径中调用 AUR 助手或 pacman。
+HOST_DISTRO=arch
+if [ -r /etc/os-release ]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    case "${ID:-}" in
+        fedora) HOST_DISTRO=fedora ;;
+        *) case " ${ID_LIKE:-} " in
+                *' fedora '*) HOST_DISTRO=fedora ;;
+           esac ;;
+    esac
+fi
 if ! command -v git &> /dev/null; then
     echo "Git not found. Installing..."
-    sudo pacman -S --noconfirm --needed git
-    pacman -Q git >/dev/null 2>&1
+    if [ "$HOST_DISTRO" = fedora ]; then
+        sudo dnf install -y git
+        rpm -q git >/dev/null 2>&1
+    else
+        sudo pacman -S --noconfirm --needed git
+        pacman -Q git >/dev/null 2>&1
+    fi
 fi
 
 # 2. 收敛现有仓库；不删除用户已有目录或本地提交

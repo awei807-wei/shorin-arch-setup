@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-
 trap 'printf "ERROR: %s:%s: %s\n" \
   "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
-
 SHORIN_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 export SHORIN_RUN_TOKEN=${SHORIN_RUN_TOKEN:-$(cat /proc/sys/kernel/random/uuid)}
 source "$SHORIN_ROOT/scripts/lib/core.sh"
 source "$SHORIN_ROOT/scripts/checks/preflight.sh"
 source "$SHORIN_ROOT/scripts/checks/audit.sh"
-
 ALL_MODULES=(
     storage
     base
@@ -20,7 +17,6 @@ ALL_MODULES=(
     vcp
     grub
 )
-
 declare -A DEFAULT_POLICY=(
     [storage]=required
     [base]=required
@@ -31,7 +27,6 @@ declare -A DEFAULT_POLICY=(
     [vcp]=optional
     [grub]=required
 )
-
 declare -A MODULE_DEPENDS=(
     [desktop-niri]='storage base'
     [applications]='base'
@@ -40,7 +35,6 @@ declare -A MODULE_DEPENDS=(
     [vcp]='applications'
     [grub]='storage base'
 )
-
 usage() {
     cat <<'EOF'
 Usage: sudo bash install.sh [install|repair|audit|verify] [options] [module...]
@@ -51,11 +45,11 @@ Modes:
   verify   Read-only authoritative verification.
 Options:
   --user NAME       Target user for install or repair.
+  --distro NAME     Target distribution: arch or fedora (auto-detected by default).
   --profile-dir DIR Desired-state manifest directory.
   -h, --help        Show this help.
 EOF
 }
-
 parse_args() {
     MODE=install
     SHOW_HELP=0
@@ -82,6 +76,15 @@ parse_args() {
                 SHORIN_PROFILE_DIR=$2
                 shift 2
                 ;;
+            --distro|--platform|--target)
+                [ "$#" -ge 2 ] && [ -n "$2" ] || {
+                    error "Missing value for $1"
+                    return 64
+                }
+                SHORIN_DISTRO=$2
+                shift 2
+                ;;
+            install|repair|audit|verify) MODE=$1; shift ;;
             -h|--help) SHOW_HELP=1; return 0 ;;
             --*) error "Unknown option: $1"; return 64 ;;
             *) SELECTED_MODULES+=("$1"); shift ;;
@@ -90,9 +93,8 @@ parse_args() {
     [ "${#SELECTED_MODULES[@]}" -gt 0 ] || SELECTED_MODULES=("${ALL_MODULES[@]}")
     SHORIN_MODE=$MODE
     SHORIN_PROFILE_DIR=${SHORIN_PROFILE_DIR:-/etc/shorin-arch-setup}
-    export SHORIN_MODE SHORIN_PROFILE_DIR TARGET_USER
+    export SHORIN_MODE SHORIN_PROFILE_DIR TARGET_USER SHORIN_DISTRO
 }
-
 configure_modules() {
     local module dependency seen=' '
     for module in "${SELECTED_MODULES[@]}"; do
@@ -112,10 +114,8 @@ configure_modules() {
         seen+="$module "
     done
 }
-
 main() {
-    local parse_status=0
-    MAIN_EXIT_CODE=0
+    local parse_status=0; MAIN_EXIT_CODE=0
     parse_args "$@" || parse_status=$?
     [ "$parse_status" -eq 0 ] || {
         usage >&2

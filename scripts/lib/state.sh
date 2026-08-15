@@ -19,6 +19,11 @@ state_command_exists() {
 }
 
 state_package_present() {
+    if platform_is_fedora; then
+        state_command_exists rpm || return 2
+        package_is_installed "$1"
+        return
+    fi
     state_command_exists pacman || return 2
     pacman -Q "$1" >/dev/null 2>&1
 }
@@ -149,8 +154,12 @@ state_fstab_targets_unique() {
 
 state_grub_config_valid() {
     local file=${1:-/boot/grub/grub.cfg}
-    state_command_exists grub-script-check || return 2
-    [ -s "$file" ] && grub-script-check "$file" >/dev/null 2>&1
+    local checker=grub-script-check
+    if platform_is_fedora && state_command_exists grub2-script-check; then
+        checker=grub2-script-check
+    fi
+    state_command_exists "$checker" || return 2
+    [ -s "$file" ] && "$checker" "$file" >/dev/null 2>&1
 }
 
 # Run read-only Git inspection in the checkout owner's user context.
