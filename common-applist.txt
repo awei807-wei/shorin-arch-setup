@@ -46,6 +46,7 @@ AUR:vicinae-bin                              # Application launcher (like Spotli
 AUR:fd-rdd-git                           # fd-rdd extension for vicinae                
 AUR:tsukimi-bin
 AUR:thorium-browser-bin
+AUR:mark-shot
 
 # --- Custom GitHub Applications (Build from Source) ---
 GitHub:focus-shift                       # niri keyboard-first window switcher
