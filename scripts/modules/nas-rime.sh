@@ -50,7 +50,7 @@ nas_rime_record_external_state() {
 }
 
 nas_rime_inspect() {
-    local phase=$1
+    local phase=$1 package
 
     if [ -z "${TARGET_USER:-}" ] || [ -z "${HOME_DIR:-}" ]; then
         if [ "$phase" = check ]; then
@@ -61,9 +61,13 @@ nas_rime_inspect() {
         return
     fi
     nas_rime_contract_init
+    for package in "${RIME_REQUIRED_PACKAGES[@]}"; do
+        nas_rime_expect "$phase" "package:$package" \
+            state_package_present "$package"
+    done
     nas_rime_expect "$phase" package:nfs-utils state_package_present nfs-utils
     nas_rime_expect "$phase" command:rime-dict-manager \
-        state_command_exists rime_dict_manager
+        rime_dict_manager_available
     nas_rime_expect "$phase" fstab:nas state_fstab_entry \
         "$NAS_IP:$NAS_REMOTE_PATH" "$NAS_LOCAL_PATH" nfs \
         defaults,_netdev,nofail "${FSTAB_FILE:-/etc/fstab}"
@@ -84,6 +88,7 @@ nas_rime_apply() {
         NAS_REMOTE_PATH="$NAS_REMOTE_PATH" NAS_LOCAL_PATH="$NAS_LOCAL_PATH" \
         RIME_INSTALLATION_ID="$RIME_INSTALLATION_ID" \
         RIME_SYNC_DIR="$RIME_SYNC_DIR" RIME_DIR="$RIME_DIR" \
+        RIME_DICT_MANAGER_PATH="$RIME_DICT_MANAGER_PATH" \
         RIME_INSTALLATION_FILE="$RIME_INSTALLATION_FILE" \
         FSTAB_FILE="${FSTAB_FILE:-/etc/fstab}" \
         bash "$SHORIN_ROOT/scripts/modules/nas-rime/apply.sh" "$TARGET_USER" || status=$?

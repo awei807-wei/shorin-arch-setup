@@ -12,6 +12,7 @@ FSTAB_FILE="$TEST_DIR/fstab"
 BIN_DIR="$TEST_DIR/bin"
 export TARGET_USER HOME_DIR FSTAB_FILE
 export SHORIN_USER_RUNTIME_ROOT="$TEST_DIR/runtime"
+export RIME_DICT_MANAGER_PATH="$BIN_DIR/rime_dict_manager"
 
 cleanup() {
     find "$TEST_DIR" -depth -delete

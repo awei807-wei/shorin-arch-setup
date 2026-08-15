@@ -118,7 +118,9 @@ fedora_package_name() {
         bluetui|bluez|brightnessctl|cava|curtail|dosfstools|eza|exfatprogs|f2fs-tools|\
         file-roller|fragments|gamescope|gnome-disk-utility|grub2-tools|ddcutil|dbus|fd|\
         alsa-plugins|giflib|glfw|gst-plugins-base-libs|gtk3|libjpeg-turbo|libva|libxslt|mpg123|openal|ttf-liberation|wine-gecko|wine-mono|\
-        hyprpicker|libva-utils|libvirt|librsvg2-tools|mission-center|nwg-look|\
+        hyprpicker|libva-utils|libvirt|libvirt-daemon|libvirt-daemon-kvm|\
+        libvirt-client|libvirt-daemon-config-network|librime-tools|\
+        librsvg2-tools|mission-center|nwg-look|\
         ntfs-3g|opencl-icd-loader|os-prober|qemu-kvm|swtpm|dnsmasq|mesa-dri-drivers|\
         mesa-vulkan-drivers|mesa-va-drivers|mesa-libOpenCL|intel-media-driver|\
         intel-compute-runtime|akmod-nvidia|xorg-x11-drv-nvidia-cuda|\

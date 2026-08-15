@@ -29,6 +29,41 @@ for package in bluez fzf glibc-langpack-zh nfs-utils tsukimi; do
     [ "$(fedora_arch_target_name "$package")" = "$package" ] ||
         fail "Fedora package mapping is missing: $package"
 done
+for package in libvirt-daemon libvirt-daemon-kvm libvirt-client \
+    libvirt-daemon-config-network librime-tools; do
+    [ "$(fedora_arch_target_name "$package")" = "$package" ] ||
+        fail "Fedora package mapping is missing: $package"
+done
+
+source "$ROOT_DIR/scripts/modules/virtualization/contract.sh"
+source "$ROOT_DIR/scripts/modules/nas-rime/contract.sh"
+[ "${VIRTUALIZATION_SERVICE:-}" = libvirtd.service ] ||
+    fail 'Fedora virtualization contract must declare libvirtd.service'
+grep -Fqx virsh <<< "${VIRTUALIZATION_COMMANDS[*]}" ||
+    fail 'Fedora virtualization contract must declare virsh'
+for group in libvirt kvm input; do
+    found=0
+    for actual in "${VIRTUALIZATION_GROUPS[@]}"; do
+        [ "$actual" = "$group" ] && found=1
+    done
+    [ "$found" -eq 1 ] || fail "Virtualization contract is missing group: $group"
+done
+for package in libvirt-daemon libvirt-daemon-kvm libvirt-client \
+    libvirt-daemon-config-network; do
+    found=0
+    for actual in "${VIRTUALIZATION_PACKAGES[@]}"; do
+        [ "$actual" = "$package" ] && found=1
+    done
+    [ "$found" -eq 1 ] ||
+        fail "Fedora virtualization contract is missing package: $package"
+done
+for actual in "${VIRTUALIZATION_PACKAGES[@]}"; do
+    [ "$actual" != bridge-utils ] ||
+        fail 'Fedora virtualization contract must not add deprecated bridge-utils'
+done
+[ "$VIRTUALIZATION_DEFAULT_NETWORK_XML" = \
+    /usr/share/libvirt/networks/default.xml ] ||
+    fail 'Virtualization contract must declare the libvirt default network artifact'
 
 RUNNER_MODULE_DIR="$TEST_DIR/modules"
 mkdir -p "$RUNNER_MODULE_DIR"
@@ -117,6 +152,33 @@ if ensure_packages first second; then
     fail 'ensure_packages must propagate Fedora package failures'
 fi
 [ "$FAIL_ON" -eq 1 ] || fail 'ensure_packages must stop after the first failed package'
+
+unset -f ensure_package
+source "$ROOT_DIR/scripts/lib/packages.sh"
+
+declare -Ag FEDORA_CONTRACT_INSTALLED=()
+package_is_installed() {
+    local mapped
+    mapped=$(fedora_arch_target_name "$1") || return 1
+    [ "${FEDORA_CONTRACT_INSTALLED[$mapped]:-0}" -eq 1 ]
+}
+dnf() {
+    printf 'dnf:%s\n' "$*" >> "$CALLS"
+    FEDORA_CONTRACT_INSTALLED["${!#}"]=1
+}
+record_package_source() { :; }
+for logical_package in "${VIRTUALIZATION_PACKAGES[@]}" "${RIME_REQUIRED_PACKAGES[@]}"; do
+    ensure_package "$logical_package" ||
+        fail "Fedora contract package did not converge in mock: $logical_package"
+done
+for expected_package in qemu-kvm virt-manager swtpm dnsmasq dbus \
+    libvirt-daemon libvirt-daemon-kvm libvirt-client \
+    libvirt-daemon-config-network librime-tools; do
+    grep -Fq "dnf:install -y --setopt=install_weak_deps=False $expected_package" \
+        "$CALLS" || fail "dnf did not receive Fedora package: $expected_package"
+done
+! grep -Fq bridge-utils "$CALLS" ||
+    fail 'mock Fedora dnf calls must not include deprecated bridge-utils'
 
 BEFORE=$(sha256sum "$ROOT_DIR/common-applist.txt" | awk '{print $1}')
 EXPECTED_COMMON_HASH=233c7908cab663fe4cbe0c96323c1bd6b1a4286c80a19051532bee60de6cbebc

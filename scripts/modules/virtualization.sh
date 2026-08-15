@@ -50,7 +50,7 @@ virtualization_service_active() {
 }
 
 virtualization_check() {
-    local package group
+    local package group command
 
     virtualization_is_targeted || { module_skip not-declared; return; }
     if [ -z "${TARGET_USER:-}" ]; then
@@ -63,11 +63,15 @@ virtualization_check() {
     done
     [ "$MODULE_RESULT" -eq "$RC_OK" ] || return 0
     module_check_state service:libvirtd \
-        virtualization_service_enabled libvirtd.service
+        virtualization_service_enabled "$VIRTUALIZATION_SERVICE"
     [ "$MODULE_RESULT" -ne "$RC_FAILED" ] || return 0
     module_check_state service:libvirtd-active \
-        virtualization_service_active libvirtd.service
+        virtualization_service_active "$VIRTUALIZATION_SERVICE"
     [ "$MODULE_RESULT" -ne "$RC_FAILED" ] || return 0
+    for command in "${VIRTUALIZATION_COMMANDS[@]}"; do
+        module_check_state "command:$command" state_command_exists "$command"
+        [ "$MODULE_RESULT" -ne "$RC_FAILED" ] || return 0
+    done
     for group in "${VIRTUALIZATION_GROUPS[@]}"; do
         module_check_state "group:$TARGET_USER:$group" \
             state_user_in_group "$TARGET_USER" "$group"
@@ -86,7 +90,7 @@ virtualization_apply() {
 }
 
 virtualization_verify() {
-    local package group
+    local package group command
 
     virtualization_is_targeted || { module_skip not-declared; return; }
     if [ -z "${TARGET_USER:-}" ]; then
@@ -96,8 +100,11 @@ virtualization_verify() {
     for package in "${VIRTUALIZATION_PACKAGES[@]}"; do
         verify_package "$package" || module_verify_failed "package:$package"
     done
-    verify_active_service libvirtd.service ||
+    verify_active_service "$VIRTUALIZATION_SERVICE" ||
         module_verify_failed service:libvirtd
+    for command in "${VIRTUALIZATION_COMMANDS[@]}"; do
+        state_command_exists "$command" || module_verify_failed "command:$command"
+    done
     for group in "${VIRTUALIZATION_GROUPS[@]}"; do
         state_user_in_group "$TARGET_USER" "$group" ||
             module_verify_failed "group:$TARGET_USER:$group"

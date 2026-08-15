@@ -27,6 +27,7 @@ NAS_APPLY_PENDING=0
 section "NAS" "Persistent NFS Mounting"
 
 ensure_package nfs-utils
+ensure_packages "${RIME_REQUIRED_PACKAGES[@]}"
 install -d "$NAS_LOCAL_PATH"
 ensure_fstab_entry "$NAS_IP:$NAS_REMOTE_PATH" "$NAS_LOCAL_PATH" nfs \
     defaults,_netdev,nofail 0 0 "${FSTAB_FILE:-/etc/fstab}"
@@ -48,7 +49,7 @@ fi
 
 section "Rime" "Configuration & Sync"
 
-command -v rime_dict_manager >/dev/null 2>&1 ||
+rime_dict_manager_available ||
     die 'rime_dict_manager is required; converge the base module first.'
 install -d -o "$TARGET_USER" -g "$(id -gn "$TARGET_USER")" "$RIME_DIR"
 
@@ -65,7 +66,7 @@ chown "$TARGET_USER:" "$RIME_INSTALLATION_FILE"
 rime_installation_matches
 
 if nas_rime_online && [ -d "$RIME_SYNC_DIR" ]; then
-    runuser -u "$TARGET_USER" -- rime_dict_manager -s ||
+    runuser -u "$TARGET_USER" -- "$RIME_DICT_MANAGER_PATH" -s ||
         { warn 'Initial Rime dictionary synchronization failed; the timer remains enabled.'; NAS_APPLY_PENDING=1; }
 fi
 

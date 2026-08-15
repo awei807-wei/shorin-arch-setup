@@ -180,6 +180,15 @@ bash install.sh verify --user shorin grub
 | `vcp` | 可选 | `applications` | VCPChat 桌面入口和 NAS 备份定时器 |
 | `grub` | 必需 | `storage base` | 双启动、Btrfs 集成、主题及配置验收 |
 
+Fedora 的 virtualization 契约会把逻辑包映射为 `qemu-kvm`、`libvirt-daemon`、
+`libvirt-daemon-kvm`、`libvirt-client` 和 `libvirt-daemon-config-network`，并显式验收
+`libvirtd.service`、`virsh`、`libvirt/kvm/input` 用户组及
+`/usr/share/libvirt/networks/default.xml`；不会安装已弃用的 `bridge-utils`。Arch
+契约显式使用 `libvirt` 包。Fedora 的 `nas-rime` 目标额外安装提供
+`/usr/bin/rime_dict_manager` 的 `librime-tools`，服务、safe-sync 脚本和只读检查共享
+同一命令路径契约。Fedora 的 GRUB 使用独立 apply，Arch 内部的 `grub-btrfs` Btrfs
+辅助脚本在 Fedora 上明确跳过。
+
 不适用或缺少外部前置的可选模块会被明确标记为跳过。例如 VCPChat 尚未部署时，`vcp` 不会冒充成功，整体结果为 `PARTIAL`。
 
 `desktop-niri` 的必需目标包含 QuickShell、`qt6-wayland`、`qt6-multimedia`、`bluez-utils`、主题生成、锁屏/空闲管理及桌面核心依赖。模块会把必需集合与 `niri-packages.list` 中的用户选择合并，并确保 Niri 配置中分别只有一个有效的 QuickShell 和 Fcitx5 启动命令；已有带参数的 `spawn-sh-at-startup` 命令会被保留。旧 profile 中的 Waybar 及其两个扩展会被视为已由 QuickShell 取代，不再触发安装或修复，也不会主动卸载机器上已有的软件。

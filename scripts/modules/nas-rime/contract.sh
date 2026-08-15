@@ -4,6 +4,8 @@ set -Eeuo pipefail
 trap 'printf "ERROR: %s:%s: %s\n" \
   "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
+RIME_DICT_MANAGER_PATH=${RIME_DICT_MANAGER_PATH:-/usr/bin/rime_dict_manager}
+
 nas_rime_contract_init() {
     NAS_IP=${NAS_IP:-10.0.0.104}
     NAS_REMOTE_PATH=${NAS_REMOTE_PATH:-/mnt/user/115yun/arch}
@@ -11,13 +13,43 @@ nas_rime_contract_init() {
     RIME_INSTALLATION_ID=${RIME_INSTALLATION_ID:-${TARGET_USER}_arch}
     RIME_SYNC_DIR=${RIME_SYNC_DIR:-$NAS_LOCAL_PATH/rime_sync}
     RIME_DIR=${RIME_DIR:-$HOME_DIR/.local/share/fcitx5/rime}
+    RIME_DICT_MANAGER_PATH=${RIME_DICT_MANAGER_PATH:-/usr/bin/rime_dict_manager}
     RIME_INSTALLATION_FILE=${RIME_INSTALLATION_FILE:-$RIME_DIR/installation.yaml}
     RIME_USER_UNIT_DIR=$HOME_DIR/.config/systemd/user
     RIME_SERVICE_FILE=$RIME_USER_UNIT_DIR/rime-sync.service
     RIME_TIMER_FILE=$RIME_USER_UNIT_DIR/rime-sync.timer
 }
 
+if platform_is_fedora; then
+    # Fedora's rime_dict_manager is shipped by librime-tools, not by
+    # fcitx5-rime.  Arch retains its existing dependency path unchanged.
+    readonly -a RIME_REQUIRED_PACKAGES=(librime-tools)
+else
+    readonly -a RIME_REQUIRED_PACKAGES=()
+fi
+
+rime_dict_manager_available() {
+    rime_dict_manager_path_is_safe || return 1
+    [ -x "$RIME_DICT_MANAGER_PATH" ]
+}
+
+rime_dict_manager_path_is_safe() {
+    # The same value is emitted into a systemd unit and a generated shell
+    # script. Keep the supported override an absolute path and reject syntax
+    # characters that either renderer would interpret instead of preserving.
+    case "$RIME_DICT_MANAGER_PATH" in
+        /*) ;;
+        *) return 1 ;;
+    esac
+    [[ "$RIME_DICT_MANAGER_PATH" != *'"'* ]] || return 1
+    [[ "$RIME_DICT_MANAGER_PATH" != *'\\'* ]] || return 1
+    [[ "$RIME_DICT_MANAGER_PATH" != *'%'* ]] || return 1
+    [[ "$RIME_DICT_MANAGER_PATH" != *$'\n'* ]] || return 1
+    [[ "$RIME_DICT_MANAGER_PATH" != *$'\r'* ]] || return 1
+}
+
 rime_service_contract() {
+    rime_dict_manager_path_is_safe || return 1
     cat <<EOF
 [Unit]
 Description=Rime Dictionary Sync
@@ -26,7 +58,7 @@ ConditionPathIsMountPoint=$NAS_LOCAL_PATH
 
 [Service]
 Type=oneshot
-ExecStartPre=/usr/bin/test -x /usr/bin/rime_dict_manager
+ExecStartPre=/usr/bin/test -x "$RIME_DICT_MANAGER_PATH"
 ExecStartPre=/usr/bin/test -x "$HOME_DIR/.local/bin/rime-safe-sync.sh"
 ExecStart="$HOME_DIR/.local/bin/rime-safe-sync.sh"
 WorkingDirectory=$RIME_DIR
@@ -37,6 +69,7 @@ EOF
 }
 
 rime_safe_sync_script_contract() {
+    rime_dict_manager_path_is_safe || return 1
     cat <<SAFE_SYNC_EOF
 #!/bin/bash
 # Rime 安全同步脚本
@@ -68,7 +101,7 @@ fi
 
 # 3. 执行同步
 cd "\$RIME_DIR" || exit 0
-/usr/bin/rime_dict_manager --sync 2>&1
+"$RIME_DICT_MANAGER_PATH" --sync 2>&1
 SYNC_EXIT=\$?
 echo "Sync completed (exit: \$SYNC_EXIT)."
 

@@ -8,9 +8,18 @@ SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." &&
 source "$SCRIPT_DIR/lib/core.sh"
 source "$SCRIPT_DIR/modules/grub/contract.sh"
 
-check_root
 grub_contract_init
 
+# Fedora has a separate GRUB implementation and does not provide the Arch
+# grub-btrfs/inotify-tools integration.  Keep this internal Arch helper a
+# deliberate no-op on Fedora so a direct invocation cannot install or start
+# Arch-only packages/services.
+if platform_is_fedora; then
+    log 'Skipping Arch-only GRUB Btrfs integration on Fedora.'
+    exit 0
+fi
+
+check_root
 grub_root_is_btrfs || exit 0
 [ -f "$GRUB_DEFAULT_FILE" ] || die "Missing GRUB defaults: $GRUB_DEFAULT_FILE"
 command -v grub-mkconfig >/dev/null 2>&1 || exit 0
