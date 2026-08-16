@@ -24,6 +24,13 @@ fail() {
     return 1
 }
 
+assert_equal() {
+    local expected=$1 actual=$2 message=$3
+
+    [ "$expected" = "$actual" ] ||
+        fail "$message (expected=$expected actual=$actual)"
+}
+
 source "$ROOT_DIR/scripts/modules/desktop-niri/targets.sh"
 source "$ROOT_DIR/scripts/modules/desktop-niri/dotfiles-apply.sh"
 
@@ -31,9 +38,107 @@ niri_user_bus_is_available() {
     return 1
 }
 
+test_dotfiles_checkout_tracks_latest_and_falls_back_safely() (
+    local github_repo="$TEST_DIR/dotfiles-github"
+    local gitee_repo="$TEST_DIR/dotfiles-gitee"
+    local checkout="$TEST_DIR/dotfiles-checkout-latest"
+    local dirty_checkout="$TEST_DIR/dotfiles-checkout-dirty"
+    local untrusted_checkout="$TEST_DIR/dotfiles-checkout-untrusted"
+    local current_user first_commit second_commit actual_checkout
+
+    current_user=$(id -un)
+    mkdir -p "$HOME_DIR"
+    desktop_niri_contract_init
+    for repository in "$github_repo" "$gitee_repo"; do
+        mkdir -p "$repository"
+        mkdir -p "$repository/wallpapers" \
+            "$repository/dotfiles/.config/niri"
+        git init -q -b main "$repository"
+        printf 'gitee-first\n' > "$repository/version.txt"
+        printf 'wallpaper\n' > "$repository/wallpapers/$(basename "$NIRI_DEFAULT_WALLPAPER_FILE")"
+        printf 'niri\n' > "$repository/dotfiles/.config/niri/config.kdl"
+        printf 'format = "repo"\n' > "$repository/dotfiles/.config/starship.toml"
+        git -C "$repository" add .
+        git -C "$repository" -c user.name=Fixture \
+            -c user.email=fixture@example.invalid commit -q -m first
+    done
+    first_commit=$(git -C "$gitee_repo" rev-parse HEAD)
+
+    runuser() {
+        [ "$1" = -u ] || return 1
+        shift 2
+        [ "$1" = -- ] || return 1
+        shift
+        "$@"
+    }
+    eval "$(declare -f ensure_git_checkout | \
+        sed 's/^ensure_git_checkout /real_ensure_git_checkout /')"
+    ensure_git_checkout() {
+        [ "$2" != "$github_repo" ] || return 1
+        real_ensure_git_checkout "$@"
+    }
+
+    export NIRI_DOTFILES_GITHUB_URL="$github_repo"
+    export NIRI_DOTFILES_GITEE_URL="$gitee_repo"
+    export NIRI_DOTFILES_CHECKOUT="$checkout"
+    export NIRI_DOTFILES_FALLBACK_CHECKOUT="$checkout.gitee"
+
+    actual_checkout=$(ensure_dotfiles_checkout "$current_user" "$HOME_DIR") ||
+        fail 'GitHub failure must fall back to a fresh Gitee main checkout'
+    [ "$actual_checkout" = "$checkout.gitee" ] ||
+        fail 'Gitee fallback must report its selected checkout path'
+    assert_equal main "$(git -C "$actual_checkout" branch --show-current)" \
+        'Gitee fallback must use main rather than a detached commit'
+    assert_equal "$first_commit" "$(git -C "$actual_checkout" rev-parse HEAD)" \
+        'Gitee fallback must start at the latest main commit'
+
+    printf 'gitee-second\n' > "$gitee_repo/version.txt"
+    git -C "$gitee_repo" add version.txt
+    git -C "$gitee_repo" -c user.name=Fixture \
+        -c user.email=fixture@example.invalid commit -q -m second
+    second_commit=$(git -C "$gitee_repo" rev-parse HEAD)
+    actual_checkout=$(ensure_dotfiles_checkout "$current_user" "$HOME_DIR") ||
+        fail 'a second run must update the trusted Gitee checkout'
+    assert_equal "$second_commit" "$(git -C "$actual_checkout" rev-parse HEAD)" \
+        'a second fallback run must follow Gitee origin/main'
+    actual_checkout=$(ensure_dotfiles_checkout "$current_user" "$HOME_DIR") ||
+        fail 'a converged fallback run must remain idempotent'
+    assert_equal "$second_commit" "$(git -C "$actual_checkout" rev-parse HEAD)" \
+        'an idempotent fallback run must not move the checkout unexpectedly'
+
+    git clone -q "$github_repo" "$dirty_checkout"
+    printf 'dirty\n' >> "$dirty_checkout/version.txt"
+    export NIRI_DOTFILES_CHECKOUT="$dirty_checkout"
+    export NIRI_DOTFILES_FALLBACK_CHECKOUT="$TEST_DIR/unused-gitee"
+    if ensure_dotfiles_checkout "$current_user" "$HOME_DIR"; then
+        fail 'a dirty existing GitHub checkout must be refused'
+    fi
+
+    mkdir -p "$untrusted_checkout"
+    printf 'sentinel\n' > "$untrusted_checkout/sentinel"
+    export NIRI_DOTFILES_CHECKOUT="$untrusted_checkout"
+    if ensure_dotfiles_checkout "$current_user" "$HOME_DIR"; then
+        fail 'an untrusted non-Git checkout must be refused'
+    fi
+    [ "$(< "$untrusted_checkout/sentinel")" = sentinel ] ||
+        fail 'an untrusted checkout path must not be replaced'
+
+    unset -f ensure_git_checkout real_ensure_git_checkout runuser
+    unset NIRI_DOTFILES_GITHUB_URL NIRI_DOTFILES_GITEE_URL \
+        NIRI_DOTFILES_CHECKOUT NIRI_DOTFILES_FALLBACK_CHECKOUT
+)
+
+test_dotfiles_checkout_tracks_latest_and_falls_back_safely
+
+desktop_niri_contract_init
 DOTFILES_CHECKOUT="$TEST_DIR/dotfiles-checkout"
 mkdir -p "$DOTFILES_CHECKOUT/dotfiles/.config/fish/conf.d"
 mkdir -p "$DOTFILES_CHECKOUT/dotfiles/.config/matugen/templates"
+mkdir -p "$DOTFILES_CHECKOUT/dotfiles/.config/niri" \
+    "$DOTFILES_CHECKOUT/wallpapers"
+printf 'niri source\n' > "$DOTFILES_CHECKOUT/dotfiles/.config/niri/config.kdl"
+printf 'wallpaper source\n' > \
+    "$DOTFILES_CHECKOUT/wallpapers/$(basename "$HOME_DIR/Pictures/Wallpapers/black-and-white-3840x2160-21293.jpg")"
 printf 'source "$HOME/.cargo/env.fish"\n' \
     > "$DOTFILES_CHECKOUT/dotfiles/.config/fish/conf.d/rustup.fish"
 printf '\nsource "$HOME/.local/bin/env.fish"\n' \
@@ -51,10 +156,6 @@ output_path = '~/.config/yazi/theme.toml'
 EOF
 printf 'legacy Matugen Starship template\n' \
     > "$DOTFILES_CHECKOUT/dotfiles/.config/matugen/templates/starship-colors.toml"
-NIRI_STARSHIP_CONFIG_SHA256=$(sha256sum \
-    "$DOTFILES_CHECKOUT/dotfiles/.config/starship.toml" | awk '{ print $1 }')
-export NIRI_STARSHIP_CONFIG_SHA256
-desktop_niri_contract_init
 deploy_dotfiles "$DOTFILES_CHECKOUT"
 niri_fish_sources_satisfied ||
     fail 'dotfile deployment must immediately remove unsafe Fish environment sources'
@@ -62,6 +163,56 @@ niri_fish_sources_satisfied ||
     fail 'the upstream Fish source with a leading blank line must be migrated'
 niri_starship_config_deployed ||
     fail 'dotfile deployment must restore the Starship configuration'
+
+STARSHIP_TARGET_COPY="$TEST_DIR/starship-target-copy.toml"
+cp "$NIRI_STARSHIP_CONFIG_FILE" "$STARSHIP_TARGET_COPY"
+rm -f "$NIRI_STARSHIP_CONFIG_FILE"
+mkdir "$NIRI_STARSHIP_CONFIG_FILE"
+if niri_starship_config_deployed; then
+    fail 'a Starship target directory must not satisfy the file contract'
+fi
+rmdir "$NIRI_STARSHIP_CONFIG_FILE"
+mkfifo "$NIRI_STARSHIP_CONFIG_FILE"
+if niri_starship_config_deployed; then
+    fail 'a Starship target FIFO must not satisfy the file contract'
+fi
+rm -f "$NIRI_STARSHIP_CONFIG_FILE"
+mv "$STARSHIP_TARGET_COPY" "$NIRI_STARSHIP_CONFIG_FILE"
+
+STARSHIP_SOURCE_COPY="$TEST_DIR/starship-source-copy.toml"
+mv "$DOTFILES_CHECKOUT/dotfiles/.config/starship.toml" "$STARSHIP_SOURCE_COPY"
+mkdir "$DOTFILES_CHECKOUT/dotfiles/.config/starship.toml"
+if deploy_dotfiles "$DOTFILES_CHECKOUT"; then
+    fail 'a Starship source directory must fail the source contract'
+fi
+rmdir "$DOTFILES_CHECKOUT/dotfiles/.config/starship.toml"
+mkfifo "$DOTFILES_CHECKOUT/dotfiles/.config/starship.toml"
+if deploy_dotfiles "$DOTFILES_CHECKOUT"; then
+    fail 'a Starship source FIFO must fail the source contract'
+fi
+rm -f "$DOTFILES_CHECKOUT/dotfiles/.config/starship.toml"
+mv "$STARSHIP_SOURCE_COPY" "$DOTFILES_CHECKOUT/dotfiles/.config/starship.toml"
+
+OLD_WALLPAPER="$HOME_DIR/Pictures/Wallpapers/old-wallpaper.jpg"
+mkdir -p "$HOME_DIR/Pictures/Wallpapers"
+printf 'old user wallpaper\n' > "$OLD_WALLPAPER"
+MISSING_WALLPAPER_CHECKOUT="$TEST_DIR/missing-wallpaper-checkout"
+cp -a "$DOTFILES_CHECKOUT" "$MISSING_WALLPAPER_CHECKOUT"
+rm -f "$MISSING_WALLPAPER_CHECKOUT/wallpapers/$(basename "$NIRI_DEFAULT_WALLPAPER_FILE")"
+if deploy_dotfiles "$MISSING_WALLPAPER_CHECKOUT"; then
+    fail 'a checkout missing the default wallpaper must fail despite an old home wallpaper'
+fi
+[ "$(< "$OLD_WALLPAPER")" = 'old user wallpaper' ] ||
+    fail 'a failed wallpaper source check must preserve the old home wallpaper'
+
+MISSING_CORE_CHECKOUT="$TEST_DIR/missing-core-checkout"
+cp -a "$DOTFILES_CHECKOUT" "$MISSING_CORE_CHECKOUT"
+rm -f "$MISSING_CORE_CHECKOUT/dotfiles/.config/niri/config.kdl"
+rmdir "$MISSING_CORE_CHECKOUT/dotfiles/.config/niri"
+if deploy_dotfiles "$MISSING_CORE_CHECKOUT"; then
+    fail 'a checkout missing the Niri core directory must fail closed'
+fi
+
 niri_matugen_starship_output_disabled ||
     fail 'dotfile deployment must disable Matugen Starship output'
 [ ! -e "$NIRI_MATUGEN_STARSHIP_TEMPLATE_FILE" ] ||
@@ -81,13 +232,13 @@ output_path = '~/.config/starship.toml'
 EOF
 deploy_dotfiles "$DOTFILES_CHECKOUT"
 cmp -s "$HOME_DIR/.config/starship.toml" "$STARSHIP_CURRENT_COPY" ||
-    fail 'the pinned Starship configuration must replace generated drift'
+    fail 'the verified Starship configuration must replace generated drift'
 niri_matugen_starship_output_disabled ||
     fail 'reintroduced Matugen Starship output must be removed'
 printf 'user-owned Starship configuration\n' > "$HOME_DIR/.config/starship.toml"
 deploy_dotfiles "$DOTFILES_CHECKOUT"
 cmp -s "$HOME_DIR/.config/starship.toml" "$STARSHIP_CURRENT_COPY" ||
-    fail 'Starship must remain managed by the pinned checkout'
+    fail 'Starship must remain managed by the verified checkout'
 cp "$STARSHIP_CURRENT_COPY" "$HOME_DIR/.config/starship.toml"
 desktop_niri_contract_init
 

@@ -36,8 +36,15 @@ _update_git_checkout() {
         runuser -u "$user" -- git -C "$destination" \
             checkout --detach "$expected_commit"
     else
-        runuser -u "$user" -- env HOME="$home" \
-            git -C "$destination" checkout "$branch"
+        if ! runuser -u "$user" -- env HOME="$home" \
+            git -C "$destination" show-ref --verify --quiet \
+            "refs/heads/$branch"; then
+            runuser -u "$user" -- env HOME="$home" \
+                git -C "$destination" checkout -b "$branch" "origin/$branch"
+        else
+            runuser -u "$user" -- env HOME="$home" \
+                git -C "$destination" checkout "$branch"
+        fi
         runuser -u "$user" -- env HOME="$home" \
             git -C "$destination" merge --ff-only "origin/$branch"
     fi

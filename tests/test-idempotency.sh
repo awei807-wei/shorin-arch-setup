@@ -103,6 +103,62 @@ test_checkout_preserves_shared_parent_mode() {
     unset -f runuser
 }
 
+test_checkout_tracks_latest_main_and_refuses_dirty_state() (
+    local repository="$TEST_DIR/latest-source-repository"
+    local checkout="$TEST_DIR/latest-checkout"
+    local current_user first_commit second_commit
+
+    current_user=$(id -un)
+    mkdir -p "$repository"
+    git init -q -b main "$repository"
+    printf 'first\n' > "$repository/file.txt"
+    git -C "$repository" add file.txt
+    git -C "$repository" -c user.name=Fixture \
+        -c user.email=fixture@example.invalid commit -q -m first
+    first_commit=$(git -C "$repository" rev-parse HEAD)
+
+    runuser() {
+        [ "$1" = -u ] || return 1
+        shift 2
+        [ "$1" = -- ] || return 1
+        shift
+        "$@"
+    }
+
+    HOME_DIR=$HOME ensure_git_checkout \
+        "$current_user" "$repository" main "$checkout" "$HOME"
+    assert_equal main "$(git -C "$checkout" branch --show-current)" \
+        'a new checkout must use the main branch'
+    assert_equal "$first_commit" "$(git -C "$checkout" rev-parse HEAD)" \
+        'a new checkout must use the latest main commit'
+
+    git -C "$checkout" checkout --detach -q
+    printf 'second\n' > "$repository/file.txt"
+    git -C "$repository" add file.txt
+    git -C "$repository" -c user.name=Fixture \
+        -c user.email=fixture@example.invalid commit -q -m second
+    second_commit=$(git -C "$repository" rev-parse HEAD)
+
+    HOME_DIR=$HOME ensure_git_checkout \
+        "$current_user" "$repository" main "$checkout" "$HOME"
+    assert_equal main "$(git -C "$checkout" branch --show-current)" \
+        'an old detached checkout must return to main'
+    assert_equal "$second_commit" "$(git -C "$checkout" rev-parse HEAD)" \
+        'an existing checkout must advance to origin/main'
+
+    HOME_DIR=$HOME ensure_git_checkout \
+        "$current_user" "$repository" main "$checkout" "$HOME"
+    assert_equal "$second_commit" "$(git -C "$checkout" rev-parse HEAD)" \
+        'a second converged run must remain idempotent'
+
+    printf 'uncommitted drift\n' >> "$checkout/file.txt"
+    if HOME_DIR=$HOME ensure_git_checkout \
+        "$current_user" "$repository" main "$checkout" "$HOME"; then
+        fail 'a dirty checkout must be refused before fetching upstream'
+    fi
+    unset -f runuser
+)
+
 test_git_state_uses_target_user_context() (
     local repository="$TEST_DIR/user-owned-repository"
     local runuser_log="$TEST_DIR/state-git-runuser.log"
@@ -536,6 +592,7 @@ test_script_contract() {
 test_atomic_text_convergence
 test_file_metadata_convergence
 test_checkout_preserves_shared_parent_mode
+test_checkout_tracks_latest_main_and_refuses_dirty_state
 test_git_state_uses_target_user_context
 test_package_convergence
 test_aur_source_routing
