@@ -5,6 +5,7 @@ trap 'printf "ERROR: %s:%s: %s\n" \
   "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+export SHORIN_DISTRO=fedora
 TEST_DIR=$(mktemp -d)
 BIN_DIR="$TEST_DIR/bin"
 CALLS="$TEST_DIR/calls.log"

@@ -5,6 +5,7 @@ trap 'printf "ERROR: %s:%s: %s\n" \
   "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+export SHORIN_DISTRO=arch
 TEST_DIR=$(mktemp -d)
 TARGET_USER=$(id -un)
 HOME_DIR=$TEST_DIR/home
