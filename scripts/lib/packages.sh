@@ -24,9 +24,20 @@ package_is_installed() {
     if platform_is_fedora; then
         local mapped
         mapped=$(fedora_arch_target_name "$package") || return 1
-        if [ "$mapped" = '@development-tools' ]; then
-            rpm -qa 2>/dev/null | grep -Eqi '(^|-)gcc|(^|-)make|(^|-)binutils'
-            return
+        if [ "$mapped" = '@c-development' ]; then
+            # Fedora's logical base-devel target is the DNF
+            # @c-development group.  Check representative required RPMs
+            # from the same group contract rather than treating one matching
+            # package as a complete group.  The RPM database query is kept
+            # separate from grep so pipefail cannot turn a satisfied query
+            # into SIGPIPE/141.
+            local rpm_list pattern
+            rpm_list=$(platform_rpm_query_all) || return $?
+            for pattern in '(^|-)gcc([.-]|$)' '(^|-)make([.-]|$)' \
+                '(^|-)binutils([.-]|$)'; do
+                grep -Eqi "$pattern" <<< "$rpm_list" || return
+            done
+            return 0
         fi
         platform_rpm_installed "$mapped"
         return
@@ -199,20 +210,60 @@ ensure_package() {
     local package=$1
 
     if platform_is_fedora; then
-        local mapped
+        local mapped repository repository_status package_status
         mapped=$(fedora_arch_target_name "$package") || {
             error "No Fedora package mapping exists for Arch target: $package"
             return 1
         }
-        if ! package_is_installed "$package"; then
-            platform_dnf_install "$mapped" || return
+        if package_is_installed "$package"; then
+            package_status=0
+        else
+            package_status=$?
         fi
-        package_is_installed "$package" && {
-            if [ "$mapped" != '@development-tools' ]; then
+        case "$package_status" in
+            0) ;;
+            1)
+                if repository=$(fedora_package_repository "$mapped"); then
+                    if platform_dnf_repo_available "$repository"; then
+                        :
+                    else
+                        repository_status=$?
+                        if [ "$repository_status" -eq 1 ]; then
+                            error "Fedora package $mapped requires the configured repository $repository; refusing to pass it to dnf without that repository."
+                        else
+                            error "Unable to inspect Fedora repository $repository for package $mapped."
+                        fi
+                        return "$((repository_status > 1 ? repository_status : 1))"
+                    fi
+                    if platform_dnf_package_available "$mapped" "$repository"; then
+                        :
+                    else
+                        repository_status=$?
+                        if [ "$repository_status" -eq 1 ]; then
+                            error "Fedora repository $repository does not provide package $mapped; refusing to claim convergence."
+                        else
+                            error "Unable to inspect Fedora package $mapped in repository $repository."
+                        fi
+                        return "$((repository_status > 1 ? repository_status : 1))"
+                    fi
+                    platform_dnf_install_from_repo "$repository" "$mapped" || return
+                else
+                    repository_status=$?
+                    [ "$repository_status" -eq 1 ] || return "$repository_status"
+                    platform_dnf_install "$mapped" || return
+                fi
+                ;;
+            *) return "$package_status" ;;
+        esac
+        if package_is_installed "$package"; then
+            if [ "$mapped" != '@c-development' ]; then
                 record_package_source "$package" "fedora:$mapped" || return
             fi
             return 0
-        }
+        else
+            package_status=$?
+        fi
+        [ "$package_status" -eq 1 ] || return "$package_status"
         return 1
     fi
 

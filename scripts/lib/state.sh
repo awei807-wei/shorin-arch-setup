@@ -78,8 +78,13 @@ state_user_exists() {
 }
 
 state_user_in_group() {
-    local user=$1 group=$2
-    id -nG "$user" 2>/dev/null | tr ' ' '\n' | grep -Fqx "$group"
+    local user=$1 group=$2 groups
+
+    # Keep id's producer out of a grep -q pipeline.  A user with many group
+    # memberships can otherwise make pipefail report SIGPIPE/141 after grep
+    # finds the requested group.
+    groups=$(id -nG "$user" 2>/dev/null) || return $?
+    grep -Fqx "$group" < <(tr ' ' '\n' <<< "$groups")
 }
 
 resolve_target_user() {

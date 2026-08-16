@@ -36,10 +36,12 @@ if platform_is_fedora; then
         warn 'Bluetooth hardware inspection unavailable; continuing without bluez.'
     fi
     ensure_service_started power-profiles-daemon.service
-    if flatpak remotes --system --columns=name 2>/dev/null | grep -Fqx flathub; then
+    if base_flatpak_system_remote_named; then
         base_flathub_system_remote_present ||
             flatpak remote-modify --system --url="$FLATHUB_REPO_URL" flathub
     else
+        flatpak_status=$?
+        [ "$flatpak_status" -eq 1 ] || die 'Unable to inspect system Flatpak remotes.'
         flatpak remote-add --system flathub \
             https://dl.flathub.org/repo/flathub.flatpakrepo
     fi
@@ -70,7 +72,7 @@ success "Audio setup complete."
 # ------------------------------------------------------------------------------
 section "Step 2/7" "Locale Configuration"
 
-if locale -a | grep -iq "zh_CN.utf8"; then
+if base_locale_present; then
     success "Chinese locale (zh_CN.UTF-8) is active."
 else
     log "Generating zh_CN.UTF-8..."
@@ -142,10 +144,12 @@ log "Module 02 completed."
 # ------------------------------------------------------------------------------
 
 ensure_package flatpak
-if flatpak remotes --system --columns=name 2>/dev/null | grep -Fqx flathub; then
+if base_flatpak_system_remote_named; then
     base_flathub_system_remote_present ||
         exe flatpak remote-modify --system --url="$FLATHUB_REPO_URL" flathub
 else
+    flatpak_status=$?
+    [ "$flatpak_status" -eq 1 ] || die 'Unable to inspect system Flatpak remotes.'
     exe flatpak remote-add --system flathub \
         https://dl.flathub.org/repo/flathub.flatpakrepo
 fi

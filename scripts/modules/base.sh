@@ -8,29 +8,7 @@ SHORIN_ROOT=${SHORIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 source "$SHORIN_ROOT/scripts/lib/verify.sh"
 source "$SHORIN_ROOT/scripts/modules/base/targets.sh"
 
-if platform_is_fedora; then
-    BASE_PACKAGES=(
-        adobe-source-han-sans-cn-fonts adobe-source-han-serif-cn-fonts
-        alsa-firmware alsa-ucm-conf base-devel fastfetch fcitx5
-        fcitx5-chinese-addons fcitx5-configtool fcitx5-gtk fcitx5-mozc
-        fcitx5-qt fcitx5-rime flatpak libva-utils noto-fonts noto-fonts-cjk
-        noto-fonts-emoji pavucontrol pciutils pipewire pipewire-alsa
-        pipewire-jack pipewire-pulse power-profiles-daemon sof-firmware
-        terminus-font ttf-jetbrains-mono-nerd usbutils vim wireplumber
-        xdg-user-dirs
-    )
-else
-    BASE_PACKAGES=(
-        adobe-source-han-sans-cn-fonts adobe-source-han-serif-cn-fonts
-        alsa-firmware alsa-ucm-conf archlinuxcn-keyring base-devel fastfetch
-        fcitx5 fcitx5-chinese-addons fcitx5-configtool fcitx5-gtk fcitx5-mozc
-        fcitx5-qt fcitx5-rime flatpak libva-utils noto-fonts noto-fonts-cjk
-        noto-fonts-emoji pavucontrol pciutils pipewire pipewire-alsa
-        pipewire-jack pipewire-pulse power-profiles-daemon sof-firmware
-        terminus-font ttf-jetbrains-mono-nerd usbutils wireplumber xdg-user-dirs
-        yay
-    )
-fi
+mapfile -t BASE_PACKAGES < <(base_declared_packages)
 
 ARCHLINUXCN_BODY='Server = https://mirrors.ustc.edu.cn/archlinuxcn/$arch
 Server = https://mirrors.tuna.tsinghua.edu.cn/archlinuxcn/$arch
@@ -82,8 +60,7 @@ base_inspect() {
         /etc/environment EDITOR "$editor"
     base_expect "$phase" vconsole:FONT key_value_matches \
         /etc/vconsole.conf FONT ter-v28n
-    base_expect "$phase" locale:zh_CN bash -c \
-        'locale -a | grep -Fqi zh_CN.utf8'
+    base_expect "$phase" locale:zh_CN base_locale_present
     base_expect "$phase" flatpak:flathub-system \
         base_flathub_system_remote_present
     base_expect "$phase" sudoers:wheel base_wheel_sudoers_valid

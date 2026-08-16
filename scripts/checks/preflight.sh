@@ -85,6 +85,9 @@ preflight_resolve_target_user() {
         export TARGET_USER HOME_DIR
         return 0
     fi
+    if [ -n "$requested" ]; then
+        die "Unable to resolve target user '$requested' for $mode: an explicit --user must name an existing non-root account."
+    fi
     die "Unable to resolve the target user for $mode."
 }
 
@@ -92,6 +95,10 @@ run_preflight() {
     local mode=$1 requested=${2:-${TARGET_USER:-}}
 
     preflight_readonly "$mode"
+    # Resolve an explicit account before acquiring a run lock or entering any
+    # mutating preflight. A missing --user must fail without even creating a
+    # lock-file side effect.
+    preflight_resolve_target_user "$mode" "$requested"
     case "$mode" in
         audit|verify)
             export SHORIN_READ_ONLY=1
@@ -101,5 +108,4 @@ run_preflight() {
             preflight_mutating "$mode"
             ;;
     esac
-    preflight_resolve_target_user "$mode" "$requested"
 }

@@ -3,9 +3,11 @@
 Shorin Arch Setup 是面向 Arch Linux 的声明式系统配置工具。入口脚本只负责解析模式、执行预检、按依赖顺序调度模块、运行最终验收并汇总状态；具体变更由独立收敛模块完成。
 
 安装器也支持 Fedora + niri。发行版默认从 `/etc/os-release` 检测，也可以显式指定
-`--distro fedora`；Fedora 路径只使用 `dnf`、Flatpak、COPR、官方 RPM 和官方
-AppImage，不会调用 AUR、`yay` 或 `paru`。`common-applist.txt` 是跨发行版的逻辑清单，
-Fedora 映射在 `scripts/lib/platform.sh` 与 `scripts/lib/fedora.sh` 中维护，不会修改该文件。
+`--distro fedora`；Fedora 路径只使用 `dnf`、Flatpak、COPR、官方 RPM、官方
+AppImage，以及固定校验和的上游源码构建，不会调用 AUR、`yay` 或 `paru`。
+`common-applist.txt` 是跨发行版的逻辑清单，Fedora 映射在 `scripts/lib/platform.sh`
+与 `scripts/lib/fedora.sh` 中维护，不会修改该文件。
+Fedora 的 `awww` 源码输入固定为上游 `v0.12.1` 对应的 Codeberg immutable commit，下载后先校验 SHA-256，再以目标用户构建。
 
 执行模型如下：
 
@@ -193,7 +195,7 @@ Fedora 的 virtualization 契约会把逻辑包映射为 `qemu-kvm`、`libvirt-d
 
 `desktop-niri` 的必需目标包含 QuickShell、`qt6-wayland`、`qt6-multimedia`、`bluez-utils`、主题生成、锁屏/空闲管理及桌面核心依赖。模块会把必需集合与 `niri-packages.list` 中的用户选择合并，并确保 Niri 配置中分别只有一个有效的 QuickShell 和 Fcitx5 启动命令；已有带参数的 `spawn-sh-at-startup` 命令会被保留。旧 profile 中的 Waybar 及其两个扩展会被视为已由 QuickShell 取代，不再触发安装或修复，也不会主动卸载机器上已有的软件。
 
-桌面修复还会收敛以下持久状态：Niri 的 `PATH` 包含目标用户 `~/.local/bin`；`Mod+Alt+V` 调用 `niri-clip toggle`；`Mod+ALT+C` 调用 `focus-shift`；Fish 直接且幂等地加入 `~/.cargo/bin` 与 `~/.local/bin`，不依赖安装器生成的 `env.fish`；`~/.config/starship.toml` 与配置仓库固定提交完全一致，且 Matugen 不再生成或覆盖该文件，旧 `starship-colors.toml` 模板会被清理；配置仓库声明的默认壁纸存在；Niri、QuickShell 和 Waypaper 中明确的旧 `swww` 配置迁移为 `awww`。Niri 配置修改后必须通过 `niri validate`，失败时会恢复原 `config.kdl` 和 `binds.kdl`。
+桌面修复还会收敛以下持久状态：Niri 的 `PATH` 包含目标用户 `~/.local/bin`；`Mod+Alt+V` 调用 `niri-clip toggle`；`Mod+ALT+C` 调用 `focus-shift`；Fish 直接且幂等地加入 `~/.cargo/bin` 与 `~/.local/bin`，不依赖安装器生成的 `env.fish`；`~/.config/starship.toml` 与配置仓库固定提交完全一致，且 Matugen 不再生成或覆盖该文件，旧 `starship-colors.toml` 模板会被清理；配置仓库声明的默认壁纸存在；Niri、QuickShell 和 Waypaper 在 Arch 与 Fedora 上统一使用上游 `awww` 后端。Fedora 不把 `awww` 冒充成 DNF 包，而是从固定版本的官方 Codeberg 源码归档校验后以目标用户构建 `awww` 与 `awww-daemon`；缺少任一命令都会保持为 DRIFT/失败，不会误报收敛。旧配置中的 `swww` 命令只作为迁移输入改写为 `awww`。Niri 配置修改后必须通过 `niri validate`，失败时会恢复原 `config.kdl` 和 `binds.kdl`。
 
 TTY1 会话由 `~/.bash_profile` 中的托管块启动 `niri-session -l`。`-l` 声明当前已处于登录 Shell；不带它时 `niri-session` 会重新拉起登录 Shell 导入环境，若登录 Shell 是 bash 会再次读取 `.bash_profile` 形成启动循环。旧版 `niri-autostart.service` 及 wants 链接会被清理；存在用户 bus 时同步执行 `daemon-reload` 和失败状态清理，避免后台重复启动一个没有 TTY 的 Niri 会话。
 
@@ -242,6 +244,7 @@ scripts/
     storage.sh
     base.sh
     desktop-niri.sh
+    desktop-niri/awww.sh        # Fedora awww 源码构建与命令合同
     applications.sh
     virtualization.sh
     nas-rime.sh

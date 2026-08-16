@@ -43,6 +43,22 @@ select_desktop_packages() {
     done <<< "$selected_lines"
 }
 
+normalize_profile_packages() {
+    local -n selected=$1
+    local entry canonical
+    local -a normalized=()
+
+    platform_is_fedora || return 0
+    for entry in "${selected[@]}"; do
+        entry=$(printf '%s\n' "$entry" | sed 's/[[:space:]]*#.*//' | xargs)
+        [ -n "$entry" ] || continue
+        if canonical=$(niri_package_target_canonical "$entry"); then
+            normalized+=("$canonical")
+        fi
+    done
+    selected=("${normalized[@]}")
+}
+
 main() {
     local list_file="$SHORIN_ROOT/niri-applist.txt"
     local profile_dir=${SHORIN_PROFILE_DIR:-/etc/shorin-arch-setup}
@@ -53,9 +69,11 @@ main() {
     [ -f "$list_file" ] || die "Package list not found: $list_file"
     command -v fzf >/dev/null 2>&1 || ensure_package fzf
     select_desktop_packages "$list_file" "$manifest" packages
+    normalize_profile_packages packages
     mapfile -t packages < <(printf '%s\n' "${packages[@]}" | sed '/^$/d' | sort -u)
 
-    if [ "${SHORIN_MODE:-install}" = install ]; then
+    if [ "${SHORIN_MODE:-install}" = install ] ||
+        { platform_is_fedora && [ -f "$manifest" ]; }; then
         install -d -m 755 "$profile_dir"
         manifest_tmp=$(mktemp)
         printf '%s\n' "${packages[@]}" > "$manifest_tmp"

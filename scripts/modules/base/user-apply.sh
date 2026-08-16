@@ -71,7 +71,8 @@ section "Step 2/3" "Account & Privileges"
 
 if [ "$SKIP_CREATION" = true ]; then
     log "Checking permissions for $MY_USERNAME..."
-    if groups "$MY_USERNAME" | grep -q "\bwheel\b"; then
+    GROUPS_OUTPUT=$(groups "$MY_USERNAME")
+    if grep -q "\bwheel\b" <<< "$GROUPS_OUTPUT"; then
         success "User is already in 'wheel' group."
     else
         log "Adding to 'wheel' group..."

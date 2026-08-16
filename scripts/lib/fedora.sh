@@ -52,8 +52,19 @@ fedora_install_local_rpm() {
 
 fedora_rpm_installed_matching() {
     local pattern=$1
-    command -v rpm >/dev/null 2>&1 || return 2
-    rpm -qa 2>/dev/null | grep -Eqi "$pattern"
+    platform_rpm_installed_matching "$pattern"
+}
+
+fedora_rpm_or_command() {
+    local pattern=$1 command_name=$2 status
+
+    if fedora_rpm_installed_matching "$pattern"; then
+        return 0
+    else
+        status=$?
+    fi
+    [ "$status" -eq 1 ] || return "$status"
+    command -v "$command_name" >/dev/null 2>&1
 }
 
 fedora_application_target_satisfied() {
@@ -66,19 +77,15 @@ fedora_application_target_satisfied() {
         upscaler)
             state_flatpak_present io.gitlab.theevilskeleton.Upscaler ;;
         clash-verge-rev)
-            fedora_rpm_installed_matching '(^|[-.])clash[-_]?verge' ||
-                command -v clash-verge >/dev/null 2>&1 ;;
+            fedora_rpm_or_command '(^|[-.])clash[-_]?verge' clash-verge ;;
         linuxqq-appimage)
-            fedora_rpm_installed_matching '(^|[-.])linuxqq' ||
-                command -v qq >/dev/null 2>&1 ;;
+            fedora_rpm_or_command '(^|[-.])linuxqq' qq ;;
         wechat-appimage)
-            fedora_rpm_installed_matching '(^|[-.])wechat' ||
-                command -v wechat >/dev/null 2>&1 ;;
+            fedora_rpm_or_command '(^|[-.])wechat' wechat ;;
         lsfg-vk-bin)
             package_is_installed qt6-qtdeclarative &&
                 package_is_installed qt6-qtbase &&
-                (fedora_rpm_installed_matching 'lsfg[-_]?vk' ||
-                    command -v lsfg-vk >/dev/null 2>&1) ;;
+                fedora_rpm_or_command 'lsfg[-_]?vk' lsfg-vk ;;
         mangojuice-bin)
             state_flatpak_present io.github.radiolamp.mangojuice ;;
         vicinae-bin|vicinae)
@@ -93,11 +100,9 @@ fedora_application_target_satisfied() {
         tsukimi-bin)
             package_is_installed tsukimi || command -v tsukimi >/dev/null 2>&1 ;;
         thorium-browser-bin)
-            fedora_rpm_installed_matching 'thorium[-_]?browser' ||
-                command -v thorium-browser >/dev/null 2>&1 ;;
+            fedora_rpm_or_command 'thorium[-_]?browser' thorium-browser ;;
         mark-shot)
-            fedora_rpm_installed_matching '(^|[-.])mark[-_]?shot' ||
-                command -v mark-shot >/dev/null 2>&1 ;;
+            fedora_rpm_or_command '(^|[-.])mark[-_]?shot' mark-shot ;;
         typora-free)
             return 1 ;;
         *)

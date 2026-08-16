@@ -10,22 +10,14 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 
 SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "$SCRIPT_DIR/lib/core.sh"
+source "$SCRIPT_DIR/modules/base/targets.sh"
 
 check_root
 
 log "Starting Phase 1: Base System Configuration..."
 
 if platform_is_fedora; then
-    FEDORA_BASE_PACKAGES=(
-        adobe-source-han-sans-cn-fonts adobe-source-han-serif-cn-fonts
-        alsa-firmware alsa-ucm-conf base-devel fastfetch fcitx5 glibc-langpack-zh
-        fcitx5-chinese-addons fcitx5-configtool fcitx5-gtk fcitx5-mozc
-        fcitx5-qt fcitx5-rime flatpak libva-utils noto-fonts noto-fonts-cjk
-        noto-fonts-emoji pavucontrol pciutils pipewire pipewire-alsa
-        pipewire-jack pipewire-pulse power-profiles-daemon sof-firmware
-        terminus-font ttf-jetbrains-mono-nerd usbutils vim wireplumber
-        xdg-user-dirs
-    )
+    mapfile -t FEDORA_BASE_PACKAGES < <(base_declared_packages)
     section "Fedora" "Base System Packages"
     # Fedora intentionally has no pacman.conf/multilib/ArchLinuxCN mutation.
     # The package wrapper translates logical manifest names to Fedora names and
