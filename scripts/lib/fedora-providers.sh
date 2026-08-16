@@ -15,7 +15,7 @@ FEDORA_LACT_COMMAND_PATH=${FEDORA_LACT_COMMAND_PATH:-/usr/bin/lact}
 FEDORA_LACT_SERVICE=${FEDORA_LACT_SERVICE:-lactd.service}
 FEDORA_LACT_COPR=${FEDORA_LACT_COPR:-ilyaz/LACT}
 # The official Yazi installation documentation requires the yazi-build
-# meta-crate; it installs both yazi-fm and yazi-cli (the yazi and ya binaries).
+# helper; its `install` subcommand produces the yazi and ya binaries.
 FEDORA_YAZI_CARGO_CRATE=${FEDORA_YAZI_CARGO_CRATE:-yazi-build}
 FEDORA_YAZI_CARGO_VERSION=${FEDORA_YAZI_CARGO_VERSION:-26.8.15}
 
@@ -50,7 +50,7 @@ fedora_application_provider_description() {
         steam) printf '%s\n' 'Flatpak com.valvesoftware.Steam (Flathub)' ;;
         fd) printf '%s\n' 'Fedora package fd-find (/usr/bin/fd)' ;;
         lact) printf '%s\n' "COPR $FEDORA_LACT_COPR, package lact, service $FEDORA_LACT_SERVICE" ;;
-        yazi) printf '%s\n' "target-user cargo $FEDORA_YAZI_CARGO_CRATE $FEDORA_YAZI_CARGO_VERSION (yazi + ya)" ;;
+        yazi) printf '%s\n' "target-user cargo $FEDORA_YAZI_CARGO_CRATE $FEDORA_YAZI_CARGO_VERSION, then yazi-build install (yazi + ya)" ;;
         *) return 1 ;;
     esac
 }

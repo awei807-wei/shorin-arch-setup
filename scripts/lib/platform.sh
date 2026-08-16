@@ -206,7 +206,7 @@ fedora_package_name() {
         xdg-desktop-portal-gtk|xwayland-satellite|zoxide|btop|baobab|\
         bluetui|bluez|brightnessctl|cava|dosfstools|eza|exfatprogs|f2fs-tools|\
         file-roller|fragments|gamescope|gnome-disk-utility|grub2-tools|ddcutil|dbus|\
-        alsa-plugins|alsa-plugins-pulseaudio|fd-find|giflib|glfw|gst-plugins-base-libs|gtk3|libjpeg-turbo|libva|libxslt|mpg123|openal|ttf-liberation|wine-gecko|wine-mono|\
+        alsa-plugins|alsa-plugins-pulseaudio|fd-find|giflib|glfw|gstreamer1-plugins-base|gtk3|libjpeg-turbo|libva|libxslt|mpg123|openal|ttf-liberation|wine-mono|mingw32-wine-gecko|mingw64-wine-gecko|\
         hyprpicker|libva-utils|libvirt|libvirt-daemon|libvirt-daemon-kvm|\
         libvirt-client|libvirt-daemon-config-network|librime-tools|\
         librsvg2-tools|nwg-look|\

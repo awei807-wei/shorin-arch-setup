@@ -44,9 +44,12 @@ Curtail、Mission Center 和 Steam 使用 Flathub；Steam 额外在其实际安�
 设置 `LANG=zh_CN.UTF-8` override，并验收 system/user Flatpak desktop export，
 不依赖原生 `/usr/share/applications/steam.desktop`。`fd` 使用 Fedora 的 `fd-find` 包并验收
 `/usr/bin/fd`；LACT 先幂等启用 `ilyaz/LACT` COPR，再安装 `lact` 并启用/启动
-`lactd.service`；Yazi 按官方 crates.io 安装约定，由目标用户以 Cargo 的
-`yazi-build` meta-crate 固定到 `26.8.15`（`--locked --force`），同时验收
-`yazi` 和 `ya` 两个命令。Lutris 在 Fedora 使用 `alsa-plugins-pulseaudio`。
+`lactd.service`；Yazi 按官方 crates.io 安装约定，由目标用户安装 `yazi-build` helper，固定版本
+`26.8.15`（`--locked --registry crates-io`），
+再执行 `yazi-build install --bin-dir ~/.cargo/bin` 生成并验收 `yazi` 和 `ya`；仅在替换
+已有不完整安装时使用 `--force`。Lutris 在 Fedora
+使用 `alsa-plugins-pulseaudio` 与 `gstreamer1-plugins-base`。
+Fedora Wine 使用 `wine`、`wine-mono`、`mingw32-wine-gecko` 和 `mingw64-wine-gecko`，不请求已不存在的 `wine-gecko`。
 Clash Verge、Linux QQ、微信、Thorium 和 Mark Shot 从 `FEDORA_RPM_DIR`（或目标用户
 XDG Downloads，包括中文 `下载`、以及 `/tmp`）发现官方 RPM；`tsukimi-bin` 使用
 `walker874/tsukimi` COPR；Vicinae 使用官方 AppImage，同时确保 Gear Lever Flatpak

@@ -37,6 +37,17 @@ PROVIDER_CALLS="$TEST_DIR/provider-calls"
 : > "$PROVIDER_CALLS"
 export PROVIDER_CALLS
 
+[ "${WINE_CONFIG_PACKAGES[*]}" = \
+    'wine wine-mono mingw32-wine-gecko mingw64-wine-gecko' ] ||
+    fail 'Fedora Wine contract must use the explicit mingw Gecko packages'
+for wine_package in wine wine-mono mingw32-wine-gecko mingw64-wine-gecko; do
+    [ "$(fedora_arch_target_name "$wine_package")" = "$wine_package" ] ||
+        fail "Fedora Wine package whitelist is missing $wine_package"
+done
+if fedora_arch_target_name wine-gecko >/dev/null 2>&1; then
+    fail 'Fedora must reject the obsolete wine-gecko target'
+fi
+
 state_package_present() {
     [ "$QUERY_ERROR" -eq 0 ] || return 2
     [ "${INSTALLED_PACKAGES[$1]:-0}" -eq 1 ]
@@ -238,24 +249,45 @@ cat > "$BIN_DIR/cargo" <<'EOF'
 #!/usr/bin/env bash
 printf 'cargo:%s\n' "$*" >> "${PROVIDER_CALLS:?}"
 mkdir -p "$HOME/.cargo/bin"
-cat > "$HOME/.cargo/bin/yazi" <<'YAZI'
+cat > "$HOME/.cargo/bin/yazi-build" <<'HELPER'
+#!/usr/bin/env bash
+printf 'yazi-build:%s\n' "$*" >> "${PROVIDER_CALLS:?}"
+[ "${1:-}" = install ] && [ "${2:-}" = --bin-dir ] || exit 2
+bin_dir=${3:?}
+mkdir -p "$bin_dir"
+cat > "$bin_dir/yazi" <<'YAZI'
 #!/usr/bin/env bash
 printf 'yazi 26.8.15\n'
 YAZI
-cat > "$HOME/.cargo/bin/ya" <<'YA'
+cat > "$bin_dir/ya" <<'YA'
 #!/usr/bin/env bash
 printf 'ya 26.8.15\n'
 YA
-chmod 755 "$HOME/.cargo/bin/yazi" "$HOME/.cargo/bin/ya"
+chmod 755 "$bin_dir/yazi" "$bin_dir/ya"
+HELPER
+chmod 755 "$HOME/.cargo/bin/yazi-build"
 EOF
 chmod 755 "$BIN_DIR/cargo"
-rm -f "$HOME_DIR/.cargo/bin/ya"
+rm -f "$HOME_DIR/.cargo/bin/yazi" "$HOME_DIR/.cargo/bin/ya"
 fedora_install_application_target yazi "$TARGET_USER" "$HOME_DIR" ||
-    fail 'Yazi cargo provider did not install a missing binary'
+    fail 'Yazi cargo provider did not install missing binaries'
 fedora_yazi_target_satisfied "$TARGET_USER" "$HOME_DIR" ||
     fail 'Yazi cargo provider must verify yazi and ya'
-grep -Fq -- '--force --version 26.8.15 yazi-build' "$PROVIDER_CALLS" ||
-    fail 'Yazi provider must use the official yazi-build meta-crate with a pinned version'
+grep -Fq -- 'cargo:install --locked --registry crates-io --version 26.8.15 yazi-build' \
+    "$PROVIDER_CALLS" ||
+    fail 'Yazi provider must install the pinned yazi-build crate from crates.io without an unnecessary force'
+grep -Fq -- "yazi-build:install --bin-dir $HOME_DIR/.cargo/bin" "$PROVIDER_CALLS" ||
+    fail 'Yazi provider must invoke the installed yazi-build helper for both binaries'
+rm -f "$HOME_DIR/.cargo/bin/ya"
+fedora_install_application_target yazi "$TARGET_USER" "$HOME_DIR" ||
+    fail 'Yazi cargo provider did not repair a partial binary installation'
+grep -Fq -- 'cargo:install --locked --registry crates-io --force --version 26.8.15 yazi-build' \
+    "$PROVIDER_CALLS" ||
+    fail 'Yazi provider must use force only when replacing an existing partial installation'
+! grep -Fq -- '--path' "$PROVIDER_CALLS" ||
+    fail 'Yazi provider must not use a local cargo --path build'
+! grep -Fq 'git clone' "$PROVIDER_CALLS" ||
+    fail 'Yazi provider must not clone a temporary source tree'
 
 unset FEDORA_FD_RDD_INSTALL_SCRIPT
 SAVED_PATH="$PATH"
@@ -278,6 +310,15 @@ unset FEDORA_RPM_DIR SHORIN_ARTIFACT_DIR
 
 [[ " ${LUTRIS_CONFIG_PACKAGES[*]} " == *' alsa-plugins-pulseaudio '* ]] ||
     fail 'Fedora Lutris contract must use alsa-plugins-pulseaudio'
+[[ " ${LUTRIS_CONFIG_PACKAGES[*]} " == *' gstreamer1-plugins-base '* ]] ||
+    fail 'Fedora Lutris contract must use gstreamer1-plugins-base'
+[[ " ${LUTRIS_CONFIG_PACKAGES[*]} " != *' gst-plugins-base-libs '* ]] ||
+    fail 'Fedora Lutris contract must not request the nonexistent gst-plugins-base-libs package'
+[ "$(fedora_arch_target_name gstreamer1-plugins-base)" = gstreamer1-plugins-base ] ||
+    fail 'Fedora package whitelist must accept the verified Lutris GStreamer package'
+if fedora_arch_target_name gst-plugins-base-libs >/dev/null 2>&1; then
+    fail 'Fedora package whitelist must reject the nonexistent Lutris GStreamer package'
+fi
 
 QUERY_ERROR=1
 before_query_error_calls=$(wc -l < "$PROVIDER_CALLS")

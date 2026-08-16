@@ -105,7 +105,9 @@ fedora_install_lact() {
 }
 
 fedora_install_yazi() {
-    local user=$1 home=$2 status=0 cargo_status=0 cargo_output
+    local user=$1 home=$2 status=0 cargo_status=0 helper_status=0
+    local cargo_output helper_output force=0 binary
+    local -a cargo_args=(install --locked --registry crates-io)
 
     fedora_yazi_target_satisfied "$user" "$home" || status=$?
     case "$status" in
@@ -113,10 +115,20 @@ fedora_install_yazi() {
         1) ;;
         *) return "$status" ;;
     esac
+    # A missing target can be installed without --force.  If either binary
+    # already exists, the pinned version may need to replace an older or
+    # incomplete cargo install, so opt into replacement deliberately.
+    for binary in yazi ya yazi-build; do
+        if [ -e "$(fedora_yazi_binary_path "$binary" "$home")" ]; then
+            force=1
+            break
+        fi
+    done
+    [ "$force" -eq 0 ] || cargo_args+=(--force)
+    cargo_args+=(--version "$FEDORA_YAZI_CARGO_VERSION" "$FEDORA_YAZI_CARGO_CRATE")
     if cargo_output=$(runuser -u "$user" -- env HOME="$home" \
         PATH="$home/.cargo/bin:${PATH:-}" \
-        cargo install --locked --force \
-        --version "$FEDORA_YAZI_CARGO_VERSION" "$FEDORA_YAZI_CARGO_CRATE" \
+        cargo "${cargo_args[@]}" \
         2>&1); then
         :
     else
@@ -125,7 +137,23 @@ fedora_install_yazi() {
         error "Failed to install $FEDORA_YAZI_CARGO_CRATE $FEDORA_YAZI_CARGO_VERSION for $user."
         return "$cargo_status"
     fi
-    fedora_yazi_target_satisfied "$user" "$home"
+    if helper_output=$(runuser -u "$user" -- env HOME="$home" \
+        PATH="$home/.cargo/bin:${PATH:-}" \
+        yazi-build install --bin-dir "$home/.cargo/bin" 2>&1); then
+        :
+    else
+        helper_status=$?
+        [ -z "$helper_output" ] || printf '%s\n' "$helper_output" >&2
+        error "Failed to run yazi-build install for $user."
+        return "$helper_status"
+    fi
+    if fedora_yazi_target_satisfied "$user" "$home"; then
+        return 0
+    else
+        status=$?
+    fi
+    error "yazi-build install did not produce both yazi and ya for $user."
+    return "$status"
 }
 
 fedora_install_verified_rpm_target() {

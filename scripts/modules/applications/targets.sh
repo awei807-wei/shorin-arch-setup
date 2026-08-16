@@ -19,9 +19,9 @@ LUTRIS_CONFIG_PACKAGES=(
     libjpeg-turbo libva libxslt mpg123 openal ttf-liberation
 )
 if platform_is_fedora; then
-    WINE_CONFIG_PACKAGES=(wine wine-gecko wine-mono)
+    WINE_CONFIG_PACKAGES=(wine wine-mono mingw32-wine-gecko mingw64-wine-gecko)
     LUTRIS_CONFIG_PACKAGES=(
-        alsa-plugins-pulseaudio giflib glfw gst-plugins-base-libs gtk3
+        alsa-plugins-pulseaudio giflib glfw gstreamer1-plugins-base gtk3
         libjpeg-turbo libva libxslt mpg123 openal ttf-liberation
     )
 fi

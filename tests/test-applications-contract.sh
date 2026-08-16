@@ -74,6 +74,8 @@ NIRI_CLIP_UNIT_ENABLED=0
 LAZYVIM_CLONES=0
 LAZYVIM_CHECKOUT_FAIL=0
 WINE_SERVER_STOP_FAIL=0
+WINE_SERVER_RUNNING=0
+WINE_SERVER_QUERY_FAIL=0
 GITHUB_HEAD=0123456789abcdef0123456789abcdef01234567
 GITHUB_CHECKOUT_DIRTY=0
 CARGO_BUILD_FAIL=0
@@ -106,6 +108,19 @@ state_git_command() {
 
 state_user_unit_enabled() {
     [ "$NIRI_CLIP_UNIT_ENABLED" -eq 1 ]
+}
+
+wineserver() {
+    return 0
+}
+
+pgrep() {
+    [ "$WINE_SERVER_QUERY_FAIL" -eq 0 ] || return 2
+    if [ "$WINE_SERVER_RUNNING" -eq 1 ]; then
+        printf '1234\n'
+        return 0
+    fi
+    return 1
 }
 
 git() {
@@ -258,7 +273,17 @@ done < <(find "$WINDOWS_FONT_SOURCE" -maxdepth 1 -type f -print0)
 application_entry_satisfied wine || fail 'complete Wine configuration must pass'
 WINE_SERVER_STOP_FAIL=1
 ensure_wine_config ||
-    fail 'a failed wineserver cleanup must not invalidate converged Wine config'
+    fail 'a wineserver cleanup with no running server must be idempotent'
+WINE_SERVER_RUNNING=1
+if ensure_wine_config; then
+    fail 'a wineserver that remains running must fail Wine convergence'
+fi
+WINE_SERVER_RUNNING=0
+WINE_SERVER_QUERY_FAIL=1
+if ensure_wine_config; then
+    fail 'a wineserver state query error must fail Wine convergence'
+fi
+WINE_SERVER_QUERY_FAIL=0
 WINE_SERVER_STOP_FAIL=0
 
 for package in "${LUTRIS_CONFIG_PACKAGES[@]}"; do

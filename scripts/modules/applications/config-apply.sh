@@ -6,6 +6,58 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 
 # Application-specific convergence. This file is sourced after target parsing.
 
+wine_server_process_status() {
+    local pids status=0
+
+    command -v pgrep >/dev/null 2>&1 || return 2
+    pids=$(pgrep -u "$TARGET_USER" -x wineserver 2>/dev/null) || status=$?
+    case "$status" in
+        0) [ -n "$pids" ] ;;
+        1) return 1 ;;
+        *) return "$status" ;;
+    esac
+}
+
+wine_server_verify_stopped() {
+    local log_no_process=${1:-0} process_status=0
+
+    wine_server_process_status || process_status=$?
+    case "$process_status" in
+        0)
+            error "wineserver remained running for $TARGET_USER after stop request."
+            return 1
+            ;;
+        1)
+            [ "$log_no_process" -eq 1 ] &&
+                log "No running wineserver remains for $TARGET_USER."
+            return 0
+            ;;
+        *)
+            error "Unable to inspect wineserver state for $TARGET_USER."
+            return "$process_status"
+            ;;
+    esac
+}
+
+stop_wine_server() {
+    local wine_prefix=$1 stop_status=0
+
+    as_user env HOME="$HOME_DIR" WINEPREFIX="$wine_prefix" \
+        wineserver -k || stop_status=$?
+    # wineserver -k returns non-zero when there is nothing to stop on some
+    # Wine builds.  Treat that exact no-process state as idempotent, while
+    # preserving command/query failures and a server that remains alive.
+    if [ "$stop_status" -gt 1 ]; then
+        error "wineserver -k failed for $TARGET_USER (status $stop_status)."
+        return "$stop_status"
+    fi
+    if [ "$stop_status" -eq 1 ]; then
+        wine_server_verify_stopped 1
+    else
+        wine_server_verify_stopped 0
+    fi
+}
+
 ensure_wine_config() {
     local wine_prefix="$HOME_DIR/.wine" font_source font_destination font
 
@@ -18,19 +70,19 @@ ensure_wine_config() {
 
     font_source="$WINDOWS_FONT_SOURCE"
     font_destination="$wine_prefix/drive_c/windows/Fonts"
-    [ -d "$font_source" ] || return 0
-    as_user mkdir -p "$font_destination"
-    while IFS= read -r -d '' font; do
-        install_if_changed "$font" "$font_destination/$(basename "$font")" 644
-        chown "$TARGET_USER:" \
-            "$font_destination/$(basename "$font")"
-    done < <(find "$font_source" -maxdepth 1 -type f -print0)
-    if command -v wineserver >/dev/null 2>&1; then
-        if ! as_user env HOME="$HOME_DIR" WINEPREFIX="$wine_prefix" \
-            wineserver -k; then
-            warn 'Wine configuration completed, but wineserver did not stop cleanly.'
-        fi
+    if [ -d "$font_source" ]; then
+        as_user mkdir -p "$font_destination"
+        while IFS= read -r -d '' font; do
+            install_if_changed "$font" "$font_destination/$(basename "$font")" 644
+            chown "$TARGET_USER:" \
+                "$font_destination/$(basename "$font")"
+        done < <(find "$font_source" -maxdepth 1 -type f -print0)
     fi
+    command -v wineserver >/dev/null 2>&1 || {
+        error "Wine package did not provide wineserver for $TARGET_USER."
+        return 1
+    }
+    stop_wine_server "$wine_prefix" || return
     return 0
 }
 
