@@ -422,11 +422,46 @@ unset FEDORA_RPM_DIR SHORIN_ARTIFACT_DIR
     fail 'Fedora Lutris contract must use gstreamer1-plugins-base'
 [[ " ${LUTRIS_CONFIG_PACKAGES[*]} " != *' gst-plugins-base-libs '* ]] ||
     fail 'Fedora Lutris contract must not request the nonexistent gst-plugins-base-libs package'
+[[ " ${LUTRIS_CONFIG_PACKAGES[*]} " == *' openal-soft '* ]] ||
+    fail 'Fedora Lutris contract must use openal-soft for 64-bit OpenAL'
+[[ " ${LUTRIS_CONFIG_PACKAGES[*]} " == *' openal-soft.i686 '* ]] ||
+    fail 'Fedora Lutris contract must use openal-soft.i686 for 32-bit OpenAL'
+[[ " ${LUTRIS_CONFIG_PACKAGES[*]} " != *' openal '* ]] ||
+    fail 'Fedora Lutris contract must not request the nonexistent openal package'
+[[ " ${LUTRIS_CONFIG_PACKAGES[*]} " != *' lib32-openal '* ]] ||
+    fail 'Fedora Lutris contract must translate away the Arch lib32-openal target'
 [ "$(fedora_arch_target_name gstreamer1-plugins-base)" = gstreamer1-plugins-base ] ||
     fail 'Fedora package whitelist must accept the verified Lutris GStreamer package'
 if fedora_arch_target_name gst-plugins-base-libs >/dev/null 2>&1; then
     fail 'Fedora package whitelist must reject the nonexistent Lutris GStreamer package'
 fi
+[ "$(fedora_arch_target_name openal)" = openal-soft ] ||
+    fail 'Fedora openal target must map to openal-soft'
+[ "$(fedora_arch_target_name lib32-openal)" = openal-soft.i686 ] ||
+    fail 'Fedora lib32-openal target must map to openal-soft.i686'
+[ "$(fedora_arch_target_name openal-soft)" = openal-soft ] ||
+    fail 'Fedora package whitelist must accept openal-soft'
+[ "$(fedora_arch_target_name openal-soft.i686)" = openal-soft.i686 ] ||
+    fail 'Fedora package whitelist must accept openal-soft.i686'
+INSTALLED_PACKAGES[lutris]=1
+for package in "${LUTRIS_CONFIG_PACKAGES[@]}"; do
+    INSTALLED_PACKAGES["$package"]=1
+done
+ensure_lutris_config || fail 'Fedora Lutris apply must install both OpenAL architectures'
+grep -Fqx 'package:openal-soft' "$PROVIDER_CALLS" ||
+    fail 'Fedora Lutris apply must install openal-soft'
+grep -Fqx 'package:openal-soft.i686' "$PROVIDER_CALLS" ||
+    fail 'Fedora Lutris apply must install openal-soft.i686'
+application_entry_satisfied lutris ||
+    fail 'Fedora Lutris contract must accept both OpenAL architectures'
+INSTALLED_PACKAGES[openal-soft.i686]=0
+application_entry_satisfied lutris &&
+    fail 'Missing Fedora 32-bit OpenAL must be reported as Lutris drift'
+INSTALLED_PACKAGES[openal-soft.i686]=1
+INSTALLED_PACKAGES[openal-soft]=0
+application_entry_satisfied lutris &&
+    fail 'Missing Fedora 64-bit OpenAL must be reported as Lutris drift'
+INSTALLED_PACKAGES[openal-soft]=1
 
 QUERY_ERROR=1
 before_query_error_calls=$(wc -l < "$PROVIDER_CALLS")

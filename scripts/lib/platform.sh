@@ -110,7 +110,13 @@ platform_rpm_installed_matching() {
 
 platform_dnf_package_available() {
     local package=$1 repository=${2:-} output status
-    local -a args=(repoquery --available --qf '%{name}')
+    local query_format='%{name}'
+    local -a args
+
+    case "$package" in
+        *.i686) query_format='%{name}.%{arch}' ;;
+    esac
+    args=(repoquery --available --qf "$query_format")
 
     command -v dnf >/dev/null 2>&1 || return 2
     [ -n "$repository" ] && args+=("--enablerepo=$repository")
@@ -206,7 +212,7 @@ fedora_package_name() {
         xdg-desktop-portal-gtk|xwayland-satellite|zoxide|btop|baobab|\
         bluetui|bluez|brightnessctl|cava|dosfstools|eza|exfatprogs|f2fs-tools|\
         file-roller|fragments|gamescope|gnome-disk-utility|grub2-tools|ddcutil|dbus|\
-        alsa-plugins|alsa-plugins-pulseaudio|fd-find|giflib|glfw|gstreamer1-plugins-base|gtk3|libjpeg-turbo|libva|libxslt|mpg123|openal|ttf-liberation|wine-mono|mingw32-wine-gecko|mingw64-wine-gecko|\
+        alsa-plugins|alsa-plugins-pulseaudio|fd-find|giflib|glfw|gstreamer1-plugins-base|gtk3|libjpeg-turbo|libva|libxslt|mpg123|openal-soft|openal-soft.i686|ttf-liberation|wine-mono|mingw32-wine-gecko|mingw64-wine-gecko|\
         hyprpicker|libva-utils|libvirt|libvirt-daemon|libvirt-daemon-kvm|\
         libvirt-client|libvirt-daemon-config-network|librime-tools|\
         librsvg2-tools|nwg-look|\
@@ -251,6 +257,8 @@ fedora_package_name() {
         qt6-wayland) printf '%s\n' qt6-qtwayland ;;
         qt6-multimedia) printf '%s\n' qt6-qtmultimedia ;;
         bluez-utils) printf '%s\n' bluez ;;
+        openal) printf '%s\n' openal-soft ;;
+        lib32-openal) printf '%s\n' openal-soft.i686 ;;
         lib32-*) return 1 ;;
         libva-nvidia-driver) printf '%s\n' xorg-x11-drv-nvidia-cuda ;;
         ttf-jetbrains-mono-nerd|ttf-jetbrains-maple-mono-nf-xx-xx)

@@ -49,7 +49,8 @@ SHA-256（x86_64: `cc67eb7991550c2f9407cda52d3f5af0937627aa6884e7de99a04fcf05980
 aarch64: `f5a85771f06bb0e8c488136ae0aedaec8d341a7cee995549df391d7d852fe8d1`），仅提取预期
 根目录的 `yazi` 和 `ya` 到目标用户 `~/.local/bin` 并验证版本，下载前通过 Fedora 包合同
 收敛 `curl` 和 `unzip`。Lutris 在 Fedora
-使用 `alsa-plugins-pulseaudio` 与 `gstreamer1-plugins-base`。
+使用 `alsa-plugins-pulseaudio`、`gstreamer1-plugins-base`、`openal-soft` 与
+`openal-soft.i686`，分别覆盖 Fedora 的 64 位和 32 位 Wine 游戏运行时。
 Fedora Wine 使用 `wine`、`wine-mono`、`mingw32-wine-gecko` 和 `mingw64-wine-gecko`，不请求已不存在的 `wine-gecko`。
 Clash Verge、Linux QQ、微信、Thorium 和 Mark Shot 从 `FEDORA_RPM_DIR`（或目标用户
 XDG Downloads，包括中文 `下载`、以及 `/tmp`）发现官方 RPM；`tsukimi-bin` 使用

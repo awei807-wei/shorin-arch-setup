@@ -66,6 +66,11 @@ for dependency in gtk4-devel glib2-devel pango-devel cairo-devel \
 done
 export SHORIN_DISTRO=arch
 
+[[ " ${LUTRIS_CONFIG_PACKAGES[*]} " == *' openal '* ]] ||
+    fail 'Arch Lutris contract must retain openal'
+[[ " ${LUTRIS_CONFIG_PACKAGES[*]} " == *' lib32-openal '* ]] ||
+    fail 'Arch Lutris contract must retain lib32-openal'
+
 declare -A INSTALLED_PACKAGES=()
 FLATPAK_STEAM_INSTALLED=0
 FLATPAK_STEAM_LOCALE=0

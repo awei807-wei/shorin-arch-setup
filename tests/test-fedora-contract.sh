@@ -30,6 +30,53 @@ for package in bluez fzf glibc-langpack-zh nfs-utils tsukimi unzip; do
     [ "$(fedora_arch_target_name "$package")" = "$package" ] ||
         fail "Fedora package mapping is missing: $package"
 done
+[ "$(fedora_arch_target_name openal)" = openal-soft ] ||
+    fail 'Arch openal must map to Fedora openal-soft'
+[ "$(fedora_arch_target_name lib32-openal)" = openal-soft.i686 ] ||
+    fail 'Arch lib32-openal must map to Fedora openal-soft.i686'
+[ "$(fedora_arch_target_name openal-soft)" = openal-soft ] ||
+    fail 'Fedora package mapping is missing: openal-soft'
+[ "$(fedora_arch_target_name openal-soft.i686)" = openal-soft.i686 ] ||
+    fail 'Fedora package mapping is missing: openal-soft.i686'
+[ "$(fedora_arch_target_name openal)" != openal ] ||
+    fail 'Fedora must not pass the nonexistent openal package to dnf'
+
+declare -Ag OPENAL_RPM_INSTALLED=()
+OPENAL_RPM_INSTALLED[openal-soft]=1
+OPENAL_RPM_INSTALLED[openal-soft.i686]=1
+rpm() {
+    [ "${1:-}" = -q ] || return 2
+    [ "${OPENAL_RPM_INSTALLED[${2:-}]:-0}" -eq 1 ]
+}
+package_is_installed openal ||
+    fail 'Fedora package_is_installed must accept openal-soft'
+package_is_installed lib32-openal ||
+    fail 'Fedora package_is_installed must accept openal-soft.i686'
+OPENAL_RPM_INSTALLED[openal-soft.i686]=0
+package_is_installed lib32-openal &&
+    fail 'Missing Fedora openal-soft.i686 must be reported as drift'
+OPENAL_RPM_INSTALLED[openal-soft.i686]=1
+OPENAL_RPM_INSTALLED[openal-soft]=0
+package_is_installed openal &&
+    fail 'Missing Fedora openal-soft must be reported as drift'
+OPENAL_RPM_INSTALLED[openal-soft]=1
+
+OPENAL_DNF_QUERY=openal-soft.i686
+OPENAL_DNF_ARGS_FILE="$TEST_DIR/openal-dnf-args"
+dnf() {
+    printf '%s\n' "$*" > "$OPENAL_DNF_ARGS_FILE"
+    [ "${1:-}" = repoquery ] || return 1
+    printf '%s\n' "$OPENAL_DNF_QUERY"
+}
+platform_dnf_package_available openal-soft.i686 ||
+    fail 'Fedora package availability must detect the i686 OpenAL package'
+OPENAL_DNF_ARGS=$(< "$OPENAL_DNF_ARGS_FILE")
+[[ "$OPENAL_DNF_ARGS" == *'--qf %{name}.%{arch}'* ]] ||
+    fail 'Fedora i686 package query must include the package architecture'
+OPENAL_DNF_QUERY=''
+platform_dnf_package_available openal-soft.i686 &&
+    fail 'Empty Fedora i686 package query must report drift'
+
 for package in libvirt-daemon libvirt-daemon-kvm libvirt-client \
     libvirt-daemon-config-network librime-tools; do
     [ "$(fedora_arch_target_name "$package")" = "$package" ] ||
