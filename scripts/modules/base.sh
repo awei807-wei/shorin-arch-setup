@@ -30,6 +30,61 @@ base_expect() {
     fi
 }
 
+base_power_profile_inspect() {
+    local phase=$1 provider provider_status=0 unit package_label enabled_label active_label
+
+    provider=$(base_power_profile_provider) || provider_status=$?
+    case "$provider_status" in
+        0)
+            unit=$(base_power_profile_provider_unit "$provider") || {
+                if [ "$phase" = check ]; then
+                    module_inspection_failed power-profile-provider:unknown
+                else
+                    module_verify_failed power-profile-provider:unknown
+                fi
+                return
+            }
+            if platform_is_fedora; then
+                package_label="package:power-profile-provider:$provider"
+                enabled_label="service:power-profile-provider:$unit"
+                active_label="service:power-profile-provider-active:$unit"
+            else
+                package_label=package:power-profiles-daemon
+                enabled_label=service:power-profiles-daemon
+                active_label=service:power-profiles-daemon-active
+            fi
+            base_expect "$phase" "$package_label" state_package_present "$provider"
+            base_expect "$phase" "$enabled_label" \
+                state_service_enabled "$unit"
+            base_expect "$phase" "$active_label" \
+                state_service_active "$unit"
+            ;;
+        1)
+            if [ "$phase" = check ]; then
+                module_drift power-profile-provider
+            else
+                module_verify_failed power-profile-provider
+            fi
+            ;;
+        3)
+            if [ "$phase" = check ]; then
+                module_inspection_failed power-profile-provider:multiple
+            else
+                module_verify_failed power-profile-provider:multiple
+            fi
+            ;;
+        *)
+            if [ "$phase" = check ]; then
+                module_inspection_failed \
+                    "power-profile-provider:inspection-error:$provider_status"
+            else
+                module_verify_failed \
+                    "power-profile-provider:inspection-error:$provider_status"
+            fi
+            ;;
+    esac
+}
+
 base_inspect() {
     local phase=$1 package unit editor bluetooth_status=0
     local gpu_info
@@ -38,10 +93,7 @@ base_inspect() {
     for package in "${BASE_PACKAGES[@]}"; do
         base_expect "$phase" "package:$package" state_package_present "$package"
     done
-    base_expect "$phase" service:power-profiles-daemon \
-        state_service_enabled power-profiles-daemon.service
-    base_expect "$phase" service:power-profiles-daemon-active \
-        state_service_active power-profiles-daemon.service
+    base_power_profile_inspect "$phase"
     while IFS= read -r unit; do
         base_expect "$phase" "global-unit:$unit" \
             state_global_service_enabled "$unit"

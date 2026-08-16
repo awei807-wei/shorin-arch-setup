@@ -200,7 +200,7 @@ fedora_package_name() {
         imv|jq|kitty|less|libnotify|lact|lsof|mako|mangohud|mpv|nautilus|\
         neovim|obs-studio|pavucontrol|\
         pciutils|pipewire|pipewire-alsa|\
-        polkit-kde|power-profiles-daemon|quickshell|ripgrep|slurp|starship|\
+        polkit-kde|power-profiles-daemon|tuned-ppd|quickshell|ripgrep|slurp|starship|\
         steam|swayidle|swaylock|swayosd|usbutils|virt-manager|\
         wf-recorder|wine|wireplumber|xdg-desktop-portal-gnome|\
         xdg-desktop-portal-gtk|xwayland-satellite|yazi|zoxide|btop|baobab|\

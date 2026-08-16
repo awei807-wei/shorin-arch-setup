@@ -23,6 +23,7 @@ if platform_is_fedora; then
     # The package wrapper translates logical manifest names to Fedora names and
     # dnf never receives an unapproved Arch-only target.
     ensure_packages "${FEDORA_BASE_PACKAGES[@]}"
+    base_ensure_power_profile_provider
     TARGET_EDITOR=${BASE_EDITOR:-vim}
     ensure_package "$TARGET_EDITOR"
     ensure_key_value /etc/environment EDITOR "$TARGET_EDITOR"

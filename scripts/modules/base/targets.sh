@@ -21,7 +21,7 @@ base_declared_packages() {
             fcitx5-configtool fcitx5-gtk fcitx5-mozc fcitx5-qt fcitx5-rime \
             flatpak libva-utils noto-fonts noto-fonts-cjk noto-fonts-emoji \
             pavucontrol pciutils pipewire pipewire-alsa pipewire-jack \
-            pipewire-pulse power-profiles-daemon sof-firmware terminus-font \
+            pipewire-pulse sof-firmware terminus-font \
             ttf-jetbrains-mono-nerd usbutils vim wireplumber xdg-user-dirs
         return 0
     fi
@@ -47,6 +47,114 @@ base_global_service_units() {
     else
         printf '%s\n' pipewire.service pipewire-pulse.service wireplumber.service
     fi
+}
+
+# Fedora 44 exposes the power-profiles-daemon API through a provider contract.
+# tuned-ppd owns the `ppd-service` capability and its unit is
+# tuned-ppd.service; power-profiles-daemon provides the same capability through
+# power-profiles-daemon.service.  Keep this choice outside the package array so
+# the two mutually exclusive providers are never installed together.
+base_power_profile_provider() {
+    local tuned_status=0 power_status=0
+
+    if ! platform_is_fedora; then
+        printf '%s\n' power-profiles-daemon
+        return 0
+    fi
+
+    package_is_installed tuned-ppd || tuned_status=$?
+    case "$tuned_status" in
+        0)
+            package_is_installed power-profiles-daemon || power_status=$?
+            case "$power_status" in
+                0) return 3 ;; # Both providers violate the capability contract.
+                1) printf '%s\n' tuned-ppd; return 0 ;;
+                *) return "$power_status" ;;
+            esac
+            ;;
+        1) ;;
+        *) return "$tuned_status" ;;
+    esac
+
+    package_is_installed power-profiles-daemon || power_status=$?
+    case "$power_status" in
+        0) printf '%s\n' power-profiles-daemon; return 0 ;;
+        1) return 1 ;;
+        *) return "$power_status" ;;
+    esac
+}
+
+base_power_profile_provider_available() {
+    local status=0
+
+    if ! platform_is_fedora; then
+        printf '%s\n' power-profiles-daemon
+        return 0
+    fi
+
+    platform_dnf_package_available tuned-ppd || status=$?
+    case "$status" in
+        0) printf '%s\n' tuned-ppd; return 0 ;;
+        1) ;;
+        *) return "$status" ;;
+    esac
+
+    status=0
+    platform_dnf_package_available power-profiles-daemon || status=$?
+    case "$status" in
+        0) printf '%s\n' power-profiles-daemon; return 0 ;;
+        1) return 1 ;;
+        *) return "$status" ;;
+    esac
+}
+
+base_power_profile_provider_unit() {
+    case "$1" in
+        tuned-ppd) printf '%s\n' tuned-ppd.service ;;
+        power-profiles-daemon) printf '%s\n' power-profiles-daemon.service ;;
+        *) return 1 ;;
+    esac
+}
+
+base_ensure_power_profile_provider() {
+    local provider provider_status=0 unit
+
+    provider=$(base_power_profile_provider) || provider_status=$?
+    case "$provider_status" in
+        0)
+            # Arch has one fixed package target, so its installed-state query
+            # is intentionally followed by the normal idempotent ensure.
+            platform_is_fedora || ensure_package "$provider" || return
+            ;;
+        1)
+            provider_status=0
+            provider=$(base_power_profile_provider_available) ||
+                provider_status=$?
+            case "$provider_status" in
+                0) ;;
+                1)
+                    error 'No Fedora package provides the ppd-service capability; refusing to claim power-profile convergence.'
+                    return 1
+                    ;;
+                *) return "$provider_status" ;;
+            esac
+            ensure_package "$provider" || return
+            ;;
+        3)
+            error 'Both tuned-ppd and power-profiles-daemon are installed; refusing to alter mutually exclusive PPD providers.'
+            return 1
+            ;;
+        *) return "$provider_status" ;;
+    esac
+
+    provider_status=0
+    provider=$(base_power_profile_provider) || provider_status=$?
+    [ "$provider_status" -eq 0 ] || {
+        error 'The selected ppd-service provider was not visible after package convergence.'
+        return "$provider_status"
+    }
+    unit=$(base_power_profile_provider_unit "$provider") || return
+    ensure_service_started "$unit"
 }
 
 base_locale_present() {

@@ -19,27 +19,51 @@ if ! declare -F require_writable_mode >/dev/null 2>&1; then
 fi
 
 service_is_enabled() {
-    systemctl is-enabled --quiet "$1"
+    local status
+
+    systemctl is-enabled --quiet "$1" && return 0
+    status=$?
+    case "$status" in
+        1|2|3|4|5|6|7|8|9|10) return 1 ;;
+        *) return "$status" ;;
+    esac
 }
 
 service_is_active() {
-    systemctl is-active --quiet "$1"
+    local status
+
+    systemctl is-active --quiet "$1" && return 0
+    status=$?
+    case "$status" in
+        1|2|3|4|5|6|7|8|9|10) return 1 ;;
+        *) return "$status" ;;
+    esac
 }
 
 ensure_service_enabled() {
     require_writable_mode || return
-    local unit=$1
+    local unit=$1 status=0
 
-    service_is_enabled "$unit" || systemctl enable "$unit"
+    service_is_enabled "$unit" || status=$?
+    case "$status" in
+        0) ;;
+        1) systemctl enable "$unit" || return ;;
+        *) return "$status" ;;
+    esac
     service_is_enabled "$unit"
 }
 
 ensure_service_started() {
     require_writable_mode || return
-    local unit=$1
+    local unit=$1 status=0
 
-    ensure_service_enabled "$unit"
-    service_is_active "$unit" || systemctl start "$unit"
+    ensure_service_enabled "$unit" || return
+    service_is_active "$unit" || status=$?
+    case "$status" in
+        0) ;;
+        1) systemctl start "$unit" || return ;;
+        *) return "$status" ;;
+    esac
     service_is_active "$unit"
 }
 

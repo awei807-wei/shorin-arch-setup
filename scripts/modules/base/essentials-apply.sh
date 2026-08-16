@@ -22,7 +22,8 @@ if platform_is_fedora; then
         pipewire wireplumber pipewire-pulse pipewire-alsa pipewire-jack \
         pavucontrol fcitx5 fcitx5-gtk fcitx5-qt fcitx5-configtool \
         fcitx5-chinese-addons fcitx5-rime fcitx5-mozc usbutils pciutils \
-        power-profiles-daemon fastfetch flatpak
+        fastfetch flatpak
+    base_ensure_power_profile_provider
     while IFS= read -r unit; do
         systemctl --global is-enabled --quiet "$unit" ||
             systemctl --global enable "$unit"
@@ -35,7 +36,6 @@ if platform_is_fedora; then
     elif [ "$BLUETOOTH_STATUS" -eq 2 ]; then
         warn 'Bluetooth hardware inspection unavailable; continuing without bluez.'
     fi
-    ensure_service_started power-profiles-daemon.service
     if base_flatpak_system_remote_named; then
         base_flathub_system_remote_present ||
             flatpak remote-modify --system --url="$FLATHUB_REPO_URL" flathub
@@ -125,9 +125,8 @@ fi
 # ------------------------------------------------------------------------------
 section "Step 5/7" "Power Management"
 
-ensure_package power-profiles-daemon
-ensure_service_started power-profiles-daemon.service
-success "Power profiles daemon enabled."
+base_ensure_power_profile_provider
+success "Power profile provider enabled."
 
 # ------------------------------------------------------------------------------
 # 7. Fastfetch

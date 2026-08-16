@@ -189,7 +189,10 @@ Fedora 的 virtualization 契约会把逻辑包映射为 `qemu-kvm`、`libvirt-d
 契约显式使用 `libvirt` 包。Fedora 的 `nas-rime` 目标额外安装提供
 `/usr/bin/rime_dict_manager` 的 `librime-tools`，服务、safe-sync 脚本和只读检查共享
 同一命令路径契约。Fedora 的 GRUB 使用独立 apply，Arch 内部的 `grub-btrfs` Btrfs
-辅助脚本在 Fedora 上明确跳过。
+辅助脚本在 Fedora 上明确跳过。Fedora 的 base 电源能力使用 `ppd-service` provider
+契约：已安装 `tuned-ppd` 时验收并启动 `tuned-ppd.service`，否则优先安装它；仅在
+该包不可用时回退到 `power-profiles-daemon.service`。两个 provider 不会同时安装，
+Arch 仍使用 `power-profiles-daemon` 原始包和服务。
 
 不适用或缺少外部前置的可选模块会被明确标记为跳过。例如 VCPChat 尚未部署时，`vcp` 不会冒充成功，整体结果为 `PARTIAL`。
 
