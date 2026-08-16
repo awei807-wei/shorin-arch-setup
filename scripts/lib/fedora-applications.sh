@@ -104,10 +104,38 @@ fedora_install_lact() {
     fedora_lact_target_satisfied
 }
 
+fedora_yazi_cleanup() {
+    local path=$1
+
+    [ -n "$path" ] && [ -d "$path" ] || return 0
+    find "$path" -depth -delete 2>/dev/null || true
+}
+
+fedora_yazi_archive_entries_safe() {
+    local archive=$1 expected_root=$2 entries entry component
+    local -a components=()
+
+    entries=$(unzip -Z1 "$archive" 2>/dev/null) || return 1
+    [ -n "$entries" ] || return 1
+    while IFS= read -r entry; do
+        [ -n "$entry" ] || return 1
+        case "$entry" in
+            /*|[A-Za-z]:/*|[A-Za-z]:\\*) return 1 ;;
+        esac
+        IFS='/' read -r -a components <<< "$entry"
+        for component in "${components[@]}"; do
+            [ "$component" != .. ] || return 1
+        done
+        case "$entry" in
+            "$expected_root"|"$expected_root"/*) ;;
+            *) return 1 ;;
+        esac
+    done <<< "$entries"
+}
+
 fedora_install_yazi() {
-    local user=$1 home=$2 status=0 cargo_status=0 helper_status=0
-    local cargo_output helper_output force=0 binary
-    local -a cargo_args=(install --locked --registry crates-io)
+    local user=$1 home=$2 status=0 archive extract_root arch root_dir url digest
+    local group binary source destination
 
     fedora_yazi_target_satisfied "$user" "$home" || status=$?
     case "$status" in
@@ -115,44 +143,102 @@ fedora_install_yazi() {
         1) ;;
         *) return "$status" ;;
     esac
-    # A missing target can be installed without --force.  If either binary
-    # already exists, the pinned version may need to replace an older or
-    # incomplete cargo install, so opt into replacement deliberately.
-    for binary in yazi ya yazi-build; do
-        if [ -e "$(fedora_yazi_binary_path "$binary" "$home")" ]; then
-            force=1
-            break
-        fi
+    arch=$(fedora_yazi_release_arch) || return
+    url=$(fedora_yazi_release_url) || return
+    digest=$(fedora_yazi_release_digest) || return
+    group=$(id -gn "$user" 2>/dev/null) || {
+        error "Unable to resolve the primary group for target user $user."
+        return 2
+    }
+    ensure_packages curl unzip || {
+        error 'Unable to install Fedora Yazi download prerequisites: curl and unzip.'
+        return 1
+    }
+    command -v curl >/dev/null 2>&1 || {
+        error 'curl is required to download the pinned Fedora Yazi release.'
+        return 1
+    }
+    command -v sha256sum >/dev/null 2>&1 || {
+        error 'sha256sum is required to verify the pinned Fedora Yazi release.'
+        return 1
+    }
+    command -v unzip >/dev/null 2>&1 || {
+        error 'unzip is required to unpack the pinned Fedora Yazi release.'
+        return 1
+    }
+    command -v runuser >/dev/null 2>&1 || {
+        error 'runuser is required to verify Fedora Yazi as the target user.'
+        return 1
+    }
+    archive=$(mktemp)
+    extract_root=$(mktemp -d)
+    if ! curl --fail --location --retry 3 --proto '=https' --tlsv1.2 \
+        "$url" -o "$archive"; then
+        rm -f "$archive"
+        fedora_yazi_cleanup "$extract_root"
+        error "Unable to download the pinned Fedora Yazi release: $url"
+        return 1
+    fi
+    if ! printf '%s  %s\n' "$digest" "$archive" | sha256sum -c - >/dev/null 2>&1; then
+        rm -f "$archive"
+        fedora_yazi_cleanup "$extract_root"
+        error "The downloaded Fedora Yazi release failed SHA-256 verification: $url"
+        return 1
+    fi
+    if ! fedora_yazi_archive_entries_safe \
+        "$archive" "yazi-${arch}-unknown-linux-gnu"; then
+        rm -f "$archive"
+        fedora_yazi_cleanup "$extract_root"
+        error "The Fedora Yazi release contains an unsafe or unexpected archive path: $url"
+        return 1
+    fi
+    if ! unzip -q "$archive" -d "$extract_root"; then
+        rm -f "$archive"
+        fedora_yazi_cleanup "$extract_root"
+        error "Unable to unpack the verified Fedora Yazi release: $url"
+        return 1
+    fi
+    rm -f "$archive"
+    root_dir="$extract_root/yazi-${arch}-unknown-linux-gnu"
+    [ -d "$root_dir" ] && [ ! -L "$root_dir" ] || {
+        fedora_yazi_cleanup "$extract_root"
+        error "Fedora Yazi release has no expected root directory: yazi-${arch}-unknown-linux-gnu"
+        return 1
+    }
+    for binary in yazi ya; do
+        source="$root_dir/$binary"
+        [ -f "$source" ] && [ ! -L "$source" ] || {
+            fedora_yazi_cleanup "$extract_root"
+            error "Fedora Yazi release is missing its expected binary: $binary"
+            return 1
+        }
     done
-    [ "$force" -eq 0 ] || cargo_args+=(--force)
-    cargo_args+=(--version "$FEDORA_YAZI_CARGO_VERSION" "$FEDORA_YAZI_CARGO_CRATE")
-    if cargo_output=$(runuser -u "$user" -- env HOME="$home" \
-        PATH="$home/.cargo/bin:${PATH:-}" \
-        cargo "${cargo_args[@]}" \
-        2>&1); then
-        :
-    else
-        cargo_status=$?
-        [ -z "$cargo_output" ] || printf '%s\n' "$cargo_output" >&2
-        error "Failed to install $FEDORA_YAZI_CARGO_CRATE $FEDORA_YAZI_CARGO_VERSION for $user."
-        return "$cargo_status"
+    if ! install -d -m 755 -o "$user" -g "$group" "$home/.local/bin"; then
+        fedora_yazi_cleanup "$extract_root"
+        error "Unable to create the Fedora Yazi binary directory: $home/.local/bin"
+        return 1
     fi
-    if helper_output=$(runuser -u "$user" -- env HOME="$home" \
-        PATH="$home/.cargo/bin:${PATH:-}" \
-        yazi-build install --bin-dir "$home/.cargo/bin" 2>&1); then
-        :
-    else
-        helper_status=$?
-        [ -z "$helper_output" ] || printf '%s\n' "$helper_output" >&2
-        error "Failed to run yazi-build install for $user."
-        return "$helper_status"
-    fi
+    for binary in yazi ya; do
+        source="$root_dir/$binary"
+        destination=$(fedora_yazi_binary_path "$binary" "$home")
+        install_if_changed "$source" "$destination" 755 || {
+            fedora_yazi_cleanup "$extract_root"
+            error "Unable to install Fedora Yazi binary: $destination"
+            return 1
+        }
+        chown "$user:$group" "$destination" || {
+            fedora_yazi_cleanup "$extract_root"
+            error "Unable to assign Fedora Yazi binary ownership: $destination"
+            return 1
+        }
+    done
+    fedora_yazi_cleanup "$extract_root"
     if fedora_yazi_target_satisfied "$user" "$home"; then
         return 0
     else
         status=$?
     fi
-    error "yazi-build install did not produce both yazi and ya for $user."
+    error "Fedora Yazi release did not produce two verified target-user binaries."
     return "$status"
 }
 
@@ -207,7 +293,7 @@ fedora_install_application_target() {
                 }
                 ;;
             copr) fedora_install_lact "$user" "$home" ;;
-            cargo) fedora_install_yazi "$user" "$home" ;;
+            release) fedora_install_yazi "$user" "$home" ;;
             *)
                 error "Unsupported Fedora provider for application target: $package"
                 return 1

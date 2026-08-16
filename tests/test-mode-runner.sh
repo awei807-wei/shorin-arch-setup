@@ -193,6 +193,163 @@ test_final_verification_rejects_invalid_fstab() {
     unset FSTAB_FILE
 }
 
+test_final_verification_allows_stale_optional_network_fstab() {
+    reset_run_state
+    : > "$FIXTURE_LOG"
+    register_module_policy fixture-clean required
+    printf '%s\n' \
+        '10.0.0.104:/share /mnt/nas nfs defaults,_netdev,nofail 0 0' \
+        > "$TEST_DIR/optional-network-fstab"
+    printf 'desired\n' > "$FIXTURE_STATE_DIR/fixture-clean"
+    FSTAB_FILE="$TEST_DIR/optional-network-fstab"
+    findmnt() {
+        printf '%s\n' \
+            '0 parse errors, 1 error, 0 warnings' \
+            '/mnt/nas' \
+            '   [E] unreachable on boot required target: Stale file handle' >&2
+        return 1
+    }
+
+    if ! run_final_verification fixture-clean; then
+        fail 'a stale optional network mount must not fail global verification'
+    fi
+    [ "${#REQUIRED_FAILURES[@]}" -eq 0 ] ||
+        fail 'an accepted optional network mount must not add required failures'
+
+    unset FSTAB_FILE
+}
+
+test_final_verification_rejects_optional_network_warning_or_count_mismatch() {
+    local fixture
+
+    for fixture in warning error-count warning-count; do
+        reset_run_state
+        : > "$FIXTURE_LOG"
+        register_module_policy fixture-clean required
+        printf '%s\n' \
+            '10.0.0.104:/share /mnt/nas nfs defaults,_netdev,nofail 0 0' \
+            > "$TEST_DIR/$fixture-fstab"
+        printf 'desired\n' > "$FIXTURE_STATE_DIR/fixture-clean"
+        FSTAB_FILE="$TEST_DIR/$fixture-fstab"
+        findmnt() {
+            case "$fixture" in
+                warning)
+                    printf '%s\n' \
+                        '0 parse errors, 1 error, 1 warning' \
+                        '/mnt/nas' \
+                        '   [E] unreachable on boot required target: Stale file handle' \
+                        '   [W] unrelated warning' >&2
+                    ;;
+                error-count)
+                    printf '%s\n' \
+                        '0 parse errors, 2 errors, 0 warnings' \
+                        '/mnt/nas' \
+                        '   [E] unreachable on boot required target: Stale file handle' >&2
+                    ;;
+                warning-count)
+                    printf '%s\n' \
+                        '0 parse errors, 1 error, 2 warnings' \
+                        '/mnt/nas' \
+                        '   [E] unreachable on boot required target: Stale file handle' \
+                        '   [W] first warning' >&2
+                    ;;
+            esac
+            return 1
+        }
+
+        if run_final_verification fixture-clean; then
+            fail "$fixture diagnostics must reject tolerated network error"
+        fi
+        assert_array_contains REQUIRED_FAILURES global:verify:fstab-invalid
+    done
+
+    unset FSTAB_FILE
+}
+
+test_final_verification_allows_supported_optional_network_types() {
+    local fstype
+
+    for fstype in nfs4 cifs smb3; do
+        reset_run_state
+        : > "$FIXTURE_LOG"
+        register_module_policy fixture-clean required
+        printf '%s\n' \
+            "server:/share /mnt/$fstype $fstype defaults,_netdev,nofail 0 0" \
+            > "$TEST_DIR/$fstype-fstab"
+        printf 'desired\n' > "$FIXTURE_STATE_DIR/fixture-clean"
+        FSTAB_FILE="$TEST_DIR/$fstype-fstab"
+        findmnt() {
+            printf '%s\n' \
+                '0 parse errors, 1 error, 0 warnings' \
+                "/mnt/$fstype" \
+                '   [E] unreachable on boot required target: Stale file handle' >&2
+            return 1
+        }
+
+        if ! run_final_verification fixture-clean; then
+            fail "$fstype nofail network mount must be accepted when unreachable"
+        fi
+    done
+
+    unset FSTAB_FILE
+}
+
+test_final_verification_rejects_nonoptional_network_fstab() {
+    reset_run_state
+    : > "$FIXTURE_LOG"
+    register_module_policy fixture-clean required
+    printf '%s\n' \
+        '10.0.0.104:/share /mnt/nas nfs defaults,_netdev 0 0' \
+        > "$TEST_DIR/nonoptional-network-fstab"
+    printf 'desired\n' > "$FIXTURE_STATE_DIR/fixture-clean"
+    FSTAB_FILE="$TEST_DIR/nonoptional-network-fstab"
+    findmnt() {
+        printf '%s\n' \
+            '0 parse errors, 1 error, 0 warnings' \
+            '/mnt/nas' \
+            '   [E] unreachable on boot required target: Stale file handle' >&2
+        return 1
+    }
+
+    if run_final_verification fixture-clean; then
+        fail 'a nonoptional network mount must fail global verification'
+    fi
+    assert_array_contains REQUIRED_FAILURES global:verify:fstab-invalid
+
+    unset FSTAB_FILE
+}
+
+test_final_verification_rejects_parse_errors_and_local_errors() {
+    local fixture
+
+    for fixture in parse local; do
+        reset_run_state
+        : > "$FIXTURE_LOG"
+        register_module_policy fixture-clean required
+        printf 'desired\n' > "$FIXTURE_STATE_DIR/fixture-clean"
+        FSTAB_FILE="$TEST_DIR/$fixture-error-fstab"
+        printf '%s\n' 'UUID=root / btrfs defaults 0 0' > "$FSTAB_FILE"
+        findmnt() {
+            if [ "$fixture" = parse ]; then
+                printf '%s\n' '1 parse errors, 0 errors, 0 warnings' >&2
+            else
+                printf '%s\n' \
+                    '0 parse errors, 1 error, 0 warnings' \
+                    '/' \
+                    '   [E] filesystem type mismatch' >&2
+            fi
+            return 1
+        }
+
+        if run_final_verification fixture-clean; then
+            fail "$fixture fstab errors must fail global verification"
+        fi
+        assert_array_contains REQUIRED_FAILURES global:verify:fstab-invalid
+    done
+
+    unset FSTAB_FILE
+}
+
 test_audit_never_applies() {
     reset_run_state
     : > "$FIXTURE_LOG"
@@ -461,6 +618,11 @@ test_final_verification_reruns_without_duplicate_failures
 test_final_status_preserves_required_apply_failure
 test_final_status_preserves_optional_apply_failure
 test_final_verification_rejects_invalid_fstab
+test_final_verification_allows_stale_optional_network_fstab
+test_final_verification_allows_supported_optional_network_types
+test_final_verification_rejects_optional_network_warning_or_count_mismatch
+test_final_verification_rejects_nonoptional_network_fstab
+test_final_verification_rejects_parse_errors_and_local_errors
 test_entrypoint_parse_status
 test_status_matrix
 

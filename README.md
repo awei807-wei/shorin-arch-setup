@@ -44,10 +44,11 @@ Curtail、Mission Center 和 Steam 使用 Flathub；Steam 额外在其实际安�
 设置 `LANG=zh_CN.UTF-8` override，并验收 system/user Flatpak desktop export，
 不依赖原生 `/usr/share/applications/steam.desktop`。`fd` 使用 Fedora 的 `fd-find` 包并验收
 `/usr/bin/fd`；LACT 先幂等启用 `ilyaz/LACT` COPR，再安装 `lact` 并启用/启动
-`lactd.service`；Yazi 按官方 crates.io 安装约定，由目标用户安装 `yazi-build` helper，固定版本
-`26.8.15`（`--locked --registry crates-io`），
-再执行 `yazi-build install --bin-dir ~/.cargo/bin` 生成并验收 `yazi` 和 `ya`；仅在替换
-已有不完整安装时使用 `--force`。Lutris 在 Fedora
+`lactd.service`；Yazi 在 Fedora 使用固定的 GitHub GNU ZIP release v26.8.15，按架构校验
+SHA-256（x86_64: `cc67eb7991550c2f9407cda52d3f5af0937627aa6884e7de99a04fcf059807e0`；
+aarch64: `f5a85771f06bb0e8c488136ae0aedaec8d341a7cee995549df391d7d852fe8d1`），仅提取预期
+根目录的 `yazi` 和 `ya` 到目标用户 `~/.local/bin` 并验证版本，下载前通过 Fedora 包合同
+收敛 `curl` 和 `unzip`。Lutris 在 Fedora
 使用 `alsa-plugins-pulseaudio` 与 `gstreamer1-plugins-base`。
 Fedora Wine 使用 `wine`、`wine-mono`、`mingw32-wine-gecko` 和 `mingw64-wine-gecko`，不请求已不存在的 `wine-gecko`。
 Clash Verge、Linux QQ、微信、Thorium 和 Mark Shot 从 `FEDORA_RPM_DIR`（或目标用户

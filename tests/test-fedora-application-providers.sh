@@ -143,6 +143,10 @@ for target in code curtail mission-center steam; do
     [ "$(fedora_application_provider_kind "$target")" = flatpak ] ||
         fail "Fedora provider kind missing for $target"
 done
+[ "$(fedora_application_provider_kind yazi)" = release ] ||
+    fail 'Yazi must use the verified Fedora release provider'
+[ "$(fedora_application_provider_id yazi)" = yazi-v26.8.15 ] ||
+    fail 'Yazi release provider must be pinned to v26.8.15'
 for target in code curtail fd mission-center steam yazi lact; do
     if fedora_arch_target_name "$target" >/dev/null 2>&1; then
         fail "Fedora provider target leaked into generic dnf mapping: $target"
@@ -228,66 +232,170 @@ second_copr_count=$(grep -c '^dnf:copr enable -y ilyaz/LACT$' "$PROVIDER_CALLS" 
 [ "$first_copr_count" -eq "$second_copr_count" ] ||
     fail 'LACT provider must not re-enable an already enabled COPR'
 
-mkdir -p "$HOME_DIR/.cargo/bin"
-cat > "$HOME_DIR/.cargo/bin/yazi" <<EOF
-#!/usr/bin/env bash
-printf 'yazi %s\\n' "$FEDORA_YAZI_CARGO_VERSION"
-EOF
-cat > "$HOME_DIR/.cargo/bin/ya" <<EOF
-#!/usr/bin/env bash
-printf 'ya %s\\n' "$FEDORA_YAZI_CARGO_VERSION"
-EOF
-chmod 755 "$HOME_DIR/.cargo/bin/yazi" "$HOME_DIR/.cargo/bin/ya"
 runuser() {
     [ "${1:-}" = -u ] && shift 2
     [ "${1:-}" = -- ] && shift
     "$@"
 }
-fedora_application_target_satisfied yazi "$TARGET_USER" "$HOME_DIR" ||
-    fail 'Yazi check must accept both pinned cargo binaries'
-cat > "$BIN_DIR/cargo" <<'EOF'
+YAZI_X86_ROOT="$TEST_DIR/yazi-x86_64-unknown-linux-gnu"
+YAZI_AARCH64_ROOT="$TEST_DIR/yazi-aarch64-unknown-linux-gnu"
+mkdir -p "$YAZI_X86_ROOT" "$YAZI_AARCH64_ROOT"
+for binary in yazi ya; do
+    cat > "$YAZI_X86_ROOT/$binary" <<EOF
 #!/usr/bin/env bash
-printf 'cargo:%s\n' "$*" >> "${PROVIDER_CALLS:?}"
-mkdir -p "$HOME/.cargo/bin"
-cat > "$HOME/.cargo/bin/yazi-build" <<'HELPER'
-#!/usr/bin/env bash
-printf 'yazi-build:%s\n' "$*" >> "${PROVIDER_CALLS:?}"
-[ "${1:-}" = install ] && [ "${2:-}" = --bin-dir ] || exit 2
-bin_dir=${3:?}
-mkdir -p "$bin_dir"
-cat > "$bin_dir/yazi" <<'YAZI'
-#!/usr/bin/env bash
-printf 'yazi 26.8.15\n'
-YAZI
-cat > "$bin_dir/ya" <<'YA'
-#!/usr/bin/env bash
-printf 'ya 26.8.15\n'
-YA
-chmod 755 "$bin_dir/yazi" "$bin_dir/ya"
-HELPER
-chmod 755 "$HOME/.cargo/bin/yazi-build"
+printf '$binary 26.8.15\\n'
 EOF
-chmod 755 "$BIN_DIR/cargo"
-rm -f "$HOME_DIR/.cargo/bin/yazi" "$HOME_DIR/.cargo/bin/ya"
+    cat > "$YAZI_AARCH64_ROOT/$binary" <<EOF
+#!/usr/bin/env bash
+printf '$binary 26.8.15\\n'
+EOF
+    chmod 755 "$YAZI_X86_ROOT/$binary" "$YAZI_AARCH64_ROOT/$binary"
+done
+printf 'release metadata that must not be installed\\n' > \
+    "$YAZI_X86_ROOT/unexpected-file"
+(cd "$TEST_DIR" && zip -q -r "$TEST_DIR/yazi-x86_64.zip" \
+    "yazi-x86_64-unknown-linux-gnu")
+(cd "$TEST_DIR" && zip -q -r "$TEST_DIR/yazi-aarch64.zip" \
+    "yazi-aarch64-unknown-linux-gnu")
+YAZI_ARCHIVE_SOURCE="$TEST_DIR/yazi-x86_64.zip"
+YAZI_BAD_CHECKSUM=0
+FEDORA_YAZI_MACHINE=x86_64
+[ "$(fedora_yazi_release_digest)" = "$FEDORA_YAZI_X86_64_SHA256" ] ||
+    fail 'Yazi x86_64 release digest selector must use the pinned checksum'
+[ "$FEDORA_YAZI_X86_64_SHA256" = \
+    cc67eb7991550c2f9407cda52d3f5af0937627aa6884e7de99a04fcf059807e0 ] ||
+    fail 'Yazi x86_64 release digest must remain pinned'
+[ "$(FEDORA_YAZI_MACHINE=aarch64 fedora_yazi_release_digest)" = \
+    "$FEDORA_YAZI_AARCH64_SHA256" ] ||
+    fail 'Yazi aarch64 release digest selector must use the pinned checksum'
+[ "$FEDORA_YAZI_AARCH64_SHA256" = \
+    f5a85771f06bb0e8c488136ae0aedaec8d341a7cee995549df391d7d852fe8d1 ] ||
+    fail 'Yazi aarch64 release digest must remain pinned'
+fedora_yazi_release_digest() {
+    if [ "$YAZI_BAD_CHECKSUM" -eq 1 ]; then
+        printf '%064d\n' 0
+    else
+        sha256sum "$YAZI_ARCHIVE_SOURCE" | awk '{ print $1 }'
+    fi
+}
+curl() {
+    local output='' argument
+
+    printf 'curl:%s\n' "$*" >> "$PROVIDER_CALLS"
+    while [ "$#" -gt 0 ]; do
+        argument=$1
+        shift
+        if [ "$argument" = -o ]; then
+            output=$1
+            shift
+        fi
+    done
+    [ -n "$output" ] || return 2
+    cp "$YAZI_ARCHIVE_SOURCE" "$output"
+}
+[ "$(fedora_yazi_release_url)" = \
+    'https://github.com/sxyazi/yazi/releases/download/v26.8.15/yazi-x86_64-unknown-linux-gnu.zip' ] ||
+    fail 'Yazi x86_64 release URL must be pinned to the official GNU ZIP'
+fedora_application_target_satisfied yazi "$TARGET_USER" "$HOME_DIR" &&
+    fail 'Yazi must be drift before release installation'
 fedora_install_application_target yazi "$TARGET_USER" "$HOME_DIR" ||
-    fail 'Yazi cargo provider did not install missing binaries'
-fedora_yazi_target_satisfied "$TARGET_USER" "$HOME_DIR" ||
-    fail 'Yazi cargo provider must verify yazi and ya'
-grep -Fq -- 'cargo:install --locked --registry crates-io --version 26.8.15 yazi-build' \
-    "$PROVIDER_CALLS" ||
-    fail 'Yazi provider must install the pinned yazi-build crate from crates.io without an unnecessary force'
-grep -Fq -- "yazi-build:install --bin-dir $HOME_DIR/.cargo/bin" "$PROVIDER_CALLS" ||
-    fail 'Yazi provider must invoke the installed yazi-build helper for both binaries'
-rm -f "$HOME_DIR/.cargo/bin/ya"
+    fail 'Yazi release provider did not install x86_64 binaries'
+for binary in yazi ya; do
+    [ -x "$HOME_DIR/.local/bin/$binary" ] ||
+        fail "Yazi release provider did not install $binary"
+    [ "$(stat -c '%U:%G' "$HOME_DIR/.local/bin/$binary")" = \
+        "$(id -un):$(id -gn)" ] ||
+        fail "Yazi release provider installed $binary with incorrect ownership"
+    "$HOME_DIR/.local/bin/$binary" --version | grep -Fq 26.8.15 ||
+        fail "Yazi $binary version verification failed"
+done
+[ "$(grep -c '^package:curl$' "$PROVIDER_CALLS" || true)" -gt 0 ] ||
+    fail 'Yazi release provider must converge curl through ensure_packages'
+[ "$(grep -c '^package:unzip$' "$PROVIDER_CALLS" || true)" -gt 0 ] ||
+    fail 'Yazi release provider must converge unzip through ensure_packages'
+[ ! -e "$HOME_DIR/.local/bin/unexpected-file" ] ||
+    fail 'Yazi release provider must install only yazi and ya'
+grep -Fq -- 'github.com/sxyazi/yazi/releases/download/v26.8.15/yazi-x86_64-unknown-linux-gnu.zip' \
+    "$PROVIDER_CALLS" || fail 'Yazi x86_64 download URL was not used'
+before_yazi_downloads=$(grep -c '^curl:' "$PROVIDER_CALLS" || true)
 fedora_install_application_target yazi "$TARGET_USER" "$HOME_DIR" ||
-    fail 'Yazi cargo provider did not repair a partial binary installation'
-grep -Fq -- 'cargo:install --locked --registry crates-io --force --version 26.8.15 yazi-build' \
-    "$PROVIDER_CALLS" ||
-    fail 'Yazi provider must use force only when replacing an existing partial installation'
-! grep -Fq -- '--path' "$PROVIDER_CALLS" ||
-    fail 'Yazi provider must not use a local cargo --path build'
-! grep -Fq 'git clone' "$PROVIDER_CALLS" ||
-    fail 'Yazi provider must not clone a temporary source tree'
+    fail 'Yazi release provider must be idempotent'
+[ "$(grep -c '^curl:' "$PROVIDER_CALLS" || true)" -eq "$before_yazi_downloads" ] ||
+    fail 'Yazi idempotency must skip a correct pair of binaries'
+rm -f "$HOME_DIR/.local/bin/ya"
+fedora_install_application_target yazi "$TARGET_USER" "$HOME_DIR" ||
+    fail 'Yazi release provider did not repair one missing binary'
+[ -x "$HOME_DIR/.local/bin/yazi" ] && [ -x "$HOME_DIR/.local/bin/ya" ] ||
+    fail 'Yazi missing-binary repair must restore both commands'
+rm -f "$HOME_DIR/.local/bin/yazi" "$HOME_DIR/.local/bin/ya"
+YAZI_BAD_CHECKSUM=1
+status=0
+fedora_install_application_target yazi "$TARGET_USER" "$HOME_DIR" || status=$?
+[ "$status" -ne 0 ] || fail 'Yazi checksum mismatch must fail installation'
+[ ! -e "$HOME_DIR/.local/bin/yazi" ] && [ ! -e "$HOME_DIR/.local/bin/ya" ] ||
+    fail 'Yazi checksum mismatch must not install unverified binaries'
+YAZI_BAD_CHECKSUM=0
+
+TRAVERSAL_ROOT="$TEST_DIR/yazi-traversal-root"
+mkdir -p "$TRAVERSAL_ROOT/root"
+printf 'must not escape the archive root\n' > "$TRAVERSAL_ROOT/escape"
+(cd "$TRAVERSAL_ROOT/root" && zip -q "$TEST_DIR/yazi-traversal.zip" ../escape)
+YAZI_ARCHIVE_SOURCE="$TEST_DIR/yazi-traversal.zip"
+status=0
+fedora_install_application_target yazi "$TARGET_USER" "$HOME_DIR" || status=$?
+[ "$status" -ne 0 ] || fail 'Yazi must reject archive entries with .. path components'
+[ ! -e "$HOME_DIR/.local/bin/yazi" ] && [ ! -e "$HOME_DIR/.local/bin/ya" ] ||
+    fail 'Unsafe Yazi archive must not install binaries'
+
+REAL_UNZIP=$(command -v unzip)
+ABSOLUTE_ARCHIVE="$TEST_DIR/yazi-absolute.zip"
+EMPTY_ARCHIVE="$TEST_DIR/yazi-empty.zip"
+touch "$ABSOLUTE_ARCHIVE" "$EMPTY_ARCHIVE"
+unzip() {
+    if [ "${1:-}" = -Z1 ]; then
+        case "${2:-}" in
+            "$ABSOLUTE_ARCHIVE") printf '/etc/passwd\n'; return 0 ;;
+            "$EMPTY_ARCHIVE") printf '\n'; return 0 ;;
+        esac
+    fi
+    "$REAL_UNZIP" "$@"
+}
+status=0
+fedora_yazi_archive_entries_safe "$ABSOLUTE_ARCHIVE" \
+    yazi-x86_64-unknown-linux-gnu || status=$?
+[ "$status" -ne 0 ] || fail 'Yazi must reject absolute archive paths'
+status=0
+fedora_yazi_archive_entries_safe "$EMPTY_ARCHIVE" \
+    yazi-x86_64-unknown-linux-gnu || status=$?
+[ "$status" -ne 0 ] || fail 'Yazi must reject empty archive listings'
+unset -f unzip
+
+YAZI_ARCHIVE_SOURCE="$TEST_DIR/yazi-aarch64.zip"
+FEDORA_YAZI_MACHINE=aarch64
+[ "$(fedora_yazi_release_url)" = \
+    'https://github.com/sxyazi/yazi/releases/download/v26.8.15/yazi-aarch64-unknown-linux-gnu.zip' ] ||
+    fail 'Yazi aarch64 release URL must be pinned to the official GNU ZIP'
+AARCH_HOME="$TEST_DIR/aarch64-home"
+mkdir -p "$AARCH_HOME"
+fedora_install_application_target yazi "$TARGET_USER" "$AARCH_HOME" ||
+    fail 'Yazi release provider did not install aarch64 binaries'
+[ -x "$AARCH_HOME/.local/bin/yazi" ] && [ -x "$AARCH_HOME/.local/bin/ya" ] ||
+    fail 'Yazi aarch64 install must produce both commands'
+for binary in yazi ya; do
+    [ "$(stat -c '%U:%G' "$AARCH_HOME/.local/bin/$binary")" = \
+        "$(id -un):$(id -gn)" ] ||
+        fail "Yazi aarch64 installed $binary with incorrect ownership"
+done
+grep -Fq -- 'github.com/sxyazi/yazi/releases/download/v26.8.15/yazi-aarch64-unknown-linux-gnu.zip' \
+    "$PROVIDER_CALLS" || fail 'Yazi aarch64 download URL was not used'
+
+FEDORA_YAZI_MACHINE=riscv64
+status=0
+fedora_install_application_target yazi "$TARGET_USER" "$HOME_DIR" || status=$?
+[ "$status" -gt 1 ] || fail 'Yazi unknown architecture must fail explicitly'
+! grep -Eiq 'cargo|git clone|rust-lld' "$PROVIDER_CALLS" ||
+    fail 'Yazi release provider must not use Cargo, clone, or rust-lld'
+FEDORA_YAZI_MACHINE=x86_64
 
 unset FEDORA_FD_RDD_INSTALL_SCRIPT
 SAVED_PATH="$PATH"

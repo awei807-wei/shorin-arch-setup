@@ -26,7 +26,7 @@ source "$ROOT_DIR/scripts/lib/core.sh"
     fail 'qemu-full must map to Fedora qemu-kvm'
 [ "$(fedora_arch_target_name AUR:swaylock-effects)" = swaylock ] ||
     fail 'swaylock-effects must map to Fedora swaylock'
-for package in bluez fzf glibc-langpack-zh nfs-utils tsukimi; do
+for package in bluez fzf glibc-langpack-zh nfs-utils tsukimi unzip; do
     [ "$(fedora_arch_target_name "$package")" = "$package" ] ||
         fail "Fedora package mapping is missing: $package"
 done

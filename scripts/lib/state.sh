@@ -141,10 +141,90 @@ state_user_unit_enabled() {
         [ "$(readlink "$link")" = "../$unit" ]
 }
 
+state_fstab_optional_network_target() {
+    local file=$1 target=$2
+
+    awk -v wanted_target="$target" '
+        BEGIN { valid_types["nfs"]=1; valid_types["nfs4"]=1
+                valid_types["cifs"]=1; valid_types["smb3"]=1 }
+        /^[[:space:]]*#/ || NF == 0 { next }
+        $2 == wanted_target {
+            count++
+            if (valid_types[$3]) {
+                option_count=split($4, options, ",")
+                has_netdev=0
+                has_nofail=0
+                for (i=1; i<=option_count; i++) {
+                    if (options[i] == "_netdev") has_netdev=1
+                    if (options[i] == "nofail") has_nofail=1
+                }
+                if (has_netdev && has_nofail) valid=1
+            }
+        }
+        END { exit(count == 1 && valid ? 0 : 1) }
+    ' "$file"
+}
+
+state_fstab_optional_network_errors_only() {
+    local file=$1 output=$2 current= line summary summary_count
+    local parse_errors summary_errors summary_warnings
+    local error_count=0 warning_count=0
+
+    # Parse the C-locale summary before inspecting diagnostics.  The text
+    # after each count is stable in util-linux; diagnostics after a colon
+    # may vary by kernel, filesystem, or language.
+    summary_count=$(printf '%s\n' "$output" |
+        grep -Ec '^[[:space:]]*[0-9]+ parse errors,' || true)
+    [ "$summary_count" -eq 1 ] || return 1
+    summary=$(printf '%s\n' "$output" |
+        grep -E '^[[:space:]]*[0-9]+ parse errors,' | tail -n 1)
+    [[ "$summary" =~ ^[[:space:]]*([0-9]+)[[:space:]]+parse[[:space:]]+errors,[[:space:]]+([0-9]+)[[:space:]]+errors?[[:space:]]*,[[:space:]]+([0-9]+)[[:space:]]+warnings[[:space:]]*$ ]] ||
+        return 1
+    parse_errors=${BASH_REMATCH[1]}
+    summary_errors=${BASH_REMATCH[2]}
+    summary_warnings=${BASH_REMATCH[3]}
+    [ "$parse_errors" -eq 0 ] || return 1
+
+    while IFS= read -r line; do
+        case "$line" in
+            [[:space:]]*) ;;
+            *) [ -n "$line" ] && current=$line ;;
+        esac
+        case "$line" in
+            *"[E] "*)
+                error_count=$((error_count + 1))
+                case "$line" in
+                    *"[E] unreachable on boot required target:"*) ;;
+                    *) return 1 ;;
+                esac
+                case "$current" in
+                    /*) ;;
+                    *) return 1 ;;
+                esac
+                state_fstab_optional_network_target "$file" "$current" ||
+                    return 1
+                ;;
+            *"[W] "*) warning_count=$((warning_count + 1)) ;;
+        esac
+    done <<< "$output"
+
+    [ "$summary_errors" -eq "$error_count" ] || return 1
+    [ "$summary_warnings" -eq "$warning_count" ] || return 1
+    [ "$summary_errors" -eq 1 ] || return 1
+    [ "$error_count" -eq 1 ] || return 1
+    [ "$warning_count" -eq 0 ]
+}
+
 state_fstab_valid() {
-    local file=${1:-/etc/fstab}
+    local file=${1:-/etc/fstab} output status=0
+
     state_command_exists findmnt || return 2
-    findmnt --verify --tab-file "$file" >/dev/null 2>&1
+    output=$(LC_ALL=C findmnt --verify --tab-file "$file" 2>&1) ||
+        status=$?
+    [ "$status" -eq 0 ] && return 0
+    [ "$status" -eq 1 ] || return "$status"
+    state_fstab_optional_network_errors_only "$file" "$output" ||
+        return "$status"
 }
 
 state_fstab_entry() {

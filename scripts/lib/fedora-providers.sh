@@ -14,17 +14,16 @@ FEDORA_FD_COMMAND_PATH=${FEDORA_FD_COMMAND_PATH:-/usr/bin/fd}
 FEDORA_LACT_COMMAND_PATH=${FEDORA_LACT_COMMAND_PATH:-/usr/bin/lact}
 FEDORA_LACT_SERVICE=${FEDORA_LACT_SERVICE:-lactd.service}
 FEDORA_LACT_COPR=${FEDORA_LACT_COPR:-ilyaz/LACT}
-# The official Yazi installation documentation requires the yazi-build
-# helper; its `install` subcommand produces the yazi and ya binaries.
-FEDORA_YAZI_CARGO_CRATE=${FEDORA_YAZI_CARGO_CRATE:-yazi-build}
-FEDORA_YAZI_CARGO_VERSION=${FEDORA_YAZI_CARGO_VERSION:-26.8.15}
+FEDORA_YAZI_VERSION=${FEDORA_YAZI_VERSION:-26.8.15}
+FEDORA_YAZI_X86_64_SHA256=${FEDORA_YAZI_X86_64_SHA256:-cc67eb7991550c2f9407cda52d3f5af0937627aa6884e7de99a04fcf059807e0}
+FEDORA_YAZI_AARCH64_SHA256=${FEDORA_YAZI_AARCH64_SHA256:-f5a85771f06bb0e8c488136ae0aedaec8d341a7cee995549df391d7d852fe8d1}
 
 fedora_application_provider_kind() {
     case "$1" in
         code|curtail|mission-center|steam) printf '%s\n' flatpak ;;
         fd) printf '%s\n' package ;;
         lact) printf '%s\n' copr ;;
-        yazi) printf '%s\n' cargo ;;
+        yazi) printf '%s\n' release ;;
         *) return 1 ;;
     esac
 }
@@ -37,7 +36,7 @@ fedora_application_provider_id() {
         steam) printf '%s\n' com.valvesoftware.Steam ;;
         fd) printf '%s\n' fd-find ;;
         lact) printf '%s\n' lact ;;
-        yazi) printf '%s\n' "$FEDORA_YAZI_CARGO_CRATE" ;;
+        yazi) printf '%s\n' "yazi-v$FEDORA_YAZI_VERSION" ;;
         *) return 1 ;;
     esac
 }
@@ -50,7 +49,7 @@ fedora_application_provider_description() {
         steam) printf '%s\n' 'Flatpak com.valvesoftware.Steam (Flathub)' ;;
         fd) printf '%s\n' 'Fedora package fd-find (/usr/bin/fd)' ;;
         lact) printf '%s\n' "COPR $FEDORA_LACT_COPR, package lact, service $FEDORA_LACT_SERVICE" ;;
-        yazi) printf '%s\n' "target-user cargo $FEDORA_YAZI_CARGO_CRATE $FEDORA_YAZI_CARGO_VERSION, then yazi-build install (yazi + ya)" ;;
+        yazi) printf '%s\n' "GitHub release v$FEDORA_YAZI_VERSION (verified GNU ZIP, yazi + ya)" ;;
         *) return 1 ;;
     esac
 }
@@ -241,25 +240,58 @@ fedora_lact_target_satisfied() {
     esac
 }
 
+fedora_yazi_release_arch() {
+    local machine=${FEDORA_YAZI_MACHINE:-$(uname -m)}
+
+    case "$machine" in
+        x86_64|aarch64) printf '%s\n' "$machine" ;;
+        *)
+            error "Unsupported Fedora Yazi release architecture: $machine"
+            return 2
+            ;;
+    esac
+}
+
+fedora_yazi_release_url() {
+    local arch
+
+    arch=$(fedora_yazi_release_arch) || return
+    printf 'https://github.com/sxyazi/yazi/releases/download/v%s/yazi-%s-unknown-linux-gnu.zip\n' \
+        "$FEDORA_YAZI_VERSION" "$arch"
+}
+
+fedora_yazi_release_digest() {
+    local arch
+
+    arch=$(fedora_yazi_release_arch) || return
+    case "$arch" in
+        x86_64) printf '%s\n' "$FEDORA_YAZI_X86_64_SHA256" ;;
+        aarch64) printf '%s\n' "$FEDORA_YAZI_AARCH64_SHA256" ;;
+    esac
+}
+
 fedora_yazi_binary_path() {
-    printf '%s\n' "${2:-${HOME_DIR:-}}/.cargo/bin/$1"
+    printf '%s\n' "${2:-${HOME_DIR:-}}/.local/bin/$1"
 }
 
 fedora_yazi_target_satisfied() {
-    local user=$1 home=$2 binary output status=0
+    local user=$1 home=$2 binary output status=0 group owner
 
     [ -n "$user" ] && [ -n "$home" ] || return 2
+    fedora_yazi_release_arch >/dev/null || return
+    group=$(id -gn "$user" 2>/dev/null) || return 2
     for binary in yazi ya; do
         binary=$(fedora_yazi_binary_path "$binary" "$home")
         [ -x "$binary" ] || return 1
+        owner=$(stat -c '%U:%G' "$binary" 2>/dev/null) || return 2
+        [ "$owner" = "$user:$group" ] || return 1
         output=$(runuser -u "$user" -- env HOME="$home" \
-            PATH="$home/.cargo/bin:${PATH:-}" "$binary" --version 2>/dev/null) || {
+            PATH="$home/.local/bin:${PATH:-}" "$binary" --version 2>/dev/null) || {
             status=$?
             [ "$status" -gt 1 ] || status=2
             return "$status"
         }
-        grep -Eq "(^|[[:space:]])${FEDORA_YAZI_CARGO_VERSION}([[:space:]]|$)" \
-            <<< "$output" || return 1
+        grep -Fq "$FEDORA_YAZI_VERSION" <<< "$output" || return 1
     done
 }
 
@@ -273,7 +305,7 @@ fedora_application_target_provider_satisfied() {
         flatpak) fedora_flatpak_present "$provider" ;;
         package) fedora_fd_target_satisfied ;;
         copr) fedora_lact_target_satisfied ;;
-        cargo) fedora_yazi_target_satisfied "$user" "$home" ;;
+        release) fedora_yazi_target_satisfied "$user" "$home" ;;
         *) return 1 ;;
     esac
 }
