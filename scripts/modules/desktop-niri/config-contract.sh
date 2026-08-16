@@ -98,6 +98,50 @@ niri_bindings_satisfied() {
         niri_binding_matches Mod+Alt+C "$(niri_binding_contract focus-shift)"
 }
 
+niri_swayosd_startup_command_present() {
+    [ -s "$NIRI_CONFIG_FILE" ] || return 1
+    grep -Eq \
+        '^[[:space:]]*spawn(-sh)?-at-startup.*swayosd(-server|-libinput-backend)?([[:space:]"&]|$)' \
+        "$NIRI_CONFIG_FILE"
+}
+
+niri_optional_startup_satisfied() {
+    local package_status=0
+
+    platform_is_fedora || return 0
+    niri_package_target_satisfied swayosd || package_status=$?
+    case "$package_status" in
+        0) return 0 ;;
+        1) ! niri_swayosd_startup_command_present ;;
+        *) return "$package_status" ;;
+    esac
+}
+
+ensure_niri_optional_startup() {
+    local user=$1 package_status=0 temporary mode group
+
+    require_writable_mode || return
+    platform_is_fedora || return 0
+    niri_package_target_satisfied swayosd || package_status=$?
+    case "$package_status" in
+        0) return 0 ;;
+        1) niri_swayosd_startup_command_present || return 0 ;;
+        *) return "$package_status" ;;
+    esac
+    temporary=$(mktemp)
+    awk '
+        /^[[:space:]]*spawn(-sh)?-at-startup/ &&
+            /swayosd(-server|-libinput-backend)?([[:space:]"&]|$)/ { next }
+        { print }
+    ' "$NIRI_CONFIG_FILE" > "$temporary"
+    mode=$(stat -c '%a' "$NIRI_CONFIG_FILE")
+    group=$(id -gn "$user")
+    install_if_changed "$temporary" "$NIRI_CONFIG_FILE" "$mode"
+    rm -f "$temporary"
+    chown "$user:$group" "$NIRI_CONFIG_FILE"
+    niri_optional_startup_satisfied
+}
+
 ensure_niri_path() {
     local user=$1 temporary mode group
 

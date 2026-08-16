@@ -90,7 +90,7 @@ virtualization_apply() {
 }
 
 virtualization_verify() {
-    local package group command
+    local package group command network_status=0
 
     virtualization_is_targeted || { module_skip not-declared; return; }
     if [ -z "${TARGET_USER:-}" ]; then
@@ -109,8 +109,12 @@ virtualization_verify() {
         state_user_in_group "$TARGET_USER" "$group" ||
             module_verify_failed "group:$TARGET_USER:$group"
     done
-    virtualization_default_network_ready ||
+    virtualization_default_network_ready || network_status=$?
+    if [ "$network_status" -eq 1 ]; then
         module_verify_failed network:default
+    elif [ "$network_status" -ne 0 ]; then
+        module_verify_failed "network:default:inspection-error:$network_status"
+    fi
     virtualization_gsettings_matches "$TARGET_USER" "$HOME_DIR" \
         uris "['qemu:///system']" ||
         module_verify_failed gsettings:uris

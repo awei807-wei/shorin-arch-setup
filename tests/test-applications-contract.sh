@@ -31,6 +31,41 @@ fail() {
     return 1
 }
 
+ARCH_FOCUS_DEPS=$(github_app_dependencies focus-shift)
+ARCH_NIRI_CLIP_DEPS=$(github_app_dependencies niri-clip)
+grep -Fq 'gtk4 pkgconf' <<< "$ARCH_FOCUS_DEPS" ||
+    fail 'Arch FocusShift dependency contract must remain unchanged'
+grep -Fq 'gtk4-layer-shell sqlite wayland wayland-protocols' \
+    <<< "$ARCH_NIRI_CLIP_DEPS" ||
+    fail 'Arch niri-clip dependency contract must remain unchanged'
+export SHORIN_DISTRO=fedora
+FEDORA_FOCUS_DEPS=$(github_app_dependencies focus-shift)
+FEDORA_NIRI_CLIP_DEPS=$(github_app_dependencies niri-clip)
+for dependency in base-devel cargo rust glib2-devel pango-devel cairo-devel \
+    cairo-gobject-devel gtk4-devel gdk-pixbuf2-devel graphene-devel \
+    pkgconf-pkg-config; do
+    grep -Fqw "$dependency" <<< "$FEDORA_FOCUS_DEPS" ||
+        fail "Fedora FocusShift build contract is missing $dependency"
+done
+for dependency in gtk4-layer-shell-devel sqlite-devel wayland-devel \
+    wayland-protocols-devel wtype; do
+    grep -Fqw "$dependency" <<< "$FEDORA_NIRI_CLIP_DEPS" ||
+        fail "Fedora niri-clip build contract is missing $dependency"
+done
+if grep -Fqw 'gtk4 pkgconf' <<< "$FEDORA_FOCUS_DEPS"; then
+    fail 'Fedora GitHub build contract must use development package names'
+fi
+if grep -Fqw libadwaita-devel <<< "$FEDORA_FOCUS_DEPS $FEDORA_NIRI_CLIP_DEPS"; then
+    fail 'Fedora GitHub build contract must not add unused libadwaita-devel'
+fi
+for dependency in gtk4-devel glib2-devel pango-devel cairo-devel \
+    cairo-gobject-devel gdk-pixbuf2-devel graphene-devel \
+    gtk4-layer-shell-devel sqlite-devel pkgconf-pkg-config wtype; do
+    fedora_arch_target_name "$dependency" >/dev/null ||
+        fail "Fedora package whitelist is missing build dependency $dependency"
+done
+export SHORIN_DISTRO=arch
+
 declare -A INSTALLED_PACKAGES=()
 FLATPAK_STEAM_INSTALLED=0
 FLATPAK_STEAM_LOCALE=0
@@ -41,6 +76,7 @@ LAZYVIM_CHECKOUT_FAIL=0
 WINE_SERVER_STOP_FAIL=0
 GITHUB_HEAD=0123456789abcdef0123456789abcdef01234567
 GITHUB_CHECKOUT_DIRTY=0
+CARGO_BUILD_FAIL=0
 GITHUB_USER_CONTEXT_LOG="$TEST_DIR/github-user-context.log"
 AS_USER_LOG="$TEST_DIR/as-user.log"
 FAILED_PACKAGES=()
@@ -130,6 +166,7 @@ as_user() {
     if [[ " $* " == *' cargo build '* ]]; then
         local previous argument target_dir=""
 
+        [ "$CARGO_BUILD_FAIL" -eq 0 ] || return 1
         for argument in "$@"; do
             if [ "${previous:-}" = --target-dir ]; then
                 target_dir=$argument
@@ -282,6 +319,15 @@ _build_and_install_cargo_binary \
     fail 'GitHub build must atomically install a binary and its provenance'
 grep -Fqx "$TARGET_USER:$HOME_DIR" "$GITHUB_USER_CONTEXT_LOG" ||
     fail 'GitHub provenance inspection must use the target user context'
+CARGO_BUILD_FAIL=1
+if _build_and_install_cargo_binary \
+    "$HOME_DIR/.local/src/focus-shift" focus-shift \
+    2>"$TEST_DIR/cargo-build-error"; then
+    fail 'Cargo build failures must fail the GitHub application target'
+fi
+grep -Fq 'Cargo build failed for focus-shift.' "$TEST_DIR/cargo-build-error" ||
+    fail 'Cargo build failures must retain a diagnostic error'
+CARGO_BUILD_FAIL=0
 application_entry_satisfied GitHub:focus-shift ||
     fail 'GitHub target must accept matching checkout, binary and provenance'
 GITHUB_CHECKOUT_DIRTY=1

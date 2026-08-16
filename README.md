@@ -291,8 +291,11 @@ tests/                           # 原语、runner、入口及真实模块合同
 - `GitHub:`：仓库内已登记的源码应用。
 
 在 Fedora 目标上，无前缀条目会经过显式 Fedora 包名白名单翻译；`AUR:` 条目不会
-进入 `dnf` 的原始 Arch 包名路径，而是交给 Fedora 映射器处理。未登记可靠来源的
-目标会失败并给出人工交接提示，不会静默跳过。
+进入 `dnf` 的原始 Arch 包名路径，而是交给 Fedora 映射器处理。`desktop-niri` 中
+没有可靠 Fedora 来源且不属于会话核心的 `bluetui`、`hyprpicker`、`nwg-look`、
+`satty`、`starship` 和 `swayosd` 会记录明确的 optional/skip 原因，既不会交给
+`dnf`，也不会进入 required 验收；`swayosd` 的缺失启动项会同步清理。其余未登记
+可靠来源的目标会给出人工交接提示，不会静默宣称已安装。
 
 当前 `GitHub:` 应用包括 `focus-shift` 和 `niri-clip`。源码位于目标用户的 `~/.local/src/`，可执行文件安装到 `~/.local/bin/`；`niri-clip` 同时部署并启用用户级 systemd 服务。
 

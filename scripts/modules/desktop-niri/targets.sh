@@ -62,6 +62,34 @@ niri_required_package_targets() {
     printf '%s\n' "${NIRI_REQUIRED_PACKAGE_TARGETS[@]}"
 }
 
+niri_package_target_is_required() {
+    local target=$1 required
+
+    while IFS= read -r required; do
+        [ "$required" = "$target" ] && return 0
+    done < <(niri_required_package_targets)
+    return 1
+}
+
+niri_fedora_optional_target_is_skipped() {
+    local target
+
+    platform_is_fedora || return 1
+    niri_package_target_is_required "$1" && return 1
+    target=$(niri_package_target_name "$1")
+    case "$target" in
+        # These are optional Arch conveniences with no reliable Fedora 44
+        # package in the target's enabled repositories.  Keep them out of
+        # the shared check/apply/verify stream instead of handing a known
+        # missing name to dnf and turning an optional feature into a module
+        # failure.
+        bluetui|hyprpicker|nwg-look|satty|starship|swayosd)
+            return 0
+            ;;
+        *) return 1 ;;
+    esac
+}
+
 niri_package_entries_from_file() {
     local file=$1
 
@@ -141,6 +169,10 @@ niri_all_package_targets() {
         if ! target=$(niri_package_target_canonical "$target"); then
             continue
         fi
+        if niri_fedora_optional_target_is_skipped "$target"; then
+            warn "Skipping Fedora optional desktop target without a reliable package source: $target"
+            continue
+        fi
         niri_package_target_is_obsolete "$target" && continue
         key=$(niri_package_target_name "$target")
         [ -z "${seen[$key]:-}" ] || continue
@@ -156,7 +188,7 @@ niri_package_target_name() {
     case "$1" in
         AUR:*) printf '%s\n' "${1#AUR:}" ;;
         flatpak:*) printf '%s\n' "${1#flatpak:}" ;;
-        imagemagic) printf '%s\n' imagemagick ;;
+        imagemagick) printf '%s\n' imagemagick ;;
         *) printf '%s\n' "$1" ;;
     esac
 }
@@ -184,7 +216,7 @@ niri_package_target_satisfied() {
         AUR:*) declared_package_target_satisfied "$target" ;;
         flatpak:*) state_flatpak_present "${target#flatpak:}" ;;
         GitHub:*) return 1 ;;
-        imagemagic) state_package_present imagemagick ;;
+        imagemagick) state_package_present imagemagick ;;
         *) state_package_present "$target" ;;
     esac
 }
@@ -213,7 +245,7 @@ ensure_niri_package_target() {
                 ;;
             flatpak:*) ensure_flatpak "${target#flatpak:}" ;;
             GitHub:*) die "Unsupported GitHub desktop target: $target" ;;
-            imagemagic) ensure_package imagemagick ;;
+            imagemagick) ensure_package imagemagick ;;
             *) ensure_package "$target" ;;
         esac && niri_package_target_satisfied "$target" && return 0
         warn "Failed to converge desktop target $target (attempt $attempt/3)."

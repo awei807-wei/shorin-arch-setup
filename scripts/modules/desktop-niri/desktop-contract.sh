@@ -224,9 +224,15 @@ niri_optional_hardware_targets_match() {
     state_package_present ddcutil || package_status=$?
     case "$package_status" in
         0)
-            state_user_in_group "$TARGET_USER" i2c &&
-                state_line_present /etc/modules-load.d/i2c-dev.conf i2c-dev ||
-                return 1
+            if platform_is_fedora; then
+                # Fedora's ddcutil package relies on udev permissions rather
+                # than an Arch-style i2c group and modules-load override.
+                :
+            else
+                state_user_in_group "$TARGET_USER" i2c &&
+                    state_line_present /etc/modules-load.d/i2c-dev.conf i2c-dev ||
+                    return 1
+            fi
             ;;
         1) ;;
         *) return "$package_status" ;;

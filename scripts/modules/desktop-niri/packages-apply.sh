@@ -53,6 +53,10 @@ normalize_profile_packages() {
         entry=$(printf '%s\n' "$entry" | sed 's/[[:space:]]*#.*//' | xargs)
         [ -n "$entry" ] || continue
         if canonical=$(niri_package_target_canonical "$entry"); then
+            if niri_fedora_optional_target_is_skipped "$canonical"; then
+                warn "Skipping Fedora optional desktop target without a reliable package source: $canonical"
+                continue
+            fi
             normalized+=("$canonical")
         fi
     done

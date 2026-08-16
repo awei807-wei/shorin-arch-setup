@@ -26,26 +26,73 @@ VIRTUALIZATION_SERVICE=${VIRTUALIZATION_SERVICE:-libvirtd.service}
 VIRTUALIZATION_DEFAULT_NETWORK_XML=${VIRTUALIZATION_DEFAULT_NETWORK_XML:-/usr/share/libvirt/networks/default.xml}
 
 virtualization_default_network_ready() {
+    local info status=0
+
+    info=$(virtualization_default_network_info) || status=$?
+    [ "$status" -eq 0 ] || return "$status"
+    virtualization_default_network_field_is_yes "$info" Active || return
+    virtualization_default_network_field_is_yes "$info" Autostart
+}
+
+virtualization_default_network_info() {
+    local output status=0
+
     command -v "$VIRTUALIZATION_VIRSH_COMMAND" >/dev/null 2>&1 || return 1
-    LC_ALL=C "$VIRTUALIZATION_VIRSH_COMMAND" net-info default 2>/dev/null | awk -F: '
-        /^Active:/ { gsub(/[[:space:]]/, "", $2); active=($2 == "yes") }
-        /^Autostart:/ { gsub(/[[:space:]]/, "", $2); autostart=($2 == "yes") }
-        END { exit(active && autostart ? 0 : 1) }
-    '
+    output=$(LC_ALL=C "$VIRTUALIZATION_VIRSH_COMMAND" net-info default 2>&1) ||
+        status=$?
+    if [ "$status" -ne 0 ]; then
+        if grep -Eqi 'network not found|no network with matching name' <<< "$output"; then
+            return 1
+        fi
+        [ "$status" -gt 1 ] || status=2
+        return "$status"
+    fi
+    printf '%s\n' "$output"
+}
+
+virtualization_default_network_field_is_yes() {
+    local info=$1 field=$2
+
+    awk -F: -v field="$field" '
+        $1 == field {
+            value=$2
+            gsub(/[[:space:]]/, "", value)
+            value=tolower(value)
+            found=(value == "yes" || value == "true" || value == "1")
+        }
+        END { exit(found ? 0 : 1) }
+    ' <<< "$info"
 }
 
 ensure_virtualization_default_network() {
+    local info status=0 start_status=0
+
     require_writable_mode || return
 
-    if ! LC_ALL=C "$VIRTUALIZATION_VIRSH_COMMAND" net-info default >/dev/null 2>&1; then
-        [ -f "$VIRTUALIZATION_DEFAULT_NETWORK_XML" ] ||
-            die 'libvirt default network template is not available.'
-        "$VIRTUALIZATION_VIRSH_COMMAND" net-define "$VIRTUALIZATION_DEFAULT_NETWORK_XML"
+    info=$(virtualization_default_network_info) || status=$?
+    case "$status" in
+        0) ;;
+        1)
+            [ -f "$VIRTUALIZATION_DEFAULT_NETWORK_XML" ] ||
+                die 'libvirt default network template is not available.'
+            "$VIRTUALIZATION_VIRSH_COMMAND" net-define \
+                "$VIRTUALIZATION_DEFAULT_NETWORK_XML" || return
+            info=$(virtualization_default_network_info) || return
+            ;;
+        *) return "$status" ;;
+    esac
+    if ! virtualization_default_network_field_is_yes "$info" Active; then
+        "$VIRTUALIZATION_VIRSH_COMMAND" net-start default || start_status=$?
+        if [ "$start_status" -ne 0 ]; then
+            info=$(virtualization_default_network_info) || return
+            virtualization_default_network_field_is_yes "$info" Active ||
+                return "$start_status"
+        fi
+        info=$(virtualization_default_network_info) || return
     fi
-    LC_ALL=C "$VIRTUALIZATION_VIRSH_COMMAND" net-info default | grep -q '^Active:.*yes' ||
-        "$VIRTUALIZATION_VIRSH_COMMAND" net-start default
-    LC_ALL=C "$VIRTUALIZATION_VIRSH_COMMAND" net-info default | grep -q '^Autostart:.*yes' ||
-        "$VIRTUALIZATION_VIRSH_COMMAND" net-autostart default
+    if ! virtualization_default_network_field_is_yes "$info" Autostart; then
+        "$VIRTUALIZATION_VIRSH_COMMAND" net-autostart default || return
+    fi
     virtualization_default_network_ready
 }
 

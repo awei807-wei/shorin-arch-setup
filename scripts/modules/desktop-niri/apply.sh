@@ -114,7 +114,9 @@ ensure_niri_session_config "$TARGET_USER" || APPLY_STATUS=$?
 # ==============================================================================
 section "Step 7/9" "Hardware"
 if package_is_installed ddcutil; then
-  if getent group i2c >/dev/null 2>&1; then
+  if platform_is_fedora; then
+    log "Fedora ddcutil uses udev permissions; no i2c group assignment is required."
+  elif getent group i2c >/dev/null 2>&1; then
     gpasswd -a "$TARGET_USER" i2c
     ensure_line /etc/modules-load.d/i2c-dev.conf i2c-dev
   else

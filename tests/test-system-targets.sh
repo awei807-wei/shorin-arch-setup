@@ -152,26 +152,86 @@ printf '<network/>\n' > "$VIRTUALIZATION_DEFAULT_NETWORK_XML"
 NETWORK_DEFINED=0
 NETWORK_ACTIVE=0
 NETWORK_AUTOSTART=0
+NETWORK_START_CALLS=0
+NETWORK_AUTOSTART_CALLS=0
+NETWORK_QUERY_STATUS=0
+NETWORK_START_STATUS=0
+NETWORK_START_ACTIVATES=1
 virsh() {
     case "$1 $2" in
         'net-info default')
             [ "${LC_ALL:-}" = C ] || return 3
-            [ "$NETWORK_DEFINED" -eq 1 ] || return 1
+            if [ "$NETWORK_QUERY_STATUS" -ne 0 ]; then
+                return "$NETWORK_QUERY_STATUS"
+            fi
+            if [ "$NETWORK_DEFINED" -ne 1 ]; then
+                printf 'error: Network not found: no network with matching name default\n' >&2
+                return 1
+            fi
             printf 'Active: %s\nAutostart: %s\n' \
                 "$([ "$NETWORK_ACTIVE" -eq 1 ] && printf yes || printf no)" \
                 "$([ "$NETWORK_AUTOSTART" -eq 1 ] && printf yes || printf no)"
             ;;
         'net-define '*) NETWORK_DEFINED=1 ;;
-        'net-start default') NETWORK_ACTIVE=1 ;;
-        'net-autostart default') NETWORK_AUTOSTART=1 ;;
+        'net-start default')
+            NETWORK_START_CALLS=$((NETWORK_START_CALLS + 1))
+            [ "$NETWORK_START_ACTIVATES" -eq 1 ] && NETWORK_ACTIVE=1
+            return "$NETWORK_START_STATUS"
+            ;;
+        'net-autostart default') NETWORK_AUTOSTART_CALLS=$((NETWORK_AUTOSTART_CALLS + 1)); NETWORK_AUTOSTART=1 ;;
         *) return 1 ;;
     esac
 }
 ensure_virtualization_default_network
 [ "$NETWORK_DEFINED:$NETWORK_ACTIVE:$NETWORK_AUTOSTART" = 1:1:1 ] ||
     fail 'missing libvirt default network must be defined, started, and enabled'
+[ "$NETWORK_START_CALLS" -eq 1 ] ||
+    fail 'missing libvirt default network must start exactly once'
 virtualization_default_network_ready ||
     fail 'converged libvirt default network must verify'
+ensure_virtualization_default_network
+[ "$NETWORK_START_CALLS" -eq 1 ] ||
+    fail 'active libvirt default network must not be started again'
+NETWORK_AUTOSTART=0
+ensure_virtualization_default_network
+[ "$NETWORK_START_CALLS" -eq 1 ] ||
+    fail 'active libvirt default network must not call net-start when autostart is missing'
+[ "$NETWORK_AUTOSTART_CALLS" -eq 2 ] ||
+    fail 'missing libvirt network autostart must be repaired idempotently'
+NETWORK_QUERY_STATUS=7
+status=0
+virtualization_default_network_ready || status=$?
+[ "$status" -eq 7 ] ||
+    fail 'real virsh network query errors must remain inspection errors'
+status=0
+ensure_virtualization_default_network || status=$?
+[ "$status" -eq 7 ] ||
+    fail 'real virsh apply query errors must remain failures'
+[ "$NETWORK_START_CALLS" -eq 1 ] ||
+    fail 'real virsh query errors must not trigger a blind net-start'
+
+# A concurrent libvirt start may win the race even though our net-start call
+# returns non-zero.  Accept that only after a fresh net-info query; a genuine
+# failure without an active network must keep its original error.
+NETWORK_QUERY_STATUS=0
+NETWORK_ACTIVE=0
+NETWORK_AUTOSTART=1
+NETWORK_START_STATUS=7
+NETWORK_START_ACTIVATES=1
+status=0
+ensure_virtualization_default_network || status=$?
+[ "$status" -eq 0 ] ||
+    fail 'a concurrent activation must satisfy virtualization network apply'
+virtualization_default_network_ready ||
+    fail 'a concurrently activated network must verify after start race'
+NETWORK_ACTIVE=0
+NETWORK_START_ACTIVATES=0
+status=0
+ensure_virtualization_default_network || status=$?
+[ "$status" -eq 7 ] ||
+    fail 'a failed network start without concurrent activation must preserve its error'
+NETWORK_START_STATUS=0
+NETWORK_START_ACTIVATES=1
 
 base_gpu_info() { return 2; }
 status=0

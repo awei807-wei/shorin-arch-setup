@@ -196,7 +196,7 @@ fedora_package_name() {
         fcitx5-rime) printf '%s\n' fcitx5-rime ;;
         fcitx5-gtk|fcitx5-qt|fcitx5|flatpak|flatseal|fastfetch|firefox|fish|fuzzel|fzf|git|niri|gdm|sddm|lightdm|lxdm|slim|ly|greetd|btrfs-progs|snapper|btrfs-assistant|\
         gnome-calendar|gnome-clocks|gnome-disk-utility|gnome-font-viewer|\
-        gnome-keyring|gnome-software|gnome-text-editor|gvfs-smb|imagemagick|\
+        gnome-keyring|gnome-software|gnome-text-editor|gvfs-smb|\
         imv|jq|kitty|less|libnotify|lact|lsof|mako|mangohud|mpv|nautilus|\
         neovim|obs-studio|pavucontrol|\
         pciutils|pipewire|pipewire-alsa|\
@@ -215,9 +215,12 @@ fedora_package_name() {
         intel-compute-runtime|akmod-nvidia|xorg-x11-drv-nvidia-cuda|\
         ffmpegthumbnailer|matugen|lutris|code|grim|thefuck|\
         wlogout|\
-        cargo|rust|wayland-devel|wayland-protocols-devel|pkgconf-pkg-config|\
+        cargo|rust|gtk4-devel|glib2-devel|pango-devel|cairo-devel|\
+        cairo-gobject-devel|gdk-pixbuf2-devel|graphene-devel|\
+        gtk4-layer-shell-devel|sqlite-devel|wayland-devel|\
+        wayland-protocols-devel|pkgconf-pkg-config|wtype|\
         lz4-devel|curl|\
-        xdg-user-dirs|xfsprogs|udftools|breeze|breeze-gtk|breeze-icons|breeze5|jetbrains-mono-fonts|\
+        xdg-user-dirs|xfsprogs|udftools|breeze-gtk|jetbrains-mono-fonts|\
         glibc-langpack-zh|nfs-utils|tsukimi|\
         qt5ct|qt6ct|qt6-qtbase|qt6-qtdeclarative|\
         wl-clipboard|cliphist|satty|swayosd)
@@ -234,7 +237,12 @@ fedora_package_name() {
         # server, while this package provides the JACK API used by clients.
         pipewire-jack) printf '%s\n' pipewire-jack-audio-connection-kit ;;
         polkit-gnome) printf '%s\n' polkit-kde ;;
-        terminus-font) printf '%s\n' terminus-fonts ;;
+        breeze) printf '%s\n' plasma-breeze ;;
+        breeze5) printf '%s\n' kf5-qqc2-breeze-style ;;
+        breeze-icons) printf '%s\n' breeze-icon-theme ;;
+        imagemagick) printf '%s\n' ImageMagick ;;
+        terminus-font) printf '%s\n' terminus-fonts-console ;;
+        terminus-fonts-console) printf '%s\n' terminus-fonts-console ;;
         vim) printf '%s\n' vim-enhanced ;;
         intel-media-driver) printf '%s\n' libva-intel-media-driver ;;
         gst-plugins-base) printf '%s\n' gstreamer1-plugins-base ;;

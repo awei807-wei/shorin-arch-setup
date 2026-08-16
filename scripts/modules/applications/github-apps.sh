@@ -9,6 +9,27 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 # ==============================================================================
 
 github_app_dependencies() {
+    if platform_is_fedora; then
+        case "$1" in
+            focus-shift)
+                # Fedora splits the development headers and pkg-config files
+                # out of the runtime packages.  In particular, gtk4-devel
+                # alone does not make the gio/glib/gobject/pango checks in
+                # FocusShift's build environment explicit, so keep those
+                # contracts here instead of letting Cargo fail later with a
+                # misleading missing-system-library error.
+                echo "base-devel git cargo rust glib2-devel pango-devel cairo-devel cairo-gobject-devel gtk4-devel gdk-pixbuf2-devel graphene-devel pkgconf-pkg-config"
+                ;;
+            niri-clip)
+                echo "base-devel git cargo rust glib2-devel pango-devel cairo-devel cairo-gobject-devel gtk4-devel gdk-pixbuf2-devel graphene-devel gtk4-layer-shell-devel sqlite-devel pkgconf-pkg-config wayland-devel wayland-protocols-devel wtype"
+                ;;
+            *)
+                return 1
+                ;;
+        esac
+        return 0
+    fi
+
     case "$1" in
         focus-shift)
             echo "base-devel git rust gtk4 pkgconf"

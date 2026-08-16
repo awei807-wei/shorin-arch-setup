@@ -87,6 +87,7 @@ base_power_profile_inspect() {
 
 base_inspect() {
     local phase=$1 package unit editor bluetooth_status=0
+    local vconsole_font vconsole_status=0
     local gpu_info
     local -a gpu_packages=()
 
@@ -110,8 +111,35 @@ base_inspect() {
     base_expect "$phase" "command:$editor" command -v "$editor"
     base_expect "$phase" environment:EDITOR key_value_matches \
         /etc/environment EDITOR "$editor"
-    base_expect "$phase" vconsole:FONT key_value_matches \
-        /etc/vconsole.conf FONT ter-v28n
+    vconsole_font=$(base_vconsole_font) || vconsole_status=$?
+    case "$vconsole_status" in
+        0)
+            base_expect "$phase" vconsole:FONT key_value_matches \
+                /etc/vconsole.conf FONT "$vconsole_font"
+            ;;
+        1)
+            if [ "$phase" = check ]; then
+                module_drift vconsole:font-available
+            else
+                module_verify_failed vconsole:font-available
+            fi
+            ;;
+        *)
+            if [ "$phase" = check ]; then
+                module_inspection_failed \
+                    "vconsole:font-inspection-error:$vconsole_status"
+            else
+                module_verify_failed \
+                    "vconsole:font-inspection-error:$vconsole_status"
+            fi
+            ;;
+    esac
+    if platform_is_fedora; then
+        base_expect "$phase" vconsole:font-file \
+            base_vconsole_font_file_present
+        base_expect "$phase" vconsole:setup \
+            base_vconsole_setup_succeeded
+    fi
     base_expect "$phase" locale:zh_CN base_locale_present
     base_expect "$phase" flatpak:flathub-system \
         base_flathub_system_remote_present

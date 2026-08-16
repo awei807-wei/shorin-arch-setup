@@ -27,11 +27,28 @@ if platform_is_fedora; then
     TARGET_EDITOR=${BASE_EDITOR:-vim}
     ensure_package "$TARGET_EDITOR"
     ensure_key_value /etc/environment EDITOR "$TARGET_EDITOR"
-    if ! key_value_matches /etc/vconsole.conf FONT ter-v28n; then
-        ensure_key_value /etc/vconsole.conf FONT ter-v28n
+    base_vconsole_font_file_present ||
+        die "Fedora vconsole font file is missing: $BASE_VCONSOLE_FONT_FILE"
+    vconsole_font=$(base_vconsole_font)
+    if ! key_value_matches /etc/vconsole.conf FONT "$vconsole_font"; then
+        ensure_key_value /etc/vconsole.conf FONT "$vconsole_font"
         systemctl restart systemd-vconsole-setup.service ||
-            warn 'Unable to restart systemd-vconsole-setup; the vconsole font will apply on reboot.'
+            die "systemd-vconsole-setup failed for Fedora vconsole font $vconsole_font."
     fi
+    vconsole_setup_status=0
+    base_vconsole_setup_succeeded || vconsole_setup_status=$?
+    case "$vconsole_setup_status" in
+        0) ;;
+        1)
+            systemctl restart systemd-vconsole-setup.service ||
+                die "systemd-vconsole-setup failed for Fedora vconsole font $vconsole_font."
+            ;;
+        *)
+            die "Unable to inspect systemd-vconsole-setup for Fedora vconsole font $vconsole_font."
+            ;;
+    esac
+    base_vconsole_setup_succeeded ||
+        die 'systemd-vconsole-setup is not in a successful state after Fedora base convergence.'
     if command -v localectl >/dev/null 2>&1; then
         localectl set-locale LANG=zh_CN.UTF-8 ||
             warn 'Unable to set zh_CN.UTF-8 with localectl; continuing with package convergence.'
@@ -102,7 +119,7 @@ if ! key_value_matches /etc/vconsole.conf FONT ter-v28n; then
     exe systemctl restart systemd-vconsole-setup
 fi
 
-success "TTY font configured (ter-v24n)."
+success "TTY font configured (ter-v28n)."
 # ------------------------------------------------------------------------------
 # 4. Configure archlinuxcn Repository
 # ------------------------------------------------------------------------------

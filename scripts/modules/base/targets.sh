@@ -9,6 +9,33 @@ source "$SHORIN_ROOT/scripts/lib/core.sh"
 
 FLATHUB_REPO_URL=${FLATHUB_REPO_URL:-https://dl.flathub.org/repo/}
 
+base_vconsole_font() {
+    printf '%s\n' ter-v28n
+}
+
+# Fedora's console-font package installs the exact file consumed by
+# systemd-vconsole-setup.  Keep the path explicit so check/apply/verify cannot
+# converge on a font name that the service cannot load.
+BASE_VCONSOLE_FONT_FILE=${BASE_VCONSOLE_FONT_FILE:-/usr/lib/kbd/consolefonts/ter-v28n.psf.gz}
+
+base_vconsole_font_file_present() {
+    if platform_is_fedora; then
+        [ -s "$BASE_VCONSOLE_FONT_FILE" ]
+    else
+        return 0
+    fi
+}
+
+base_vconsole_setup_succeeded() {
+    local result status=0
+
+    command -v systemctl >/dev/null 2>&1 || return 2
+    result=$(systemctl show -p Result --value \
+        systemd-vconsole-setup.service 2>/dev/null) || status=$?
+    [ "$status" -eq 0 ] || return "$status"
+    [ "$result" = success ]
+}
+
 # Keep the package contract in one place.  Both base check/verify and the
 # Fedora apply path consume this function so a package cannot be installed
 # without also being inspected (or inspected without being installable).
@@ -21,7 +48,7 @@ base_declared_packages() {
             fcitx5-configtool fcitx5-gtk fcitx5-mozc fcitx5-qt fcitx5-rime \
             flatpak libva-utils noto-fonts noto-fonts-cjk noto-fonts-emoji \
             pavucontrol pciutils pipewire pipewire-alsa pipewire-jack \
-            pipewire-pulse sof-firmware terminus-font \
+            pipewire-pulse sof-firmware terminus-fonts-console \
             ttf-jetbrains-mono-nerd usbutils vim wireplumber xdg-user-dirs
         return 0
     fi

@@ -71,6 +71,8 @@ desktop_niri_inspect() {
     desktop_niri_expect "$phase" config:niri-quickshell-startup \
         niri_quickshell_startup_satisfied \
             "$HOME_DIR/.config/niri/config.kdl"
+    desktop_niri_expect "$phase" config:optional-startup \
+        niri_optional_startup_satisfied
     desktop_niri_expect "$phase" config:niri-fcitx5-startup \
         niri_fcitx5_startup_satisfied \
             "$HOME_DIR/.config/niri/config.kdl"

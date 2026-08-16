@@ -169,7 +169,8 @@ expect_mapping noto-fonts-cjk google-noto-sans-cjk-fonts
 expect_mapping noto-fonts-emoji google-noto-color-emoji-fonts
 expect_mapping pipewire-pulse pipewire-pulseaudio
 expect_mapping pipewire-jack pipewire-jack-audio-connection-kit
-expect_mapping terminus-font terminus-fonts
+expect_mapping terminus-font terminus-fonts-console
+expect_mapping terminus-fonts-console terminus-fonts-console
 expect_mapping vim vim-enhanced
 expect_mapping intel-media-driver libva-intel-media-driver
 expect_mapping gst-plugins-base gstreamer1-plugins-base
@@ -244,10 +245,42 @@ source "$ROOT_DIR/scripts/modules/base/targets.sh"
 mapfile -t FEDORA_BASE_PACKAGES < <(base_declared_packages)
 printf '%s\n' "${FEDORA_BASE_PACKAGES[@]}" | grep -Fqx glibc-langpack-zh ||
     fail 'Fedora base check/apply contract must include glibc-langpack-zh'
-grep -Fq 'base_declared_packages' "$ROOT_DIR/scripts/modules/base.sh" ||
-    fail 'base check must consume the shared package contract'
-grep -Fq 'base_declared_packages' "$ROOT_DIR/scripts/modules/base/system-apply.sh" ||
-    fail 'base apply must consume the shared package contract'
+printf '%s\n' "${FEDORA_BASE_PACKAGES[@]}" | grep -Fqx terminus-fonts-console ||
+    fail 'Fedora base contract must install terminus-fonts-console'
+
+# Fedora's terminus-fonts-console package owns the exact ter-v28n file.  The
+# same fixed file and result contract must drive check/apply/verify, while
+# Arch retains the ter-v28n logical font name as before.
+DEFAULT_VCONSOLE_FONT_FILE=$BASE_VCONSOLE_FONT_FILE
+BASE_VCONSOLE_FONT_FILE="$TEST_DIR/ter-v28n.psf.gz"
+printf 'font\n' > "$BASE_VCONSOLE_FONT_FILE"
+[ "$(base_vconsole_font)" = ter-v28n ] ||
+    fail 'Fedora vconsole contract must keep the ter-v28n font'
+base_vconsole_font_file_present ||
+    fail 'Fedora vconsole contract must require the ter-v28n font file'
+VCONSOLE_SYSTEMCTL_RESULT=success
+systemctl() {
+    [ "${1:-}" = show ] || return 64
+    printf '%s\n' "$VCONSOLE_SYSTEMCTL_RESULT"
+}
+base_vconsole_setup_succeeded ||
+    fail 'successful systemd-vconsole-setup must satisfy the Fedora contract'
+VCONSOLE_SYSTEMCTL_RESULT=failed
+status=0
+base_vconsole_setup_succeeded || status=$?
+[ "$status" -eq 1 ] ||
+    fail 'failed systemd-vconsole-setup must remain a verification failure'
+rm -f "$BASE_VCONSOLE_FONT_FILE"
+status=0
+base_vconsole_font_file_present || status=$?
+[ "$status" -eq 1 ] ||
+    fail 'missing Fedora vconsole font file must be reported as drift'
+export SHORIN_DISTRO=arch
+[ "$(base_vconsole_font)" = ter-v28n ] ||
+    fail 'Arch vconsole font contract must remain ter-v28n'
+export SHORIN_DISTRO=fedora
+[ "$DEFAULT_VCONSOLE_FONT_FILE" = /usr/lib/kbd/consolefonts/ter-v28n.psf.gz ] ||
+    fail 'Fedora vconsole contract must declare the verified font path'
 
 # Fedora GPU targets must follow detected vendors. Mesa is the common runtime;
 # vendor driver families must not leak across Intel/AMD/NVIDIA hardware.
@@ -306,7 +339,8 @@ MANIFEST="$TEST_DIR/niri-packages.list"
 printf '%s\n' awww polkit-gnome AUR:wlogout AUR:clipse AUR:waypaper AUR:ddcutil-service \
     AUR:ttf-jetbrains-maple-mono-nf-xx-xx AUR:swaylock-effects \
     AUR:ttf-lxgw-wenkai-screen AUR:python-pywalfox AUR:niriswitcher \
-    AUR:unknown-aur-target > "$MANIFEST"
+    AUR:unknown-aur-target bluetui hyprpicker nwg-look satty starship swayosd \
+    breeze breeze5 breeze-icons imagemagick > "$MANIFEST"
 mapfile -t TARGETS < <(niri_all_package_targets "$MANIFEST" "$LIST_FILE")
 if printf '%s\n' "${TARGETS[@]}" | grep -Eq '^AUR:'; then
     fail 'Fedora desktop target contract must not expose raw AUR targets'
@@ -318,6 +352,20 @@ for target in wlogout ddcutil jetbrains-mono-fonts swaylock; do
     printf '%s\n' "${TARGETS[@]}" | grep -Fqx "$target" ||
         fail "Fedora desktop target translation is missing $target"
 done
+for mapping in \
+    'breeze=plasma-breeze' \
+    'breeze5=kf5-qqc2-breeze-style' \
+    'breeze-icons=breeze-icon-theme' \
+    'imagemagick=ImageMagick'; do
+    logical=${mapping%%=*}
+    expected=${mapping#*=}
+    actual=$(fedora_arch_target_name "$logical") ||
+        fail "Fedora desktop mapping is missing $logical"
+    [ "$actual" = "$expected" ] ||
+        fail "Fedora desktop mapping $logical -> $actual (expected $expected)"
+    printf '%s\n' "${TARGETS[@]}" | grep -Fqx "$logical" ||
+        fail "Fedora target enumeration dropped mapped optional target $logical"
+done
 for target in clipse waypaper nautilus-open-any-terminal; do
     if printf '%s\n' "${TARGETS[@]}" | grep -Fqx "$target"; then
         fail "unsupported Fedora optional target must be skipped: $target"
@@ -326,6 +374,11 @@ done
 for target in python-pywalfox niriswitcher ttf-lxgw-wenkai-screen; do
     if printf '%s\n' "${TARGETS[@]}" | grep -Fqx "$target"; then
         fail "unsupported Fedora optional target must be skipped: $target"
+    fi
+done
+for target in bluetui hyprpicker nwg-look satty starship swayosd; do
+    if printf '%s\n' "${TARGETS[@]}" | grep -Fqx "$target"; then
+        fail "unavailable Fedora optional target must be skipped: $target"
     fi
 done
 if printf '%s\n' "$(niri_required_package_targets)" | grep -Eq '^AUR:'; then
@@ -406,6 +459,35 @@ niri_package_target_satisfied "$CANONICAL" ||
     fail 'Fedora desktop verify must use the same canonical target'
 grep -Fqx 'ensure:wlogout' "$DNF_CALLS" ||
     fail 'Fedora desktop apply must install the translated package name'
+
+# Fedora ddcutil uses udev access rules; the desktop contract must not require
+# an Arch-only i2c group or modules-load file.  The Arch branch still keeps
+# those checks.
+MOCK_DESKTOP_INSTALLED[ddcutil]=1
+state_user_in_group() { return 1; }
+state_line_present() { return 1; }
+niri_optional_hardware_targets_match ||
+    fail 'Fedora ddcutil hardware contract must not require an i2c group'
+export SHORIN_DISTRO=arch
+if niri_optional_hardware_targets_match; then
+    fail 'Arch ddcutil hardware contract must retain its i2c checks'
+fi
+export SHORIN_DISTRO=fedora
+
+# A missing Fedora swayosd package must not leave a login-time spawn command
+# behind.  The optional target remains visible in diagnostics but is never
+# treated as a required package.
+printf 'spawn-at-startup "swayosd-server"\nspawn-at-startup "quickshell"\n' \
+    > "$NIRI_CONFIG_FILE"
+if niri_optional_startup_satisfied; then
+    fail 'Fedora missing swayosd must make its startup command drift'
+fi
+ensure_niri_optional_startup "$TARGET_USER" ||
+    fail 'Fedora optional startup cleanup must converge'
+! grep -Fq swayosd "$NIRI_CONFIG_FILE" ||
+    fail 'Fedora optional startup cleanup must remove swayosd-server'
+grep -Fq quickshell "$NIRI_CONFIG_FILE" ||
+    fail 'Fedora optional startup cleanup must preserve unrelated startup commands'
 
 if fedora_install_application_target unknown-aur-target "$TARGET_USER" "$HOME_DIR"; then
     fail 'unknown Fedora AUR target must not claim success'
