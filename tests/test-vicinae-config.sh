@@ -6,6 +6,9 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 export SHORIN_DISTRO=arch
+# This contract targets Arch semantics even when the test process runs on Fedora.
+# Keep the package-manager presence check deterministic without invoking a host tool.
+pacman() { return 0; }
 TEST_DIR=$(mktemp -d)
 HOME_DIR="$TEST_DIR/home"
 TARGET_USER=$(id -un)

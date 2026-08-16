@@ -90,6 +90,7 @@ assert_invalid_terminal_is_normalized() {
     output=$(TERM=xterm-kitty ENTRYPOINT="$ENTRYPOINT" bash -Eeuo pipefail -c '
         source "$ENTRYPOINT"
         infocmp() { [ "${1:-}" = xterm-256color ]; }
+        pacman() { return 0; }
         preflight_readonly repair
         printf "TERM=%s\n" "$TERM"
     ' 2>&1)
