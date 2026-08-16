@@ -6,6 +6,7 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 export SHORIN_DISTRO=arch
+REAL_NIRI_BIN=$(type -P niri || true)
 TEST_DIR=$(mktemp -d)
 TARGET_USER=$(id -un)
 HOME_DIR=$TEST_DIR/home
@@ -52,11 +53,15 @@ test_dotfiles_checkout_tracks_latest_and_falls_back_safely() (
     for repository in "$github_repo" "$gitee_repo"; do
         mkdir -p "$repository"
         mkdir -p "$repository/wallpapers" \
-            "$repository/dotfiles/.config/niri"
+            "$repository/dotfiles/.config/niri" \
+            "$repository/dotfiles/.config/quickshell/scripts"
         git init -q -b main "$repository"
         printf 'gitee-first\n' > "$repository/version.txt"
         printf 'wallpaper\n' > "$repository/wallpapers/$(basename "$NIRI_DEFAULT_WALLPAPER_FILE")"
         printf 'niri\n' > "$repository/dotfiles/.config/niri/config.kdl"
+        printf '#!/usr/bin/env bash\n' \
+            > "$repository/dotfiles/.config/quickshell/scripts/lockscreen.sh"
+        chmod 755 "$repository/dotfiles/.config/quickshell/scripts/lockscreen.sh"
         printf 'format = "repo"\n' > "$repository/dotfiles/.config/starship.toml"
         git -C "$repository" add .
         git -C "$repository" -c user.name=Fixture \
@@ -135,8 +140,12 @@ DOTFILES_CHECKOUT="$TEST_DIR/dotfiles-checkout"
 mkdir -p "$DOTFILES_CHECKOUT/dotfiles/.config/fish/conf.d"
 mkdir -p "$DOTFILES_CHECKOUT/dotfiles/.config/matugen/templates"
 mkdir -p "$DOTFILES_CHECKOUT/dotfiles/.config/niri" \
+    "$DOTFILES_CHECKOUT/dotfiles/.config/quickshell/scripts" \
     "$DOTFILES_CHECKOUT/wallpapers"
 printf 'niri source\n' > "$DOTFILES_CHECKOUT/dotfiles/.config/niri/config.kdl"
+printf '#!/usr/bin/env bash\n' \
+    > "$DOTFILES_CHECKOUT/dotfiles/.config/quickshell/scripts/lockscreen.sh"
+chmod 755 "$DOTFILES_CHECKOUT/dotfiles/.config/quickshell/scripts/lockscreen.sh"
 printf 'wallpaper source\n' > \
     "$DOTFILES_CHECKOUT/wallpapers/$(basename "$HOME_DIR/Pictures/Wallpapers/black-and-white-3840x2160-21293.jpg")"
 printf 'source "$HOME/.cargo/env.fish"\n' \
@@ -211,6 +220,13 @@ rm -f "$MISSING_CORE_CHECKOUT/dotfiles/.config/niri/config.kdl"
 rmdir "$MISSING_CORE_CHECKOUT/dotfiles/.config/niri"
 if deploy_dotfiles "$MISSING_CORE_CHECKOUT"; then
     fail 'a checkout missing the Niri core directory must fail closed'
+fi
+
+MISSING_LOCKSCREEN_CHECKOUT="$TEST_DIR/missing-lockscreen-checkout"
+cp -a "$DOTFILES_CHECKOUT" "$MISSING_LOCKSCREEN_CHECKOUT"
+rm -f "$MISSING_LOCKSCREEN_CHECKOUT/dotfiles/.config/quickshell/scripts/lockscreen.sh"
+if deploy_dotfiles "$MISSING_LOCKSCREEN_CHECKOUT"; then
+    fail 'a checkout missing the executable lockscreen source must fail closed'
 fi
 
 niri_matugen_starship_output_disabled ||
@@ -507,6 +523,8 @@ fi
 [ ! -e "$NIRI_FISH_RUSTUP_FILE" ] && [ ! -e "$NIRI_FISH_LOCAL_ENV_FILE" ] ||
     fail 'known legacy Fish source files must be migrated without duplicate sourcing'
 niri_bash_profile_satisfied || fail 'TTY1 Niri startup must use the managed profile block'
+niri_session_entry_satisfied ||
+    fail 'Niri session entry must use niri-session and avoid a bare niri launch'
 niri_legacy_autostart_absent || fail 'legacy Niri user service must be removed'
 grep -Fqx '// preserve niri marker' "$NIRI_CONFIG_FILE" ||
     fail 'Niri session convergence must preserve unrelated configuration'
@@ -539,6 +557,222 @@ grep -Fqx '    Mod+ALT+C repeat=false hotkey-overlay-title="窗口切换 FocusSh
 grep -Fq -- "-u $TARGET_USER -- env HOME=$HOME_DIR niri validate" \
     "$RUNUSER_VALIDATE_LOG" ||
     fail 'Niri validation must execute in the target user context'
+
+SESSION_PROFILE_COPY="$TEST_DIR/session-profile-before-entry-audit"
+SESSION_CONFIG_COPY="$TEST_DIR/session-config-before-entry-audit"
+cp "$NIRI_BASH_PROFILE" "$SESSION_PROFILE_COPY"
+cp "$NIRI_CONFIG_FILE" "$SESSION_CONFIG_COPY"
+printf '\nexec niri\n' >> "$NIRI_BASH_PROFILE"
+if niri_session_entry_satisfied; then
+    fail 'a bare niri launch must fail the session entry contract'
+fi
+cp "$SESSION_PROFILE_COPY" "$NIRI_BASH_PROFILE"
+printf '\ngraphical-session.target\n' >> "$NIRI_CONFIG_FILE"
+niri_session_entry_satisfied ||
+    fail 'session entry audit must remain scoped to .bash_profile'
+cp "$SESSION_CONFIG_COPY" "$NIRI_CONFIG_FILE"
+
+test_fedora_niri_session_compatibility() (
+    local fedora_home="$TEST_DIR/fedora-home"
+    local fedora_bin="$TEST_DIR/fedora-bin"
+    local empty_path="$TEST_DIR/empty-path"
+    local config_copy binds_copy arch_copy guard noise_file noise_output \
+        unguarded_file lockscreen_config_noise lockscreen_binds_noise \
+        saved_config_file saved_binds_file
+
+    export SHORIN_DISTRO=fedora HOME_DIR="$fedora_home"
+    unset NIRI_CONFIG_FILE NIRI_BINDS_FILE NIRI_LOCAL_BIN
+    unset NIRI_LOCKSCREEN_SCRIPT_FILE NIRI_FEDORA_POLKIT_AGENT_PATH
+    desktop_niri_contract_init
+    mkdir -p "$HOME_DIR/.config/niri" "$HOME_DIR/.config/quickshell/scripts" \
+        "$HOME_DIR/.local/bin" \
+        "$fedora_bin" "$empty_path"
+    printf '#!/usr/bin/env bash\n' > "$NIRI_LOCKSCREEN_SCRIPT_FILE"
+    chmod 755 "$NIRI_LOCKSCREEN_SCRIPT_FILE"
+    cat > "$NIRI_CONFIG_FILE" <<'EOF'
+environment {
+    PATH "/usr/local/bin:/usr/bin"
+}
+spawn-at-startup "lockscreen-wait.sh"
+spawn-sh-at-startup "fd-rdd --watch-mode tiered"
+spawn-at-startup "waybar"
+spawn-at-startup "quickshell"
+spawn-at-startup "/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1"
+EOF
+    cat > "$NIRI_BINDS_FILE" <<'EOF'
+binds {
+    Mod+W { spawn "vicinae" "toggle"; }
+    Mod+P { spawn "waypaper" "--random"; }
+    Mod+S { spawn "niriswitcherctl" "toggle"; }
+    Mod+H { spawn "hyprpicker"; }
+    Mod+Q { spawn-sh "hyprpicker | wl-copy"; }
+    Mod+R { spawn-sh "vicinae toggle"; }
+}
+EOF
+    chown -R "$TARGET_USER:" "$HOME_DIR"
+
+    noise_file="$TEST_DIR/fedora-compatibility-noise.kdl"
+    noise_output="$TEST_DIR/fedora-compatibility-noise.output.kdl"
+    cat > "$noise_file" <<'EOF'
+
+  // spawn-at-startup "lockscreen-wait.sh"
+# polkit-gnome-authentication-agent-1
+ordinary text lockscreen-wait.sh polkit-gnome-authentication-agent-1
+text "spawn-at-startup \"lockscreen-wait.sh\""
+EOF
+    awk -v optional='fd-rdd vicinae waypaper niriswitcherctl niriswitcher waybar hyprpicker' \
+        -v polkit="$NIRI_FEDORA_POLKIT_AGENT_PATH" \
+        -f "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-config-compatibility.awk" \
+        "$noise_file" > "$noise_output" ||
+        fail 'Fedora compatibility AWK must process non-command text'
+    cmp -s "$noise_file" "$noise_output" ||
+        fail 'comments and ordinary text must remain byte-for-byte unchanged'
+    niri_fedora_config_file_compatibility_satisfied "$noise_file" ||
+        fail 'comments and ordinary text must not fail the Fedora compatibility contract'
+
+    unguarded_file="$TEST_DIR/fedora-compatibility-unguarded.kdl"
+    printf '%s\n' 'spawn-sh "vicinae toggle"' > "$unguarded_file"
+    if niri_fedora_config_file_compatibility_satisfied "$unguarded_file"; then
+        fail 'an actual unguarded optional spawn must fail the Fedora compatibility contract'
+    fi
+
+    saved_config_file=$NIRI_CONFIG_FILE
+    saved_binds_file=$NIRI_BINDS_FILE
+    lockscreen_config_noise="$TEST_DIR/fedora-lockscreen-noise-config.kdl"
+    lockscreen_binds_noise="$TEST_DIR/fedora-lockscreen-noise-binds.kdl"
+    cat > "$lockscreen_config_noise" <<'EOF'
+// lockscreen.sh
+description "lockscreen.sh"
+spawn-at-startup "quickshell"
+EOF
+    cat > "$lockscreen_binds_noise" <<'EOF'
+binds {
+    Mod+W { spawn "kitty"; }
+}
+EOF
+    NIRI_CONFIG_FILE=$lockscreen_config_noise
+    NIRI_BINDS_FILE=$lockscreen_binds_noise
+    if niri_fedora_lockscreen_contract_satisfied; then
+        fail 'comments and ordinary text must not satisfy the active lockscreen contract'
+    fi
+    NIRI_CONFIG_FILE=$saved_config_file
+    NIRI_BINDS_FILE=$saved_binds_file
+
+    ensure_niri_fedora_session_compatibility "$TARGET_USER" ||
+        fail 'Fedora Niri compatibility migration must converge'
+    niri_fedora_session_compatibility_satisfied ||
+        fail 'Fedora Niri compatibility contract must accept guarded commands'
+    grep -Fq 'spawn-sh-at-startup "command -v' "$NIRI_CONFIG_FILE" ||
+        fail 'Fedora startup commands must use shell guards'
+    grep -Fq 'command -v waybar >/dev/null 2>&1' "$NIRI_CONFIG_FILE" ||
+        fail 'Fedora Waybar startup must be guarded'
+    grep -Fq 'command -v fd-rdd >/dev/null 2>&1' "$NIRI_CONFIG_FILE" ||
+        fail 'an existing spawn-sh startup must be guarded'
+    grep -Fq 'spawn-sh "command -v vicinae' "$NIRI_BINDS_FILE" ||
+        fail 'Fedora binding guards must preserve original arguments'
+    grep -Fq '(\"vicinae\" \"toggle\")' "$NIRI_BINDS_FILE" ||
+        fail 'Fedora binding guards must retain original arguments in one shell string'
+    grep -Fq 'command -v hyprpicker >/dev/null 2>&1 && (hyprpicker | wl-copy)' \
+        "$NIRI_BINDS_FILE" ||
+        fail 'an existing hyprpicker pipeline must be guarded inside its shell string'
+    grep -Fq 'command -v vicinae >/dev/null 2>&1 && (vicinae toggle)' \
+        "$NIRI_BINDS_FILE" ||
+        fail 'an existing spawn-sh command must be guarded inside its shell string'
+    if grep -Eq 'spawn-sh[^\n]*"sh" "-c"' "$NIRI_CONFIG_FILE" "$NIRI_BINDS_FILE"; then
+        fail 'Fedora shell spawns must not emit extra KDL arguments'
+    fi
+    grep -Fq 'spawn-at-startup "lockscreen.sh"' "$NIRI_CONFIG_FILE" ||
+        fail 'Fedora lockscreen startup must use lockscreen.sh'
+    grep -Fq '/usr/libexec/kf6/polkit-kde-authentication-agent-1' \
+        "$NIRI_CONFIG_FILE" ||
+        fail 'Fedora polkit startup must use the KDE authentication agent'
+    niri_config_valid "$TARGET_USER" ||
+        fail 'Fedora migrated configuration must pass the niri validate fixture'
+
+    if [ -n "$REAL_NIRI_BIN" ] && [ -f "$HOME/.config/niri/config.kdl" ]; then
+        local real_niri_home="$TEST_DIR/real-niri-home"
+        export HOME_DIR="$real_niri_home"
+        mkdir -p "$HOME_DIR/.config"
+        cp -a "$HOME/.config/niri" "$HOME_DIR/.config/niri"
+        mkdir -p "$HOME_DIR/.config/quickshell/scripts"
+        printf '#!/bin/sh\n' > "$HOME_DIR/.config/quickshell/scripts/lockscreen.sh"
+        chmod 755 "$HOME_DIR/.config/quickshell/scripts/lockscreen.sh"
+        NIRI_CONFIG_FILE="$HOME_DIR/.config/niri/config.kdl"
+        NIRI_BINDS_FILE="$HOME_DIR/.config/niri/binds.kdl"
+        NIRI_LOCKSCREEN_SCRIPT_FILE="$HOME_DIR/.config/quickshell/scripts/lockscreen.sh"
+        export NIRI_CONFIG_FILE NIRI_BINDS_FILE NIRI_LOCKSCREEN_SCRIPT_FILE
+        chown -R "$TARGET_USER:" "$HOME_DIR"
+        ensure_niri_fedora_session_compatibility "$TARGET_USER" ||
+            fail 'the real Niri fixture must converge before validation'
+        XDG_CONFIG_HOME="$HOME_DIR/.config" "$REAL_NIRI_BIN" validate \
+            -c "$NIRI_CONFIG_FILE" ||
+            fail 'the real Niri validator must accept the Fedora migration'
+    fi
+
+    config_copy="$TEST_DIR/fedora-config-before-idempotent.kdl"
+    binds_copy="$TEST_DIR/fedora-binds-before-idempotent.kdl"
+    cp "$NIRI_CONFIG_FILE" "$config_copy"
+    cp "$NIRI_BINDS_FILE" "$binds_copy"
+    ensure_niri_fedora_session_compatibility "$TARGET_USER" ||
+        fail 'a second Fedora compatibility run must succeed'
+    cmp -s "$config_copy" "$NIRI_CONFIG_FILE" ||
+        fail 'Fedora config migration must be content-idempotent'
+    cmp -s "$binds_copy" "$NIRI_BINDS_FILE" ||
+        fail 'Fedora binding migration must be content-idempotent'
+
+    guard=$(niri_optional_command_guard_contract vicinae)
+    if env -i PATH="$empty_path" HOME="$HOME_DIR" /usr/bin/bash \
+        -c "$guard" sh toggle; then
+        fail 'an absent optional command must make its shell guard skip'
+    fi
+    cat > "$fedora_bin/vicinae" <<'EOF'
+#!/bin/sh
+[ "$1" = toggle ]
+EOF
+    chmod 755 "$fedora_bin/vicinae"
+    env -i PATH="$fedora_bin" HOME="$HOME_DIR" /usr/bin/bash \
+        -c "$guard" sh toggle ||
+        fail 'an installed optional command must run through its shell guard'
+
+    printf '%s\n' 'arch legacy configuration' > "$NIRI_CONFIG_FILE"
+    printf '%s\n' 'arch legacy bindings' > "$NIRI_BINDS_FILE"
+    arch_copy="$TEST_DIR/arch-config-before-noop.kdl"
+    cp "$NIRI_CONFIG_FILE" "$arch_copy"
+    export SHORIN_DISTRO=arch
+    ensure_niri_fedora_session_compatibility "$TARGET_USER" ||
+        fail 'Fedora compatibility helper must be a no-op on Arch'
+    cmp -s "$arch_copy" "$NIRI_CONFIG_FILE" ||
+        fail 'Arch config must remain unchanged by Fedora migration'
+
+    export SHORIN_DISTRO=fedora
+    cat > "$NIRI_CONFIG_FILE" <<'EOF'
+spawn-at-startup "lockscreen-wait.sh"
+spawn-at-startup "waybar"
+EOF
+    cat > "$NIRI_BINDS_FILE" <<'EOF'
+binds {
+    Mod+W { spawn "vicinae" "toggle"; }
+}
+EOF
+    cp "$NIRI_CONFIG_FILE" "$config_copy"
+    cp "$NIRI_BINDS_FILE" "$binds_copy"
+    ensure_niri_quickshell_startup() { :; }
+    ensure_niri_optional_startup() { :; }
+    ensure_niri_fcitx5_startup() { :; }
+    ensure_niri_path() { :; }
+    ensure_niri_wallpaper_backend() { :; }
+    niri_config_valid() { return 1; }
+    if ensure_niri_managed_config_files "$TARGET_USER"; then
+        fail 'a validation failure must reject Fedora config migration'
+    fi
+    cmp -s "$config_copy" "$NIRI_CONFIG_FILE" ||
+        fail 'a failed Fedora migration must restore config.kdl'
+    cmp -s "$binds_copy" "$NIRI_BINDS_FILE" ||
+        fail 'a failed Fedora migration must restore binds.kdl'
+)
+
+test_fedora_niri_session_compatibility
+export SHORIN_DISTRO=arch
 
 printf 'set -gx USER_CUSTOM_ENV preserved\n' > "$NIRI_FISH_RUSTUP_FILE"
 FISH_CUSTOM_COPY="$TEST_DIR/custom-rustup.fish"

@@ -5,6 +5,7 @@ trap 'printf "ERROR: %s:%s: %s\n" \
   "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 niri_session_contract_init() {
+    NIRI_LOCAL_BIN=${NIRI_LOCAL_BIN:-$HOME_DIR/.local/bin}
     NIRI_CONFIG_FILE=${NIRI_CONFIG_FILE:-$HOME_DIR/.config/niri/config.kdl}
     NIRI_BINDS_FILE=${NIRI_BINDS_FILE:-$HOME_DIR/.config/niri/binds.kdl}
     NIRI_QUICKSHELL_DIR=${NIRI_QUICKSHELL_DIR:-$HOME_DIR/.config/quickshell}
@@ -14,7 +15,8 @@ niri_session_contract_init() {
     NIRI_BASH_PROFILE=${NIRI_BASH_PROFILE:-$HOME_DIR/.bash_profile}
     NIRI_LEGACY_UNIT=${NIRI_LEGACY_UNIT:-$HOME_DIR/.config/systemd/user/niri-autostart.service}
     NIRI_LEGACY_UNIT_LINK=${NIRI_LEGACY_UNIT_LINK:-$HOME_DIR/.config/systemd/user/default.target.wants/niri-autostart.service}
-    NIRI_LOCAL_BIN=${NIRI_LOCAL_BIN:-$HOME_DIR/.local/bin}
+    NIRI_LOCKSCREEN_SCRIPT_FILE=${NIRI_LOCKSCREEN_SCRIPT_FILE:-$NIRI_QUICKSHELL_DIR/scripts/lockscreen.sh}
+    NIRI_FEDORA_POLKIT_AGENT_PATH=${NIRI_FEDORA_POLKIT_AGENT_PATH:-/usr/libexec/kf6/polkit-kde-authentication-agent-1}
 }
 
 niri_run_as_user() {
@@ -115,6 +117,84 @@ niri_optional_startup_satisfied() {
         1) ! niri_swayosd_startup_command_present ;;
         *) return "$package_status" ;;
     esac
+}
+
+niri_optional_command_guard_contract() {
+    case "$1" in
+        fd-rdd|vicinae|waypaper|niriswitcher|niriswitcherctl|waybar|hyprpicker)
+            printf 'command -v %s >/dev/null 2>&1 && exec %s "$@"' "$1" "$1"
+            ;;
+        *) return 2 ;;
+    esac
+}
+
+niri_fedora_config_file_compatibility_satisfied() {
+    local file=$1
+    local optional_commands='fd-rdd vicinae waypaper niriswitcherctl niriswitcher waybar hyprpicker'
+
+    [ -s "$file" ] || return 1
+    awk -v optional="$optional_commands" \
+        -v polkit="$NIRI_FEDORA_POLKIT_AGENT_PATH" \
+        -v validate=1 \
+        -f "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-config-compatibility.awk" \
+        "$file" >/dev/null
+}
+
+niri_fedora_lockscreen_contract_satisfied() {
+    local optional_commands='fd-rdd vicinae waypaper niriswitcherctl niriswitcher waybar hyprpicker'
+
+    platform_is_fedora || return 0
+    awk -v optional="$optional_commands" \
+        -v polkit="$NIRI_FEDORA_POLKIT_AGENT_PATH" \
+        -v validate=1 \
+        -v require_lockscreen=1 \
+        -f "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-config-compatibility.awk" \
+        "$NIRI_CONFIG_FILE" "$NIRI_BINDS_FILE" >/dev/null || return 1
+    [ -f "$NIRI_LOCKSCREEN_SCRIPT_FILE" ] &&
+        [ ! -L "$NIRI_LOCKSCREEN_SCRIPT_FILE" ] &&
+        [ -x "$NIRI_LOCKSCREEN_SCRIPT_FILE" ] &&
+        [ "$(stat -c '%U' "$NIRI_LOCKSCREEN_SCRIPT_FILE")" = "$TARGET_USER" ]
+}
+
+niri_fedora_session_compatibility_satisfied() {
+    platform_is_fedora || return 0
+    niri_fedora_lockscreen_contract_satisfied || return 1
+    niri_fedora_config_file_compatibility_satisfied "$NIRI_CONFIG_FILE" || return 1
+    niri_fedora_config_file_compatibility_satisfied "$NIRI_BINDS_FILE"
+}
+
+ensure_niri_fedora_config_file_compatibility() {
+    local file=$1 user=$2 temporary mode group
+    local optional_commands='fd-rdd vicinae waypaper niriswitcherctl niriswitcher waybar hyprpicker'
+
+    require_writable_mode || return
+    platform_is_fedora || return 0
+    [ -f "$file" ] || return 1
+    temporary=$(mktemp)
+    if ! awk -v optional="$optional_commands" -v polkit="$NIRI_FEDORA_POLKIT_AGENT_PATH" \
+        -f "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-config-compatibility.awk" \
+        "$file" > "$temporary"; then
+        rm -f "$temporary"
+        return 1
+    fi
+    mode=$(stat -c '%a' "$file")
+    group=$(id -gn "$user")
+    if ! install_if_changed "$temporary" "$file" "$mode"; then
+        rm -f "$temporary"
+        return 1
+    fi
+    rm -f "$temporary"
+    chown "$user:$group" "$file"
+    niri_fedora_config_file_compatibility_satisfied "$file"
+}
+
+ensure_niri_fedora_session_compatibility() {
+    local user=$1
+
+    platform_is_fedora || return 0
+    ensure_niri_fedora_config_file_compatibility "$NIRI_CONFIG_FILE" "$user" || return
+    ensure_niri_fedora_config_file_compatibility "$NIRI_BINDS_FILE" "$user" || return
+    niri_fedora_session_compatibility_satisfied
 }
 
 ensure_niri_optional_startup() {

@@ -65,6 +65,9 @@ dotfiles_source_contract() {
     local dotfiles="$checkout/dotfiles"
     local config_dir="$dotfiles/.config"
     local niri_dir="$config_dir/niri"
+    local quickshell_dir="$config_dir/quickshell"
+    local quickshell_scripts_dir="$quickshell_dir/scripts"
+    local lockscreen_script="$quickshell_scripts_dir/lockscreen.sh"
     local wallpapers="$checkout/wallpapers"
     local wallpaper="$wallpapers/$(basename "$NIRI_DEFAULT_WALLPAPER_FILE")"
     local starship="$config_dir/starship.toml"
@@ -72,9 +75,13 @@ dotfiles_source_contract() {
     [ -d "$dotfiles" ] && [ ! -L "$dotfiles" ] || return 1
     [ -d "$config_dir" ] && [ ! -L "$config_dir" ] || return 1
     [ -d "$niri_dir" ] && [ ! -L "$niri_dir" ] || return 1
+    [ -d "$quickshell_dir" ] && [ ! -L "$quickshell_dir" ] || return 1
+    [ -d "$quickshell_scripts_dir" ] && [ ! -L "$quickshell_scripts_dir" ] || return 1
     [ -d "$wallpapers" ] && [ ! -L "$wallpapers" ] || return 1
     [ -f "$niri_dir/config.kdl" ] && [ -s "$niri_dir/config.kdl" ] &&
         [ ! -L "$niri_dir/config.kdl" ] || return 1
+    [ -f "$lockscreen_script" ] && [ -s "$lockscreen_script" ] &&
+        [ ! -L "$lockscreen_script" ] && [ -x "$lockscreen_script" ] || return 1
     [ -f "$wallpaper" ] && [ -s "$wallpaper" ] && [ ! -L "$wallpaper" ] ||
         return 1
     [ -f "$starship" ] && [ -s "$starship" ] && [ ! -L "$starship" ] ||

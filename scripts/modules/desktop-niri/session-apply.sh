@@ -29,7 +29,8 @@ ensure_niri_managed_config_files() {
         quickshell_modes+=("$(stat -c '%a' "$file")")
     done < <(find "$NIRI_QUICKSHELL_DIR" -type f -print0)
 
-    ensure_niri_quickshell_startup "$NIRI_CONFIG_FILE" "$user" || status=$?
+    ensure_niri_fedora_session_compatibility "$user" || status=$?
+    [ "$status" -ne 0 ] || ensure_niri_quickshell_startup "$NIRI_CONFIG_FILE" "$user" || status=$?
     [ "$status" -ne 0 ] || ensure_niri_optional_startup "$user" || status=$?
     [ "$status" -ne 0 ] || ensure_niri_fcitx5_startup \
         "$NIRI_CONFIG_FILE" "$user" || status=$?

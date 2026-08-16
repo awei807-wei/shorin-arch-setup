@@ -84,6 +84,21 @@ niri_bash_profile_satisfied() {
     [ "$actual" = "$expected" ]
 }
 
+niri_session_entry_satisfied() {
+    local file
+
+    niri_bash_profile_satisfied || return 1
+    file=$NIRI_BASH_PROFILE
+    awk '
+        {
+            line=$0
+            sub(/[[:space:]]*#.*/, "", line)
+            if (line ~ /(^|[[:space:]])(exec[[:space:]]+)?(\/[^[:space:]]*\/)?niri([[:space:]]|$)/) found=1
+        }
+        END { exit found + 0 }
+    ' "$file"
+}
+
 niri_legacy_autostart_absent() {
     [ ! -e "$NIRI_LEGACY_UNIT" ] && [ ! -L "$NIRI_LEGACY_UNIT" ] &&
         [ ! -e "$NIRI_LEGACY_UNIT_LINK" ] &&
