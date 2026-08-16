@@ -158,7 +158,12 @@ NETWORK_QUERY_STATUS=0
 NETWORK_START_STATUS=0
 NETWORK_START_ACTIVATES=1
 virsh() {
-    case "$1 $2" in
+    local command=''
+    if [ "${1:-}" = -c ]; then
+        [ "${2:-}" = qemu:///system ] || return 3
+        shift 2
+    fi
+    case "$1 ${2:-}" in
         'net-info default')
             [ "${LC_ALL:-}" = C ] || return 3
             if [ "$NETWORK_QUERY_STATUS" -ne 0 ]; then

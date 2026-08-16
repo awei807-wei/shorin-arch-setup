@@ -39,19 +39,29 @@ Fedora + niri：
 sudo bash install.sh install --distro fedora --user shorin
 ```
 
-Fedora 的第三方目标按以下方式收敛：Heroic、Upscaler、MangoJuice 使用 Flathub；
+Fedora 的第三方目标按以下方式收敛：Heroic、Upscaler、MangoJuice、VS Code、
+Curtail、Mission Center 和 Steam 使用 Flathub；Steam 额外在其实际安装 scope
+设置 `LANG=zh_CN.UTF-8` override，并验收 system/user Flatpak desktop export，
+不依赖原生 `/usr/share/applications/steam.desktop`。`fd` 使用 Fedora 的 `fd-find` 包并验收
+`/usr/bin/fd`；LACT 先幂等启用 `ilyaz/LACT` COPR，再安装 `lact` 并启用/启动
+`lactd.service`；Yazi 按官方 crates.io 安装约定，由目标用户以 Cargo 的
+`yazi-build` meta-crate 固定到 `26.8.15`（`--locked --force`），同时验收
+`yazi` 和 `ya` 两个命令。Lutris 在 Fedora 使用 `alsa-plugins-pulseaudio`。
 Clash Verge、Linux QQ、微信、Thorium 和 Mark Shot 从 `FEDORA_RPM_DIR`（或目标用户
-`Downloads`、`/tmp`）发现官方 RPM；`tsukimi-bin` 使用 `walker874/tsukimi` COPR；
-Vicinae 使用官方 AppImage，同时确保 Gear Lever Flatpak 可用；`lsfg-vk-bin` 先收敛
-`qt6-qtdeclarative` 和 `qt6-qtbase`，再安装本地官方 RPM；`fd-rdd-git` 使用可配置的
-官方 `install.sh`。找不到外部 artifact 时安装器会输出来源、glob 和可执行的交接路径，
-不会把“依赖已安装”冒充为主程序已安装。
+XDG Downloads，包括中文 `下载`、以及 `/tmp`）发现官方 RPM；`tsukimi-bin` 使用
+`walker874/tsukimi` COPR；Vicinae 使用官方 AppImage，同时确保 Gear Lever Flatpak
+可用；`lsfg-vk-bin` 先收敛 `qt6-qtdeclarative` 和 `qt6-qtbase`，再安装本地官方 RPM。
+`fd-rdd-git` 不再重试已失效的固定网络 URL，只接受
+`FEDORA_FD_RDD_INSTALL_SCRIPT` 指定的本地官方 installer；`typora-free` 没有声明来源，
+会明确标记为 skipped。找不到外部 artifact 时安装器会输出来源、glob 和可执行的交接
+路径，不会把“依赖已安装”冒充为主程序已安装；这类目标会记录为 `pending/skip`，写入
+`~/Documents/安装待处理的软件.txt`，且不会阻断其他独立可选模块。
 
 Vicinae 的自动收敛路径是目标用户 `~/.local/bin/vicinae.AppImage` 加托管的
 `~/.local/share/applications/vicinae.desktop`，并要求 Gear Lever Flatpak 已安装；
 只有这三个状态同时满足时才报告已集成。也可以通过 `FEDORA_VICINAE_APPIMAGE`
 指定本地官方 AppImage；`fd-rdd` 可通过 `FEDORA_FD_RDD_INSTALL_SCRIPT` 交接本地官方
-`install.sh`，避免在网络受限时把下载失败误报为成功。
+`install.sh`，避免在网络受限时把失效网络 URL 或下载失败误报为成功。
 
 `install` 和 `repair` 必须由 root 启动，因为它们需要调用发行版包管理器（Arch 为
 `pacman`，Fedora 为 `dnf`）、写入
@@ -177,7 +187,7 @@ bash install.sh verify --user shorin grub
 | `base` | 必需 | 无 | 软件源、基础包、用户、locale、音频、输入法、电源和 GPU |
 | `desktop-niri` | 必需 | `storage base` | Niri 桌面、QuickShell、portal、TTY1 会话和用户配置 |
 | `applications` | 可选 | `base` | Repo、AUR、Flatpak、GitHub 应用及应用配置 |
-| `virtualization` | 可选 | `applications` | QEMU/KVM、libvirt、用户组和默认网络 |
+| `virtualization` | 可选 | `base` | QEMU/KVM、libvirt、用户组和默认网络 |
 | `nas-rime` | 可选 | `base` | NFS、Rime 同步和用户定时器 |
 | `vcp` | 可选 | `applications` | VCPChat 桌面入口和 NAS 备份定时器 |
 | `grub` | 必需 | `storage base` | 双启动、Btrfs 集成、主题及配置验收 |

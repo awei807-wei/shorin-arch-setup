@@ -9,19 +9,57 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 # shared manifest, while Fedora receives a verified Flatpak/RPM/COPR action.
 
 FEDORA_RPM_DIR=${FEDORA_RPM_DIR:-${SHORIN_RPM_DIR:-}}
-FEDORA_FD_RDD_INSTALL_URL=${FEDORA_FD_RDD_INSTALL_URL:-https://raw.githubusercontent.com/vicinae/fd-rdd/main/install.sh}
 
 fedora_user_bin() {
     printf '%s\n' "${2:-$HOME_DIR}/.local/bin/$1"
 }
 
+fedora_user_download_directory() {
+    local home=${1:-${HOME_DIR:-}} directory line value
+
+    [ -n "$home" ] || return 1
+    if command -v xdg-user-dir >/dev/null 2>&1; then
+        directory=$(HOME="$home" XDG_CONFIG_HOME="$home/.config" \
+            xdg-user-dir DOWNLOAD 2>/dev/null) || directory=''
+        case "$directory" in
+            "$home"/*) printf '%s\n' "$directory"; return 0 ;;
+        esac
+    fi
+    if [ -r "$home/.config/user-dirs.dirs" ]; then
+        while IFS= read -r line; do
+            case "$line" in
+                XDG_DOWNLOAD_DIR=\"*\")
+                    value=${line#XDG_DOWNLOAD_DIR=\"}
+                    value=${value%\"}
+                    case "$value" in
+                        '$HOME'/*)
+                            value="$home/${value#\$HOME/}" ;;
+                        /*) ;;
+                        *) continue ;;
+                    esac
+                    case "$value" in
+                        "$home"/*) printf '%s\n' "$value"; return 0 ;;
+                    esac
+                    ;;
+            esac
+        done < "$home/.config/user-dirs.dirs"
+    fi
+    [ -d "$home/Downloads" ] && printf '%s\n' "$home/Downloads" && return 0
+    [ -d "$home/下载" ] && printf '%s\n' "$home/下载" && return 0
+    return 1
+}
+
 fedora_rpm_file() {
-    local pattern=$1 directory file match=''
+    local pattern=$1 directory file match='' download_directory
     local -a directories=()
 
     [ -n "${FEDORA_RPM_DIR:-}" ] && directories+=("$FEDORA_RPM_DIR")
     [ -n "${SHORIN_ARTIFACT_DIR:-}" ] && directories+=("$SHORIN_ARTIFACT_DIR")
-    directories+=("$PWD" "${HOME_DIR:-/nonexistent}/Downloads" /tmp)
+    if download_directory=$(fedora_user_download_directory "${HOME_DIR:-}"); then
+        directories+=("$download_directory")
+    fi
+    directories+=("$PWD" "${HOME_DIR:-/nonexistent}/Downloads" \
+        "${HOME_DIR:-/nonexistent}/下载" /tmp)
     for directory in "${directories[@]}"; do
         [ -d "$directory" ] || continue
         match=''
@@ -42,9 +80,9 @@ fedora_install_local_rpm() {
     require_writable_mode || return
     file=$(fedora_rpm_file "$pattern") || true
     if [ -z "$file" ]; then
-        error "Fedora $label RPM was not found (pattern: $pattern)."
+        warn "Pending Fedora artifact: $label RPM was not found (pattern: $pattern)."
         warn "Place the official RPM in FEDORA_RPM_DIR, SHORIN_ARTIFACT_DIR, the target user's Downloads, or /tmp, then rerun."
-        return 1
+        return "$RC_SKIPPED"
     fi
     log "Installing official Fedora RPM: $file"
     dnf install -y "$file"
@@ -65,52 +103,6 @@ fedora_rpm_or_command() {
     fi
     [ "$status" -eq 1 ] || return "$status"
     command -v "$command_name" >/dev/null 2>&1
-}
-
-fedora_application_target_satisfied() {
-    local package=$1 user=${2:-${TARGET_USER:-}} home=${3:-${HOME_DIR:-}}
-    local appimage gearlever
-
-    case "$package" in
-        heroic-games-launcher-bin)
-            state_flatpak_present com.heroicgameslauncher.hgl ;;
-        upscaler)
-            state_flatpak_present io.gitlab.theevilskeleton.Upscaler ;;
-        clash-verge-rev)
-            fedora_rpm_or_command '(^|[-.])clash[-_]?verge' clash-verge ;;
-        linuxqq-appimage)
-            fedora_rpm_or_command '(^|[-.])linuxqq' qq ;;
-        wechat-appimage)
-            fedora_rpm_or_command '(^|[-.])wechat' wechat ;;
-        lsfg-vk-bin)
-            package_is_installed qt6-qtdeclarative &&
-                package_is_installed qt6-qtbase &&
-                fedora_rpm_or_command 'lsfg[-_]?vk' lsfg-vk ;;
-        mangojuice-bin)
-            state_flatpak_present io.github.radiolamp.mangojuice ;;
-        vicinae-bin|vicinae)
-            gearlever=1
-            state_flatpak_present it.mijorus.gearlever || gearlever=0
-            appimage=$(fedora_user_bin vicinae.AppImage "$home")
-            [ "$gearlever" -eq 1 ] && [ -x "$appimage" ] &&
-                fedora_vicinae_desktop_satisfied "$home" ;;
-        fd-rdd-git)
-            [ -x "$(fedora_user_bin fd-rdd "$home")" ] ||
-                command -v fd-rdd >/dev/null 2>&1 ;;
-        tsukimi-bin)
-            package_is_installed tsukimi || command -v tsukimi >/dev/null 2>&1 ;;
-        thorium-browser-bin)
-            fedora_rpm_or_command 'thorium[-_]?browser' thorium-browser ;;
-        mark-shot)
-            fedora_rpm_or_command '(^|[-.])mark[-_]?shot' mark-shot ;;
-        typora-free)
-            return 1 ;;
-        *)
-            local mapped
-            mapped=$(fedora_arch_target_name "AUR:$package") || return 1
-            package_is_installed "$mapped"
-            ;;
-    esac
 }
 
 fedora_vicinae_desktop_satisfied() {
@@ -139,10 +131,10 @@ fedora_install_vicinae() {
         file=$(fedora_rpm_file '*vicinae*.AppImage') || true
     fi
     if [ -z "$file" ]; then
-        error 'Official Vicinae AppImage was not found.'
+        warn 'Pending Fedora artifact: official Vicinae AppImage was not found.'
         warn 'Set FEDORA_VICINAE_APPIMAGE to the downloaded official AppImage, or place vicinae*.AppImage in FEDORA_RPM_DIR/SHORIN_ARTIFACT_DIR, the target user Downloads, or /tmp.'
         warn 'Gear Lever is installed, but no Vicinae integration is claimed until the AppImage and its managed desktop entry are present.'
-        return 1
+        return "$RC_SKIPPED"
     fi
     [[ "$(basename "$file")" =~ [Vv]icinae ]] || {
         error "Artifact does not look like a Vicinae AppImage: $file"
@@ -167,122 +159,8 @@ EOF
     [ -x "$destination" ] && fedora_vicinae_desktop_satisfied "$home"
 }
 
-fedora_install_fd_rdd() {
-    local user=$1 home=$2 script temporary
 
-    require_writable_mode || return
-    if [ -n "${FEDORA_FD_RDD_INSTALL_SCRIPT:-}" ] &&
-        [ -r "$FEDORA_FD_RDD_INSTALL_SCRIPT" ]; then
-        script=$FEDORA_FD_RDD_INSTALL_SCRIPT
-    else
-        command -v curl >/dev/null 2>&1 || {
-            error 'curl is required to fetch the official fd-rdd install.sh.'
-            return 1
-        }
-        case "$FEDORA_FD_RDD_INSTALL_URL" in
-            https://raw.githubusercontent.com/vicinae/fd-rdd/*) ;;
-            *)
-                error "Refusing a non-official fd-rdd installer URL: $FEDORA_FD_RDD_INSTALL_URL"
-                return 1
-                ;;
-        esac
-        temporary=$(mktemp)
-        if ! curl --fail --location --retry 3 --proto '=https' --tlsv1.2 \
-            "$FEDORA_FD_RDD_INSTALL_URL" -o "$temporary"; then
-            rm -f "$temporary"
-            error "Unable to download official fd-rdd installer: $FEDORA_FD_RDD_INSTALL_URL"
-            return 1
-        fi
-        script=$temporary
-    fi
-    grep -q '^#!' "$script" || {
-        [ -n "${temporary:-}" ] && rm -f "$temporary"
-        error 'Downloaded fd-rdd installer did not contain a shebang.'
-        return 1
-    }
-    if ! runuser -u "$user" -- env HOME="$home" bash "$script"; then
-        [ -n "${temporary:-}" ] && rm -f "$temporary"
-        error 'The official fd-rdd install.sh failed for the target user.'
-        return 1
-    fi
-    [ -n "${temporary:-}" ] && rm -f "$temporary"
-    fedora_application_target_satisfied fd-rdd-git "$user" "$home"
-}
-
-fedora_install_verified_rpm_target() {
-    local package=$1 user=$2 home=$3 label=$4 pattern=$5
-
-    fedora_install_local_rpm "$label" "$pattern" &&
-        fedora_application_target_satisfied "$package" "$user" "$home"
-}
-
-fedora_install_clash_verge() {
-    local package=$1 user=$2 home=$3
-
-    fedora_install_verified_rpm_target \
-        "$package" "$user" "$home" 'Clash Verge' 'Clash Verge-*.rpm' &&
-        return 0
-    fedora_install_verified_rpm_target \
-        "$package" "$user" "$home" 'Clash Verge' 'Clash.Verge*.rpm' &&
-        return 0
-    fedora_install_verified_rpm_target \
-        "$package" "$user" "$home" 'Clash Verge' 'clash-verge*.rpm'
-}
-
-fedora_install_application_target() {
-    local package=$1 user=${2:-${TARGET_USER:-}} home=${3:-${HOME_DIR:-}}
-    local mapped
-
-    require_writable_mode || return
-    [ -n "$user" ] && [ -n "$home" ] || {
-        error "A Fedora application target requires a target user: $package"
-        return 1
-    }
-    if fedora_application_target_satisfied "$package" "$user" "$home"; then
-        log "Skipping Fedora target already satisfied: $package"
-        return 0
-    fi
-    case "$package" in
-        heroic-games-launcher-bin)
-            ensure_flatpak com.heroicgameslauncher.hgl ;;
-        upscaler)
-            ensure_flatpak io.gitlab.theevilskeleton.Upscaler ;;
-        clash-verge-rev)
-            fedora_install_clash_verge "$package" "$user" "$home" ;;
-        linuxqq-appimage)
-            fedora_install_verified_rpm_target \
-                "$package" "$user" "$home" 'Linux QQ' 'linuxqq*.rpm' ;;
-        wechat-appimage)
-            fedora_install_verified_rpm_target \
-                "$package" "$user" "$home" 'WeChat Linux' 'WeChatLinux*.rpm' ;;
-        lsfg-vk-bin)
-            ensure_packages qt6-qtdeclarative qt6-qtbase
-            fedora_install_verified_rpm_target \
-                "$package" "$user" "$home" 'lsfg-vk' 'lsfg-vk*.rpm' ;;
-        mangojuice-bin)
-            ensure_flatpak io.github.radiolamp.mangojuice ;;
-        vicinae-bin|vicinae)
-            fedora_install_vicinae "$user" "$home" ;;
-        fd-rdd-git)
-            fedora_install_fd_rdd "$user" "$home" ;;
-        tsukimi-bin)
-            dnf copr enable -y walker874/tsukimi
-            ensure_package tsukimi
-            fedora_application_target_satisfied "$package" "$user" "$home" ;;
-        thorium-browser-bin)
-            fedora_install_verified_rpm_target \
-                "$package" "$user" "$home" 'Thorium Browser' 'thorium-browser*.rpm' ;;
-        mark-shot)
-            fedora_install_verified_rpm_target \
-                "$package" "$user" "$home" 'Mark Shot' 'mark-shot-*.rpm' ;;
-        typora-free)
-            error 'typora-free has no declared official Fedora source; install it manually and add a Fedora-specific target.'
-            return 1 ;;
-        *)
-            mapped=$(fedora_arch_target_name "AUR:$package") || {
-                error "No Fedora mapping exists for AUR target: $package"
-                return 1
-            }
-            ensure_package "$mapped" ;;
-    esac
-}
+# Provider and application target implementations are kept separate from
+# shared Fedora artifact helpers to keep each library focused and auditable.
+source "$SHORIN_LIB_DIR/fedora-providers.sh"
+source "$SHORIN_LIB_DIR/fedora-applications.sh"

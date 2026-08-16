@@ -110,6 +110,10 @@ EOF
 cat > "$BIN_DIR/virsh" <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
+if [ "${1:-}" = -c ]; then
+    [ "${2:-}" = qemu:///system ] || exit 3
+    shift 2
+fi
 if [ "${1:-}" = net-info ] && [ "${2:-}" = default ]; then
     printf 'Name: default\nActive: yes\nAutostart: yes\n'
     exit 0

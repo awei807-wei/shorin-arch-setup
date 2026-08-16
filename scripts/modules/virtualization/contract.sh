@@ -24,6 +24,11 @@ VIRTUALIZATION_VIRSH_COMMAND=${VIRTUALIZATION_VIRSH_COMMAND:-virsh}
 readonly -a VIRTUALIZATION_COMMANDS=("$VIRTUALIZATION_VIRSH_COMMAND")
 VIRTUALIZATION_SERVICE=${VIRTUALIZATION_SERVICE:-libvirtd.service}
 VIRTUALIZATION_DEFAULT_NETWORK_XML=${VIRTUALIZATION_DEFAULT_NETWORK_XML:-/usr/share/libvirt/networks/default.xml}
+VIRTUALIZATION_URI=${VIRTUALIZATION_URI:-qemu:///system}
+
+virtualization_virsh() {
+    "$VIRTUALIZATION_VIRSH_COMMAND" -c "$VIRTUALIZATION_URI" "$@"
+}
 
 virtualization_default_network_ready() {
     local info status=0
@@ -38,7 +43,7 @@ virtualization_default_network_info() {
     local output status=0
 
     command -v "$VIRTUALIZATION_VIRSH_COMMAND" >/dev/null 2>&1 || return 1
-    output=$(LC_ALL=C "$VIRTUALIZATION_VIRSH_COMMAND" net-info default 2>&1) ||
+    output=$(LC_ALL=C virtualization_virsh net-info default 2>&1) ||
         status=$?
     if [ "$status" -ne 0 ]; then
         if grep -Eqi 'network not found|no network with matching name' <<< "$output"; then
@@ -75,14 +80,14 @@ ensure_virtualization_default_network() {
         1)
             [ -f "$VIRTUALIZATION_DEFAULT_NETWORK_XML" ] ||
                 die 'libvirt default network template is not available.'
-            "$VIRTUALIZATION_VIRSH_COMMAND" net-define \
+            virtualization_virsh net-define \
                 "$VIRTUALIZATION_DEFAULT_NETWORK_XML" || return
             info=$(virtualization_default_network_info) || return
             ;;
         *) return "$status" ;;
     esac
     if ! virtualization_default_network_field_is_yes "$info" Active; then
-        "$VIRTUALIZATION_VIRSH_COMMAND" net-start default || start_status=$?
+        virtualization_virsh net-start default || start_status=$?
         if [ "$start_status" -ne 0 ]; then
             info=$(virtualization_default_network_info) || return
             virtualization_default_network_field_is_yes "$info" Active ||
@@ -91,7 +96,7 @@ ensure_virtualization_default_network() {
         info=$(virtualization_default_network_info) || return
     fi
     if ! virtualization_default_network_field_is_yes "$info" Autostart; then
-        "$VIRTUALIZATION_VIRSH_COMMAND" net-autostart default || return
+        virtualization_virsh net-autostart default || return
     fi
     virtualization_default_network_ready
 }

@@ -21,7 +21,7 @@ LUTRIS_CONFIG_PACKAGES=(
 if platform_is_fedora; then
     WINE_CONFIG_PACKAGES=(wine wine-gecko wine-mono)
     LUTRIS_CONFIG_PACKAGES=(
-        alsa-plugins giflib glfw gst-plugins-base-libs gtk3
+        alsa-plugins-pulseaudio giflib glfw gst-plugins-base-libs gtk3
         libjpeg-turbo libva libxslt mpg123 openal ttf-liberation
     )
 fi
@@ -66,11 +66,7 @@ lazyvim_config_satisfied() {
 }
 
 lazyvim_target_satisfied() {
-    local package
-
-    for package in "${LAZYVIM_PACKAGES[@]}"; do
-        state_package_present "$package" || return
-    done
+    application_packages_present "${LAZYVIM_PACKAGES[@]}" || return
     lazyvim_config_satisfied
 }
 
@@ -78,7 +74,12 @@ application_packages_present() {
     local package
 
     for package in "$@"; do
-        state_package_present "$package" || return
+        if platform_is_fedora && fedora_application_provider_target "$package"; then
+            fedora_application_target_satisfied "$package" \
+                "${TARGET_USER:-}" "${HOME_DIR:-}" || return
+        else
+            state_package_present "$package" || return
+        fi
     done
 }
 
@@ -122,6 +123,12 @@ steam_native_locale_satisfied() {
 }
 
 steam_flatpak_locale_satisfied() {
+    if platform_is_fedora; then
+        fedora_flatpak_desktop_export_satisfied \
+            com.valvesoftware.Steam "${HOME_DIR:-}" || return 1
+        fedora_flatpak_override_satisfied com.valvesoftware.Steam
+        return
+    fi
     command -v flatpak >/dev/null 2>&1 || return 2
     flatpak override --system --show com.valvesoftware.Steam 2>/dev/null |
         grep -Fqx 'LANG=zh_CN.UTF-8'
@@ -202,7 +209,14 @@ application_entry_payload_satisfied() {
         flatpak:*) state_flatpak_present "${entry#flatpak:}" ;;
         GitHub:*) github_application_satisfied "${entry#GitHub:}" ;;
         lazyvim) lazyvim_target_satisfied ;;
-        *) state_package_present "$entry" ;;
+        *)
+            if platform_is_fedora && fedora_application_provider_target "$entry"; then
+                fedora_application_target_satisfied "$entry" \
+                    "${TARGET_USER:-}" "${HOME_DIR:-}"
+            else
+                state_package_present "$entry"
+            fi
+            ;;
     esac
 }
 
@@ -212,7 +226,13 @@ application_entry_config_satisfied() {
     case "$entry" in
         wine) wine_config_satisfied || return ;;
         lutris) lutris_config_satisfied || return ;;
-        steam) steam_native_locale_satisfied || return ;;
+        steam)
+            if platform_is_fedora; then
+                steam_flatpak_locale_satisfied || return
+            else
+                steam_native_locale_satisfied || return
+            fi
+            ;;
         flatpak:com.valvesoftware.Steam)
             steam_flatpak_locale_satisfied || return
             ;;

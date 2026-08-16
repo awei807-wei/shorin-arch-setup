@@ -197,23 +197,23 @@ fedora_package_name() {
         fcitx5-gtk|fcitx5-qt|fcitx5|flatpak|flatseal|fastfetch|firefox|fish|fuzzel|fzf|git|niri|gdm|sddm|lightdm|lxdm|slim|ly|greetd|btrfs-progs|snapper|btrfs-assistant|\
         gnome-calendar|gnome-clocks|gnome-disk-utility|gnome-font-viewer|\
         gnome-keyring|gnome-software|gnome-text-editor|gvfs-smb|\
-        imv|jq|kitty|less|libnotify|lact|lsof|mako|mangohud|mpv|nautilus|\
+        imv|jq|kitty|less|libnotify|lsof|mako|mangohud|mpv|nautilus|\
         neovim|obs-studio|pavucontrol|\
         pciutils|pipewire|pipewire-alsa|\
         polkit-kde|power-profiles-daemon|tuned-ppd|quickshell|ripgrep|slurp|starship|\
-        steam|swayidle|swaylock|swayosd|usbutils|virt-manager|\
+        swayidle|swaylock|swayosd|usbutils|virt-manager|\
         wf-recorder|wine|wireplumber|xdg-desktop-portal-gnome|\
-        xdg-desktop-portal-gtk|xwayland-satellite|yazi|zoxide|btop|baobab|\
-        bluetui|bluez|brightnessctl|cava|curtail|dosfstools|eza|exfatprogs|f2fs-tools|\
-        file-roller|fragments|gamescope|gnome-disk-utility|grub2-tools|ddcutil|dbus|fd|\
-        alsa-plugins|giflib|glfw|gst-plugins-base-libs|gtk3|libjpeg-turbo|libva|libxslt|mpg123|openal|ttf-liberation|wine-gecko|wine-mono|\
+        xdg-desktop-portal-gtk|xwayland-satellite|zoxide|btop|baobab|\
+        bluetui|bluez|brightnessctl|cava|dosfstools|eza|exfatprogs|f2fs-tools|\
+        file-roller|fragments|gamescope|gnome-disk-utility|grub2-tools|ddcutil|dbus|\
+        alsa-plugins|alsa-plugins-pulseaudio|fd-find|giflib|glfw|gst-plugins-base-libs|gtk3|libjpeg-turbo|libva|libxslt|mpg123|openal|ttf-liberation|wine-gecko|wine-mono|\
         hyprpicker|libva-utils|libvirt|libvirt-daemon|libvirt-daemon-kvm|\
         libvirt-client|libvirt-daemon-config-network|librime-tools|\
-        librsvg2-tools|mission-center|nwg-look|\
+        librsvg2-tools|nwg-look|\
         ntfs-3g|opencl-icd-loader|os-prober|qemu-kvm|swtpm|dnsmasq|mesa-dri-drivers|\
         mesa-vulkan-drivers|mesa-libOpenCL|mesa-va-drivers-freeworld|\
         intel-compute-runtime|akmod-nvidia|xorg-x11-drv-nvidia-cuda|\
-        ffmpegthumbnailer|matugen|lutris|code|grim|thefuck|\
+        ffmpegthumbnailer|matugen|lutris|grim|thefuck|\
         wlogout|\
         cargo|rust|gtk4-devel|glib2-devel|pango-devel|cairo-devel|\
         cairo-gobject-devel|gdk-pixbuf2-devel|graphene-devel|\

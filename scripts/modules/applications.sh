@@ -11,7 +11,7 @@ source "$SHORIN_ROOT/scripts/modules/applications/targets.sh"
 APPLICATION_SOURCE_LIST=${APPLICATION_SOURCE_LIST:-$SHORIN_ROOT/common-applist.txt}
 
 applications_inspect() {
-    local phase=$1 entry manifest_entries
+    local phase=$1 entry manifest_entries pending_status=0
 
     if [ -z "${TARGET_USER:-}" ] || [ -z "${HOME_DIR:-}" ]; then
         module_inspection_failed target-user-context
@@ -44,6 +44,36 @@ applications_inspect() {
                 module_verify_failed "application-manifest-invalid:$entry"
             fi
             return
+        fi
+        if platform_is_fedora && [[ "$entry" == AUR:* ]]; then
+            pending_status=0
+            fedora_application_target_pending "${entry#AUR:}" \
+                "$HOME_DIR" || pending_status=$?
+            case "$pending_status" in
+                0)
+                    if [ "$phase" = check ]; then
+                        # A missing handoff artifact must trigger apply so
+                        # other application targets still converge. The apply
+                        # phase records this target as pending and skips only
+                        # the optional applications module verification.
+                        module_drift "application-pending:$entry"
+                    else
+                        module_skip "application-pending:$entry"
+                    fi
+                    continue
+                    ;;
+                1) ;;
+                *)
+                    if [ "$phase" = check ]; then
+                        module_inspection_failed \
+                            "application-pending-inspection-error:$entry:$pending_status"
+                    else
+                        module_verify_failed \
+                            "application-pending-inspection-error:$entry:$pending_status"
+                    fi
+                    continue
+                    ;;
+            esac
         fi
         if [ "$phase" = check ]; then
             module_check_state "application:$entry" \
@@ -91,7 +121,11 @@ applications_apply() {
 
     bash "$SHORIN_ROOT/scripts/modules/applications/apply.sh" || status=$?
     case "$status" in
-        0|20) return 0 ;;
+        0) return 0 ;;
+        "$RC_SKIPPED")
+            module_skip application-pending
+            return 0
+            ;;
         *) return "$status" ;;
     esac
 }

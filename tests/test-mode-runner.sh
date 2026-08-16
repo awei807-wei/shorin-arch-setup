@@ -315,6 +315,30 @@ test_apply_result_control_flow() {
         'an independent module must still be checked after an inspection failure'
 }
 
+test_optional_dependency_failure_does_not_block_downstream() {
+    reset_run_state
+    : > "$FIXTURE_LOG"
+    rm -f "$FIXTURE_STATE_DIR/fixture-apply-fail" \
+        "$FIXTURE_STATE_DIR/fixture-after"
+    register_module_policy fixture-apply-fail optional
+    register_module_policy fixture-after required
+    local -A MODULE_DEPENDS=([fixture-after]='fixture-apply-fail')
+
+    run_modules install fixture-apply-fail fixture-after
+    assert_equal 1 "$(call_count fixture-after:check)" \
+        'an optional dependency failure must not block downstream inspection'
+    assert_equal 1 "$(call_count fixture-after:apply)" \
+        'an optional dependency failure must not block downstream apply'
+}
+
+test_real_module_dependency_graph() {
+    source "$ENTRYPOINT"
+    [ "${MODULE_DEPENDS[virtualization]:-}" = base ] ||
+        fail 'virtualization must depend on base, not optional applications'
+    [ "${MODULE_DEPENDS[vcp]:-}" = applications ] ||
+        fail 'VCP must retain its applications dependency'
+}
+
 test_final_verification_reruns_without_duplicate_failures() {
     reset_run_state
     : > "$FIXTURE_LOG"
@@ -431,6 +455,8 @@ test_repair_rechecks_downstream_after_dependency_converges
 test_audit_never_applies
 test_read_only_mutator_is_rejected
 test_apply_result_control_flow
+test_optional_dependency_failure_does_not_block_downstream
+test_real_module_dependency_graph
 test_final_verification_reruns_without_duplicate_failures
 test_final_status_preserves_required_apply_failure
 test_final_status_preserves_optional_apply_failure

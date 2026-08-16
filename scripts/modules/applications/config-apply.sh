@@ -53,8 +53,14 @@ ensure_native_steam_locale() {
 }
 
 ensure_flatpak_steam_locale() {
+    local scope=system status=0
+
     steam_flatpak_locale_satisfied && return 0
-    flatpak override --system --env=LANG=zh_CN.UTF-8 \
+    if platform_is_fedora; then
+        scope=$(fedora_flatpak_app_scope com.valvesoftware.Steam) || status=$?
+        [ "$status" -eq 0 ] || return "$status"
+    fi
+    flatpak override "--$scope" --env=LANG=zh_CN.UTF-8 \
         com.valvesoftware.Steam
     steam_flatpak_locale_satisfied
 }
@@ -183,7 +189,13 @@ ensure_application_entry_config() {
     case "$entry" in
         wine) ensure_wine_config || status=$? ;;
         lutris) ensure_lutris_config || status=$? ;;
-        steam) ensure_native_steam_locale || status=$? ;;
+        steam)
+            if platform_is_fedora; then
+                ensure_flatpak_steam_locale || status=$?
+            else
+                ensure_native_steam_locale || status=$?
+            fi
+            ;;
         flatpak:com.valvesoftware.Steam)
             ensure_flatpak_steam_locale || status=$?
             ;;

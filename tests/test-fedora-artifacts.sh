@@ -88,9 +88,21 @@ fedora_install_application_target linuxqq-appimage "$TARGET_USER" "$HOME_DIR" ||
     fail 'an already satisfied Fedora RPM target must be idempotent without the artifact'
 
 rm -f "$FEDORA_TEST_INSTALLED_FILE"
+status=0
+fedora_install_application_target lsfg-vk-bin "$TARGET_USER" "$HOME_DIR" ||
+    status=$?
+[ "$status" -eq "$RC_SKIPPED" ] ||
+    fail 'a missing manual RPM must be reported as a pending skip, not success'
+fedora_application_target_pending lsfg-vk-bin "$HOME_DIR" ||
+    fail 'a missing manual RPM must be classified as pending'
 if fedora_install_application_target lsfg-vk-bin "$TARGET_USER" "$HOME_DIR"; then
     fail 'lsfg-vk must fail when its main RPM is missing'
 fi
+touch "$RPM_DIR/lsfg-vk-1.0.x86_64.rpm"
+if fedora_application_target_pending lsfg-vk-bin "$HOME_DIR"; then
+    fail 'an available manual RPM must not remain classified as pending'
+fi
+rm -f "$RPM_DIR/lsfg-vk-1.0.x86_64.rpm"
 
 gearlever_dir="$HOME_DIR/.local/share/applications"
 mkdir -p "$HOME_DIR/.local/bin" "$gearlever_dir"
@@ -108,5 +120,34 @@ sed -i "s#^Exec=.*#Exec=\"$HOME_DIR/.local/bin/vicinae.AppImage\"#" \
     "$gearlever_dir/vicinae.desktop"
 fedora_application_target_satisfied vicinae-bin "$TARGET_USER" "$HOME_DIR" ||
     fail 'Vicinae integration must require Gear Lever, executable AppImage, and managed desktop entry'
+
+# Missing handoff artifacts are drift during check, but an explicit pending
+# state during verify/apply. They must not be reported as successfully
+# installed or turn the independent applications module into a hard failure.
+module_main() { :; }
+APPLICATION_MANIFEST="$TEST_DIR/applications.list"
+printf 'AUR:lsfg-vk-bin\n' > "$APPLICATION_MANIFEST"
+source "$ROOT_DIR/scripts/modules/applications.sh"
+MODULE_RESULT=$RC_OK
+MODULE_REASONS=()
+applications_check
+[ "$MODULE_RESULT" -eq "$RC_DRIFT" ] ||
+    fail 'a missing Fedora artifact must trigger application apply as drift'
+grep -Fqx 'application-pending:AUR:lsfg-vk-bin' <<< "${MODULE_REASONS[*]}" ||
+    fail 'application check must explain the pending artifact'
+MODULE_RESULT=$RC_OK
+MODULE_REASONS=()
+applications_verify
+[ "$MODULE_RESULT" -eq "$RC_SKIPPED" ] ||
+    fail 'application verify must classify a missing artifact as pending skip'
+grep -Fqx 'application-pending:AUR:lsfg-vk-bin' <<< "${MODULE_REASONS[*]}" ||
+    fail 'application verify must retain the pending artifact reason'
+bash() { return "$RC_SKIPPED"; }
+MODULE_RESULT=$RC_OK
+MODULE_REASONS=()
+applications_apply || fail 'pending application apply must not return a hard failure'
+[ "$MODULE_RESULT" -eq "$RC_SKIPPED" ] ||
+    fail 'pending application apply must mark the module skipped'
+unset -f bash
 
 printf 'PASS: Fedora artifact discovery, post-install verification, and Vicinae state contract\n'
