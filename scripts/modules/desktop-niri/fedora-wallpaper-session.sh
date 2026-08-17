@@ -268,26 +268,35 @@ fedora_wallpaper_apply_image() {
         "${args[@]}" >> "$FEDORA_WALLPAPER_LOG" 2>&1
 }
 
+fedora_wallpaper_close_lock_fd() {
+    local lock_fd=${FEDORA_WALLPAPER_LOCK_FD:-}
+
+    [ -n "$lock_fd" ] || return 0
+    case "$lock_fd" in
+        *[!0-9]*) return 0 ;;
+    esac
+    # Bash's dynamic descriptor syntax closes the numeric descriptor stored in
+    # lock_fd without evaluating any text supplied through the environment.
+    exec {lock_fd}>&-
+}
+
 fedora_wallpaper_start_daemon() {
     local namespace=$1
     local -a args=(--no-cache)
-    local daemon_log lock_fd=${FEDORA_WALLPAPER_LOCK_FD:-}
+    local daemon_log
 
     [ -n "$namespace" ] && args+=(--namespace "$namespace")
     mkdir -p "$(dirname "$FEDORA_WALLPAPER_LOG")" 2>/dev/null || true
     daemon_log="${FEDORA_WALLPAPER_LOG}.${namespace:-default}.daemon"
+
     # The daemon is intentionally detached from the initializer's flock FD.
     # A background process retaining that descriptor would keep the lock held
     # after this script exits and block every later login until the daemon
-    # dies.  Bash's dynamic FD redirection closes exactly the descriptor
-    # acquired by fedora_wallpaper_session_main without relying on eval.
-    if [ -n "$lock_fd" ]; then
-        fedora_wallpaper_run "$AWWW_DAEMON_BIN" "${args[@]}" \
-            >> "$daemon_log" 2>&1 {lock_fd}>&- &
-    else
-        fedora_wallpaper_run "$AWWW_DAEMON_BIN" "${args[@]}" \
-            >> "$daemon_log" 2>&1 &
-    fi
+    # dies.  Close it in the child immediately before exec, without eval.
+    (
+        fedora_wallpaper_close_lock_fd
+        fedora_wallpaper_run "$AWWW_DAEMON_BIN" "${args[@]}"
+    ) >> "$daemon_log" 2>&1 &
     fedora_wallpaper_log "started awww-daemon namespace=${namespace:-default} pid=$!"
 }
 
@@ -316,13 +325,84 @@ fedora_wallpaper_run_quietly() {
     local label=$1 timeout_seconds=$2
     shift 2
 
-    if PATH="$FEDORA_WALLPAPER_PATH" timeout --signal=TERM "$timeout_seconds" "$@" \
-        >> "$FEDORA_WALLPAPER_LOG" 2>&1; then
+    # Helper scripts can daemonize their own work.  Run timeout in a child
+    # after closing the initializer's dynamic flock descriptor so those
+    # descendants cannot retain the session lock either.
+    if (
+        fedora_wallpaper_close_lock_fd
+        PATH="$FEDORA_WALLPAPER_PATH" timeout --signal=TERM "$timeout_seconds" "$@"
+    ) >> "$FEDORA_WALLPAPER_LOG" 2>&1; then
         return 0
     fi
     fedora_wallpaper_log "$label skipped or timed out"
     return 1
 }
+
+fedora_wallpaper_niri_socket_is_valid() {
+    local socket=${NIRI_SOCKET:-}
+
+    [ -n "$socket" ] && [ -S "$socket" ]
+}
+
+fedora_wallpaper_find_niri_socket() {
+    local runtime_dir=${XDG_RUNTIME_DIR:-}
+    local wayland_display=${WAYLAND_DISPLAY:-}
+    local candidate name prefix pid exe
+
+    [ -n "$runtime_dir" ] && [ -n "$wayland_display" ] || return 1
+    case "$wayland_display" in
+        *[![:alnum:]_.-]*) return 1 ;;
+    esac
+    prefix="niri.${wayland_display}."
+
+    for candidate in "$runtime_dir/${prefix}"*.sock; do
+        [ -e "$candidate" ] || continue
+        [ ! -L "$candidate" ] || continue
+        [ -S "$candidate" ] || continue
+        name=${candidate##*/}
+        case "$name" in
+            "$prefix"*.sock) ;;
+            *) continue ;;
+        esac
+        pid=${name#"$prefix"}
+        pid=${pid%.sock}
+        case "$pid" in
+            ''|*[!0-9]*) continue ;;
+        esac
+        kill -0 "$pid" 2>/dev/null || continue
+        exe=$(basename -- "$(readlink -f -- "/proc/$pid/exe" 2>/dev/null || true)")
+        [ "$exe" = niri ] || continue
+        printf '%s\n' "$candidate"
+        return 0
+    done
+    return 1
+}
+
+fedora_wallpaper_prepare_niri_socket() {
+    local current=${NIRI_SOCKET:-} candidate
+
+    fedora_wallpaper_niri_socket_is_valid && return 0
+    candidate=$(fedora_wallpaper_find_niri_socket || true)
+    if [ -n "$candidate" ]; then
+        export NIRI_SOCKET="$candidate"
+        fedora_wallpaper_log \
+            "WARNING: invalid NIRI_SOCKET=${current:-<unset>}; using active niri socket $candidate"
+        return 0
+    fi
+    fedora_wallpaper_log \
+        "WARNING: invalid NIRI_SOCKET=${current:-<unset>}; no active niri socket candidate found"
+    return 1
+}
+
+fedora_wallpaper_run_niri_helper() (
+    local label=$1 timeout_seconds=$2
+    shift 2
+
+    # Keep any temporary socket override inside this subshell so callers keep
+    # their original NIRI_SOCKET value and export state after the helper.
+    fedora_wallpaper_prepare_niri_socket || true
+    fedora_wallpaper_run_quietly "$label" "$timeout_seconds" "$@"
+)
 
 fedora_wallpaper_query_wrapper() {
     # QuickShell and helper scripts may query while the daemon is still
@@ -419,11 +499,11 @@ fedora_wallpaper_session_main() {
     }
 
     if [ -x "$FEDORA_WALLPAPER_OVERVIEW_SCRIPT" ]; then
-        fedora_wallpaper_run_quietly overview-blur 20 \
+        fedora_wallpaper_run_niri_helper overview-blur 20 \
             "$FEDORA_WALLPAPER_OVERVIEW_SCRIPT" "$image" || true
     fi
     if [ -x "$FEDORA_WALLPAPER_AUTO_BLUR_SCRIPT" ]; then
-        fedora_wallpaper_run_quietly auto-blur 20 \
+        fedora_wallpaper_run_niri_helper auto-blur 20 \
             "$FEDORA_WALLPAPER_AUTO_BLUR_SCRIPT" || true
     fi
 }

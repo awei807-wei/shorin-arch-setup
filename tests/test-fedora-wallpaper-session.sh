@@ -131,10 +131,22 @@ AWEOF
     cat > "$root/bin/overview-blur" <<'AWEOF'
 #!/usr/bin/env bash
 printf 'overview-blur:%s\n' "$*" >> "${WALLPAPER_TEST_LOG:?}"
+if [ "${WALLPAPER_TEST_BLUR_BACKGROUND:-0}" -eq 1 ]; then
+    pid_dir=${WALLPAPER_TEST_BLUR_PID_DIR:?}
+    mkdir -p "$pid_dir"
+    (exec sleep 1000) &
+    printf '%s\n' "$!" > "$pid_dir/overview.pid"
+fi
 AWEOF
     cat > "$root/bin/auto-blur" <<'AWEOF'
 #!/usr/bin/env bash
 printf 'auto-blur:%s\n' "$*" >> "${WALLPAPER_TEST_LOG:?}"
+if [ "${WALLPAPER_TEST_BLUR_BACKGROUND:-0}" -eq 1 ]; then
+    pid_dir=${WALLPAPER_TEST_BLUR_PID_DIR:?}
+    mkdir -p "$pid_dir"
+    (exec sleep 1000) &
+    printf '%s\n' "$!" > "$pid_dir/auto.pid"
+fi
 AWEOF
     chmod 755 "$root/bin"/*
 }
@@ -351,6 +363,73 @@ for pid_file in "$alive"/log/daemon-pids/*.pid; do
     [ -f "$pid_file" ] || continue
     kill "$(cat "$pid_file")" 2>/dev/null || true
 done
+
+# Blur helpers may daemonize work after the initializer returns.  Their
+# descendants must not retain the initializer's flock descriptor, and a
+# second full session must still run while those descendants remain alive.
+alive_helper="$TEST_DIR/alive-helper"
+make_fixture "$alive_helper"
+: > "$alive_helper/log/events"
+mkdir -p "$alive_helper/log/blur-pids"
+run_session_alive_helper() {
+    WALLPAPER_TEST_LOG="$alive_helper/log/events" \
+        WALLPAPER_TEST_STATE="$alive_helper/state" \
+        WALLPAPER_TEST_BLUR_BACKGROUND=1 \
+        WALLPAPER_TEST_BLUR_PID_DIR="$alive_helper/log/blur-pids" \
+        AWWW_BIN="$alive_helper/bin/awww" \
+        AWWW_DAEMON_BIN="$alive_helper/bin/awww-daemon" \
+        WAYPAPER_BIN="$alive_helper/bin/waypaper" \
+        FEDORA_WALLPAPER_STATE_DIR="$alive_helper/log" \
+        FEDORA_WALLPAPER_LOG="$alive_helper/log/session.log" \
+        FEDORA_WALLPAPER_LOCK="$alive_helper/log/session.lock" \
+        FEDORA_WALLPAPER_OVERVIEW_SCRIPT="$alive_helper/bin/overview-blur" \
+        FEDORA_WALLPAPER_AUTO_BLUR_SCRIPT="$alive_helper/bin/auto-blur" \
+        FEDORA_WALLPAPER_QUERY_TIMEOUT=1 \
+        FEDORA_WALLPAPER_READY_TIMEOUT=2 \
+        FEDORA_WALLPAPER_IMAGE_TIMEOUT=1 \
+        FEDORA_WALLPAPER_WAYPAPER_TIMEOUT=2 \
+        HOME="$alive_helper/home" \
+        "$SESSION_SCRIPT"
+}
+run_session_alive_helper
+for pid_file in "$alive_helper"/log/blur-pids/*.pid; do
+    [ -s "$pid_file" ] || fail 'alive blur helper fixture must record a child pid'
+done
+exec 9>"$alive_helper/log/session.lock"
+flock -n 9 || fail 'alive blur helper must not retain the initializer lock'
+exec 9>&-
+run_session_alive_helper
+[ "$(grep -Fc 'waypaper:--random' "$alive_helper/log/events")" -eq 2 ] ||
+    fail 'second initializer must complete while blur helper children remain alive'
+for pid_file in "$alive_helper"/log/blur-pids/*.pid; do
+    [ -f "$pid_file" ] || continue
+    kill "$(cat "$pid_file")" 2>/dev/null || true
+done
+
+# A missing NIRI_SOCKET must not be replaced by a guessed path when no active
+# Niri candidate exists, and the helper wrapper must restore the old value.
+niri_restore="$TEST_DIR/niri-restore"
+make_fixture "$niri_restore"
+mkdir -p "$niri_restore/runtime"
+cat > "$niri_restore/bin/niri-helper" <<'AWEOF'
+#!/usr/bin/env bash
+printf 'niri-socket:%s\n' "${NIRI_SOCKET-<unset>}" >> "${WALLPAPER_TEST_LOG:?}"
+AWEOF
+chmod 755 "$niri_restore/bin/niri-helper"
+niri_restore_output=$(WALLPAPER_TEST_LOG="$niri_restore/log/events" \
+    FEDORA_WALLPAPER_LOG="$niri_restore/log/session.log" \
+    XDG_RUNTIME_DIR="$niri_restore/runtime" \
+    WAYLAND_DISPLAY=wayland-1 \
+    NIRI_SOCKET="$niri_restore/runtime/old.sock" \
+    HOME="$niri_restore/home" \
+    bash -c 'source "$1"; fedora_wallpaper_run_niri_helper niri-helper 1 "$2"; printf "restored:%s\\n" "${NIRI_SOCKET-<unset>}"' \
+    bash "$SESSION_SCRIPT" "$niri_restore/bin/niri-helper")
+grep -Fqx "niri-socket:$niri_restore/runtime/old.sock" "$niri_restore/log/events" ||
+    fail 'missing NIRI_SOCKET must remain unchanged when no Niri candidate exists'
+grep -Fq 'no active niri socket candidate found' "$niri_restore/log/session.log" ||
+    fail 'missing Niri candidate must record a warning'
+grep -Fqx "restored:$niri_restore/runtime/old.sock" <<< "$niri_restore_output" ||
+    fail 'NIRI_SOCKET wrapper must restore the original value after helper execution'
 
 # A stale socket that never becomes ready is bounded by the retry budget and
 # must surface as a session failure rather than being swallowed.
