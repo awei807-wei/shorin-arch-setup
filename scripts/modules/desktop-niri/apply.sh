@@ -11,6 +11,7 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 SCRIPT_DIR="${SHORIN_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "$SCRIPT_DIR/lib/core.sh"
 source "$SCRIPT_DIR/modules/desktop-niri/targets.sh"
+source "$SCRIPT_DIR/modules/desktop-niri/fedora-provider-apply.sh"
 
 DEBUG=${DEBUG:-0}
 CN_MIRROR=${CN_MIRROR:-0}
@@ -42,16 +43,8 @@ info_kv "Target" "$TARGET_USER"
 # desktop tree untouched.
 if platform_is_fedora; then
   section "Step 0/9" "Fedora Starship and Exact Fonts"
-  fedora_provider_architecture_satisfied || {
-    error "Fedora target-user providers support x86_64 only; refusing system changes."
-    exit 1
-  }
-  ensure_packages curl unzip xz tar util-linux fontconfig || {
-    error "Fedora provider prerequisites did not converge; refusing desktop mutations."
-    exit 1
-  }
-  fedora_install_desktop_providers "$TARGET_USER" "$HOME_DIR" || {
-    error "Fedora target-user providers did not converge; refusing desktop mutations."
+  fedora_desktop_provider_apply_system "$TARGET_USER" "$HOME_DIR" || {
+    error "Fedora desktop provider apply failed; refusing desktop mutations."
     exit 1
   }
 fi

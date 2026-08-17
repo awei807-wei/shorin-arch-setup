@@ -360,7 +360,7 @@ grep -Fq 'provider:font:material-design-icons' \
     "$ROOT_DIR/scripts/modules/desktop-niri.sh" ||
     fail 'desktop-niri provider MODULE_REASON contract is missing'
 grep -Fq 'fedora_install_desktop_providers' \
-    "$ROOT_DIR/scripts/modules/desktop-niri/apply.sh" ||
-    fail 'desktop-niri apply does not invoke the Fedora font provider'
+    "$ROOT_DIR/scripts/modules/desktop-niri/fedora-provider-apply.sh" ||
+    fail 'desktop-niri Fedora apply helper does not invoke the provider transaction'
 
 printf 'PASS: Fedora Starship and exact font providers\n'

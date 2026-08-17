@@ -81,6 +81,18 @@ Fusion JetBrainsMapleMono 是第三方融合上游的社区归档，不是 JetBr
 约 152.3 MB（约 145 MiB），只有活动 Kitty 配置明确包含 `font_family JetBrains Maple Mono` 时才会下载、
 校验和安装。没有该配置引用时不会下载或验收 Maple，避免为未使用的字体引入体积和来源。
 
+如果 Fedora 的系统包前置已经存在，只需修复这些目标用户资产时，不必重复执行完整
+`repair` 或触碰系统包。目标用户可直接运行：
+
+```bash
+bash scripts/fedora-desktop-providers.sh --user shiyi
+```
+
+该入口只在 Fedora、x86_64 且目标用户环境已具备 `curl`、`sha256sum`、`tar`、`unzip`、
+`xz`、`flock` 和 fontconfig 时继续；缺少前置、非 Fedora 或架构不支持都会 fail-closed
+并输出 `MODULE_REASON`。普通用户只能指定自己，root 可通过 `--user` 指定桌面用户；两条
+路径都复用相同的 source contract、精确字体验收和跨 provider 事务，不调用包管理器。
+
 普通 `jetbrains-mono-fonts`、Source Han 和 Noto Emoji 仍由 Fedora 包管理；
 `ttf-jetbrains-mono-nerd` 与 `ttf-jetbrains-maple-mono-nf-xx-xx` 不再伪映射为普通
 JetBrains Mono。Arch 继续使用原有 pacman/AUR 目标。Kitty、QuickShell 和 Fish 的
@@ -272,6 +284,7 @@ ArchLinuxCN/AUR 到目标来源的迁移；凭据与当前版本不一致时同�
 ```text
 install.sh                       # 统一入口与调度器
 scripts/
+  fedora-desktop-providers.sh      # 无需完整 repair 的 Fedora 目标用户 provider 入口
   lib/
     core.sh                      # 日志、错误传播、锁与公共上下文
     runner.sh                    # 模块执行、依赖结果与状态汇总
@@ -294,6 +307,7 @@ scripts/
     storage.sh
     base.sh
     desktop-niri.sh
+    desktop-niri/fedora-provider-apply.sh # Fedora provider 系统/目标用户 apply 入口
     desktop-niri/awww.sh        # Fedora awww 源码构建与命令合同
     applications.sh
     virtualization.sh

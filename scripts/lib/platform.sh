@@ -225,7 +225,7 @@ fedora_package_name() {
         cairo-gobject-devel|gdk-pixbuf2-devel|graphene-devel|\
         gtk4-layer-shell-devel|sqlite-devel|wayland-devel|\
         wayland-protocols-devel|pkgconf-pkg-config|wtype|\
-        lz4-devel|curl|unzip|xz|tar|\
+        lz4-devel|curl|unzip|xz|tar|util-linux|\
         xdg-user-dirs|xfsprogs|udftools|breeze-gtk|jetbrains-mono-fonts|fontconfig|\
         glibc-langpack-zh|nfs-utils|tsukimi|\
         qt5ct|qt6ct|qt6-qtbase|qt6-qtdeclarative|\
