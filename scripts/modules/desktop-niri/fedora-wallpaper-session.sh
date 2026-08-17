@@ -24,10 +24,85 @@ FEDORA_WALLPAPER_DEFAULT_NAMESPACE=${FEDORA_WALLPAPER_DEFAULT_NAMESPACE:-}
 FEDORA_WALLPAPER_OVERVIEW_NAMESPACE=${FEDORA_WALLPAPER_OVERVIEW_NAMESPACE:-overview}
 FEDORA_WALLPAPER_OVERVIEW_SCRIPT=${FEDORA_WALLPAPER_OVERVIEW_SCRIPT:-"$HOME/.config/scripts/niri_set_overview_blur_dark_bg.sh"}
 FEDORA_WALLPAPER_AUTO_BLUR_SCRIPT=${FEDORA_WALLPAPER_AUTO_BLUR_SCRIPT:-"$HOME/.config/scripts/niri_auto_blur_bg.sh"}
+FEDORA_WALLPAPER_STATE_DIR_EXPLICIT=${FEDORA_WALLPAPER_STATE_DIR+x}
+FEDORA_WALLPAPER_LOG_EXPLICIT=${FEDORA_WALLPAPER_LOG+x}
+FEDORA_WALLPAPER_LOCK_EXPLICIT=${FEDORA_WALLPAPER_LOCK+x}
 FEDORA_WALLPAPER_STATE_DIR=${FEDORA_WALLPAPER_STATE_DIR:-"${XDG_STATE_HOME:-$HOME/.local/state}/shorin-arch-setup"}
 FEDORA_WALLPAPER_LOG=${FEDORA_WALLPAPER_LOG:-"$FEDORA_WALLPAPER_STATE_DIR/fedora-wallpaper-session.log"}
 FEDORA_WALLPAPER_LOCK=${FEDORA_WALLPAPER_LOCK:-"$FEDORA_WALLPAPER_STATE_DIR/fedora-wallpaper-session.lock"}
 FEDORA_WALLPAPER_MAX_RETRIES=${FEDORA_WALLPAPER_MAX_RETRIES:-2}
+
+fedora_wallpaper_path_is_safe() {
+    local path=$1 current=/ component
+    local -a components=()
+
+    case "$path" in
+        /*) ;;
+        *) return 1 ;;
+    esac
+    [ "$path" != / ] || return 1
+    IFS=/ read -r -a components <<< "${path#/}"
+    for component in "${components[@]}"; do
+        [ -n "$component" ] || continue
+        case "$component" in
+            .|..) return 1 ;;
+        esac
+        if [ "$current" = / ]; then
+            current="/$component"
+        else
+            current="$current/$component"
+        fi
+        [ ! -L "$current" ] || return 1
+    done
+}
+
+fedora_wallpaper_state_dir_writable() {
+    local state_dir=$1
+
+    fedora_wallpaper_path_is_safe "$state_dir" || return 1
+    if [ -e "$state_dir" ] && [ ! -d "$state_dir" ]; then
+        return 1
+    fi
+    if [ ! -e "$state_dir" ]; then
+        mkdir -m 700 -p -- "$state_dir" 2>/dev/null || return 1
+    fi
+    [ ! -L "$state_dir" ] &&
+        [ "$(stat -c '%u' "$state_dir" 2>/dev/null || printf '%s' -1)" -eq "$(id -u)" ] &&
+        [ -w "$state_dir" ]
+}
+
+fedora_wallpaper_prepare_state() {
+    local configured_state=$FEDORA_WALLPAPER_STATE_DIR
+    local runtime_root runtime_state warning
+
+    if fedora_wallpaper_state_dir_writable "$configured_state"; then
+        return 0
+    fi
+
+    warning="Fedora wallpaper state namespace is unavailable: $configured_state"
+    if [ -n "${FEDORA_WALLPAPER_STATE_DIR_EXPLICIT:-}" ]; then
+        printf 'WARNING: %s; explicit state directory will not be bypassed.\n' \
+            "$warning" >&2
+        return 1
+    fi
+
+    runtime_root=${XDG_RUNTIME_DIR:-}
+    runtime_state=${runtime_root%/}/shorin-arch-setup
+    if [ -z "$runtime_root" ] ||
+        ! fedora_wallpaper_state_dir_writable "$runtime_root" ||
+        ! fedora_wallpaper_state_dir_writable "$runtime_state"; then
+        printf 'WARNING: %s; no safe XDG_RUNTIME_DIR fallback is available.\n' \
+            "$warning" >&2
+        return 1
+    fi
+
+    FEDORA_WALLPAPER_STATE_DIR=$runtime_state
+    [ -n "${FEDORA_WALLPAPER_LOG_EXPLICIT:-}" ] ||
+        FEDORA_WALLPAPER_LOG="$runtime_state/fedora-wallpaper-session.log"
+    [ -n "${FEDORA_WALLPAPER_LOCK_EXPLICIT:-}" ] ||
+        FEDORA_WALLPAPER_LOCK="$runtime_state/fedora-wallpaper-session.lock"
+    fedora_wallpaper_log "WARNING: $warning; using session runtime state $runtime_state"
+}
 
 fedora_wallpaper_path() {
     PATH="$FEDORA_WALLPAPER_PATH" command -v "$1"
@@ -130,7 +205,7 @@ fedora_wallpaper_expand_path() {
     local value=$1
 
     case "$value" in
-        '~'/*) printf '%s/%s\n' "$HOME" "${value#~/}" ;;
+        '~'/*) printf '%s/%s\n' "$HOME" "${value#'~/'}" ;;
         '~') printf '%s\n' "$HOME" ;;
         /*) printf '%s\n' "$value" ;;
         *) printf '%s\n' "$HOME/$value" ;;
@@ -196,12 +271,23 @@ fedora_wallpaper_apply_image() {
 fedora_wallpaper_start_daemon() {
     local namespace=$1
     local -a args=(--no-cache)
-    local daemon_log
+    local daemon_log lock_fd=${FEDORA_WALLPAPER_LOCK_FD:-}
 
     [ -n "$namespace" ] && args+=(--namespace "$namespace")
     mkdir -p "$(dirname "$FEDORA_WALLPAPER_LOG")" 2>/dev/null || true
     daemon_log="${FEDORA_WALLPAPER_LOG}.${namespace:-default}.daemon"
-    fedora_wallpaper_run "$AWWW_DAEMON_BIN" "${args[@]}" >> "$daemon_log" 2>&1 &
+    # The daemon is intentionally detached from the initializer's flock FD.
+    # A background process retaining that descriptor would keep the lock held
+    # after this script exits and block every later login until the daemon
+    # dies.  Bash's dynamic FD redirection closes exactly the descriptor
+    # acquired by fedora_wallpaper_session_main without relying on eval.
+    if [ -n "$lock_fd" ]; then
+        fedora_wallpaper_run "$AWWW_DAEMON_BIN" "${args[@]}" \
+            >> "$daemon_log" 2>&1 {lock_fd}>&- &
+    else
+        fedora_wallpaper_run "$AWWW_DAEMON_BIN" "${args[@]}" \
+            >> "$daemon_log" 2>&1 &
+    fi
     fedora_wallpaper_log "started awww-daemon namespace=${namespace:-default} pid=$!"
 }
 
@@ -259,10 +345,19 @@ fedora_wallpaper_session_main() {
     local default_ready=0 overview_ready=0 image configured_image
     local lock_fd
 
+    unset FEDORA_WALLPAPER_LOCK_FD
+    fedora_wallpaper_prepare_state || return 1
     mkdir -p "$(dirname "$FEDORA_WALLPAPER_LOCK")" 2>/dev/null || true
     if command -v flock >/dev/null 2>&1; then
-        exec {lock_fd}>"$FEDORA_WALLPAPER_LOCK"
-        flock -n "$lock_fd" || return 0
+        if ! exec {lock_fd}>"$FEDORA_WALLPAPER_LOCK"; then
+            fedora_wallpaper_log "unable to open wallpaper session lock: $FEDORA_WALLPAPER_LOCK"
+            return 1
+        fi
+        if ! flock -n "$lock_fd"; then
+            exec {lock_fd}>&-
+            return 0
+        fi
+        FEDORA_WALLPAPER_LOCK_FD=$lock_fd
     fi
 
     if ! fedora_wallpaper_command_help_satisfied; then

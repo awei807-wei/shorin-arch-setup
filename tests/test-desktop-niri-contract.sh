@@ -1199,6 +1199,7 @@ EOF
 
     printf '%s\n' 'arch legacy configuration' > "$NIRI_CONFIG_FILE"
     printf '%s\n' 'arch legacy bindings' > "$NIRI_BINDS_FILE"
+    rm -f "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE"
     arch_copy="$TEST_DIR/arch-config-before-noop.kdl"
     cp "$NIRI_CONFIG_FILE" "$arch_copy"
     export SHORIN_DISTRO=arch
@@ -1206,6 +1207,8 @@ EOF
         fail 'Fedora compatibility helper must be a no-op on Arch'
     cmp -s "$arch_copy" "$NIRI_CONFIG_FILE" ||
         fail 'Arch config must remain unchanged by Fedora migration'
+    [ ! -e "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE" ] ||
+        fail 'Arch compatibility must not create the Fedora Xwayland bridge override'
 
     export SHORIN_DISTRO=fedora
     cat > "$NIRI_CONFIG_FILE" <<'EOF'
@@ -1247,7 +1250,8 @@ test_fedora_wallpaper_backend_integration() (
         NIRI_QUICKSHELL_DIR NIRI_DESKTOP_STATE_DIR \
         NIRI_QUICKSHELL_BACKUP_DIR NIRI_QUICKSHELL_SOURCE_STATE_FILE \
         NIRI_WAYPAPER_CONFIG_FILE NIRI_FEDORA_WALLPAPER_SESSION_FILE \
-        NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE
+        NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE \
+        NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE
     desktop_niri_contract_init
     mkdir -p "$HOME_DIR/.config/niri" "$HOME_DIR/.config/waypaper" \
         "$HOME_DIR/.config/quickshell" "$HOME_DIR/.local/bin" \
@@ -1310,6 +1314,32 @@ EOF
     ensure_niri_fedora_session_compatibility "$TARGET_USER" ||
         fail 'Fedora compatibility must converge before wallpaper backend validation'
     helper_digest=$(sha256sum "$NIRI_FEDORA_WALLPAPER_SESSION_FILE")
+    niri_fedora_xwayland_videobridge_autostart_satisfied ||
+        fail 'Fedora compatibility must install the managed Xwayland bridge override'
+    grep -Fqx '[Desktop Entry]' \
+        "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE" ||
+        fail 'Xwayland bridge override must be a desktop entry'
+    grep -Fqx 'Hidden=true' \
+        "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE" ||
+        fail 'Xwayland bridge override must disable user autostart'
+
+    # Repair/apply must replace stale deployed wrappers with the current source
+    # bytes rather than assuming an existing executable is already current.
+    printf '#!/usr/bin/env bash\n# stale initializer\n' \
+        > "$NIRI_FEDORA_WALLPAPER_SESSION_FILE"
+    printf '#!/usr/bin/env bash\n# stale query wrapper\n' \
+        > "$NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE"
+    chmod 755 "$NIRI_FEDORA_WALLPAPER_SESSION_FILE" \
+        "$NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE"
+    ensure_niri_fedora_wallpaper_session "$TARGET_USER" ||
+        fail 'wallpaper repair must replace stale deployed wrappers'
+    cmp -s "$ROOT_DIR/scripts/modules/desktop-niri/fedora-wallpaper-session.sh" \
+        "$NIRI_FEDORA_WALLPAPER_SESSION_FILE" ||
+        fail 'wallpaper initializer wrapper must match the current source'
+    cmp -s "$ROOT_DIR/scripts/modules/desktop-niri/fedora-wallpaper-session.sh" \
+        "$NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE" ||
+        fail 'awww query wrapper must match the current source'
+
     ensure_niri_wallpaper_backend "$TARGET_USER" ||
         fail 'Fedora wallpaper backend must accept initializer-managed startup'
     if niri_wallpaper_backend_satisfied; then
@@ -1387,6 +1417,13 @@ EOF
         fail 'desktop check must report a missing Fedora wallpaper helper'
     ensure_niri_fedora_wallpaper_session "$TARGET_USER" ||
         fail 'Fedora wallpaper helper fixture must be restorable'
+
+    rm -f "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE"
+    run_desktop_niri_check
+    grep -Fq 'config:fedora-xwaylandvideobridge-autostart' <<< "$output" ||
+        fail 'desktop check must report a missing Xwayland bridge override'
+    ensure_niri_fedora_xwayland_videobridge_autostart "$TARGET_USER" ||
+        fail 'Xwayland bridge override must be restorable after check drift'
 
     state_copy="$TEST_DIR/fedora-wallpaper-check-state-copy"
     cp "$NIRI_QUICKSHELL_SOURCE_STATE_FILE" "$state_copy"

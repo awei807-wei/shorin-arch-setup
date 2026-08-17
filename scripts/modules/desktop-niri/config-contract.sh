@@ -22,6 +22,7 @@ niri_session_contract_init() {
     NIRI_LOCKSCREEN_SCRIPT_FILE=${NIRI_LOCKSCREEN_SCRIPT_FILE:-$NIRI_QUICKSHELL_DIR/scripts/lockscreen.sh}
     NIRI_FEDORA_WALLPAPER_SESSION_FILE=${NIRI_FEDORA_WALLPAPER_SESSION_FILE:-$NIRI_LOCAL_BIN/shorin-fedora-wallpaper-session}
     NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE=${NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE:-$NIRI_LOCAL_BIN/shorin-fedora-awww-query}
+    NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE=${NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE:-$HOME_DIR/.config/autostart/org.kde.xwaylandvideobridge.desktop}
     NIRI_FEDORA_POLKIT_AGENT_PATH=${NIRI_FEDORA_POLKIT_AGENT_PATH:-/usr/libexec/kf6/polkit-kde-authentication-agent-1}
 }
 
@@ -176,6 +177,34 @@ niri_fedora_wallpaper_session_satisfied() {
         niri_fedora_awww_query_wrapper_satisfied
 }
 
+niri_fedora_xwayland_videobridge_autostart_contract() {
+    printf '[Desktop Entry]\nHidden=true\n'
+}
+
+niri_fedora_xwayland_videobridge_autostart_satisfied() {
+    local actual expected
+
+    platform_is_fedora || return 0
+    [ -f "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE" ] || return 1
+    [ ! -L "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE" ] || return 1
+    [ "$(stat -c '%U' "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE")" = \
+        "$TARGET_USER" ] || return 1
+    actual=$(< "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE")
+    expected=$(niri_fedora_xwayland_videobridge_autostart_contract)
+    [ "$actual" = "$expected" ]
+}
+
+niri_fedora_install_if_stale_user_file() {
+    local source=$1 destination=$2 user=$3 group=$4
+
+    [ ! -L "$destination" ] || return 1
+    if [ ! -f "$destination" ] || ! cmp -s "$source" "$destination" ||
+        [ "$(stat -c '%a' "$destination" 2>/dev/null || printf '%s' 0)" -ne 755 ] ||
+        [ "$(stat -c '%U' "$destination" 2>/dev/null || printf '%s' '')" != "$user" ]; then
+        install -m 755 -o "$user" -g "$group" "$source" "$destination" || return 1
+    fi
+}
+
 niri_fedora_lockscreen_binding_satisfied() {
     platform_is_fedora || return 0
     [ -s "$NIRI_BINDS_FILE" ] || return 1
@@ -205,11 +234,35 @@ ensure_niri_fedora_wallpaper_session() {
     [ -f "$source" ] && [ ! -L "$source" ] && [ -x "$source" ] || return 1
     group=$(id -gn "$user") || return 1
     install -d -o "$user" -g "$group" "$NIRI_LOCAL_BIN" || return 1
-    install -m 755 -o "$user" -g "$group" \
-        "$source" "$NIRI_FEDORA_WALLPAPER_SESSION_FILE" || return 1
-    install -m 755 -o "$user" -g "$group" \
-        "$source" "$NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE" || return 1
+    niri_fedora_install_if_stale_user_file "$source" \
+        "$NIRI_FEDORA_WALLPAPER_SESSION_FILE" "$user" "$group" || return 1
+    niri_fedora_install_if_stale_user_file "$source" \
+        "$NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE" "$user" "$group" || return 1
     niri_fedora_wallpaper_session_satisfied
+}
+
+ensure_niri_fedora_xwayland_videobridge_autostart() {
+    local user=$1 group temporary
+
+    require_writable_mode || return
+    platform_is_fedora || return 0
+    niri_path_is_safe_no_symlink "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE" ||
+        return 1
+    group=$(id -gn "$user") || return 1
+    install -d -o "$user" -g "$group" \
+        "$(dirname "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE")" ||
+        return 1
+    [ ! -L "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE" ] || return 1
+    temporary=$(mktemp)
+    niri_fedora_xwayland_videobridge_autostart_contract > "$temporary"
+    install_if_changed "$temporary" \
+        "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE" 644 || {
+        rm -f "$temporary"
+        return 1
+    }
+    rm -f "$temporary"
+    chown "$user:$group" "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE" || return 1
+    niri_fedora_xwayland_videobridge_autostart_satisfied
 }
 
 ensure_niri_fedora_wallpaper_initializer() {
@@ -254,7 +307,8 @@ niri_fedora_session_compatibility_satisfied() {
     platform_is_fedora || return 0
     niri_fedora_lockscreen_contract_satisfied || return 1
     niri_fedora_config_file_compatibility_satisfied "$NIRI_CONFIG_FILE" || return 1
-    niri_fedora_config_file_compatibility_satisfied "$NIRI_BINDS_FILE"
+    niri_fedora_config_file_compatibility_satisfied "$NIRI_BINDS_FILE" || return 1
+    niri_fedora_xwayland_videobridge_autostart_satisfied
 }
 
 ensure_niri_fedora_config_file_compatibility() {
@@ -292,6 +346,7 @@ ensure_niri_fedora_session_compatibility() {
 
     platform_is_fedora || return 0
     ensure_niri_fedora_wallpaper_session "$user" || return
+    ensure_niri_fedora_xwayland_videobridge_autostart "$user" || return
     ensure_niri_fedora_config_file_compatibility "$NIRI_CONFIG_FILE" "$user" || return
     ensure_niri_fedora_config_file_compatibility "$NIRI_BINDS_FILE" "$user" || return
     niri_fedora_session_compatibility_satisfied

@@ -260,7 +260,9 @@ Arch 的 tty1 会话由 `~/.bash_profile` 中的托管块启动 `niri-session -l
 
 Fedora 只接受正式图形登录：display-manager service 必须 enabled 且 active，Wayland 会话文件必须存在并且只声明 `Exec=niri-session`。修复不会创建或保留 Shorin 托管的 tty1 autologin，也不会把 `graphical-session.target` 当作会话入口；缺少正式 display manager 或会话文件时保持 DRIFT/失败，不静默回退到 TTY。不要从 tty2 裸执行 `niri`。
 
-Fedora 的壁纸会话由 Niri 启动一次 `fedora-wallpaper-session.sh`，使用 awww 的 default/overview namespace、受锁保护的状态目录和有限重试；优先复用 Waypaper 的随机选择并显式应用已选图片，Waypaper 不可用时从其配置读取可用图片。awww 未就绪、图片不可用或命令合同不满足都会记录到目标用户状态日志并保持失败，不会把短暂启动成功误报为壁纸已收敛。
+Fedora 的壁纸会话由 Niri 启动一次 `fedora-wallpaper-session.sh`，使用 awww 的 default/overview namespace、受锁保护的状态目录和有限重试；默认 Shorin state namespace 暂不可写时，仅本次会话安全回退到 `$XDG_RUNTIME_DIR/shorin-arch-setup` 并记录 warning，正式 `apply/check` 仍会修复并审计 home state ownership。优先复用 Waypaper 的随机选择并显式应用已选图片，Waypaper 不可用时从其配置读取可用图片。awww 未就绪、图片不可用或命令合同不满足都会记录到目标用户状态日志并保持失败，不会把短暂启动成功误报为壁纸已收敛。
+
+Fedora + Niri 会通过目标用户的 `~/.config/autostart/org.kde.xwaylandvideobridge.desktop` 写入 `Hidden=true`，禁用 X11 兼容桥的默认自动启动；这是仅针对 X11 兼容层的设置，不影响 Wayland 原生 portal。Arch 路径不写入或管理该文件。
 
 Fedora 的 Niri 配置收敛保留现有用户文件，不会用上游树盲目覆盖 `config.kdl` 或 `binds.kdl`。事务内会备份并迁移旧的 `~/.config/quickshell/scripts/lockscreen-wait.sh` 到 `lockscreen.sh`，并替换 polkit-gnome 路径；来源 checkout 必须提供普通、可执行的 `dotfiles/.config/quickshell/scripts/lockscreen.sh`，目标文件必须归目标用户所有。缺少来源的 `fd-rdd`、`vicinae`、`waypaper`、`niriswitcher`、`niriswitcherctl`、`waybar` 和 `hyprpicker` 只改为 `command -v` shell guard，后续安装对应程序后即可自动启用，当前不会伪造命令或宣称功能已安装。迁移后的配置必须通过 `niri validate`，失败会恢复原文件。
 

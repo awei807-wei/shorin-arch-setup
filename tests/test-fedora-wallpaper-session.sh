@@ -105,6 +105,14 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 touch "$state/$namespace.ready"
+if [ -n "${WALLPAPER_TEST_DAEMON_PID_DIR:-}" ]; then
+    mkdir -p "$WALLPAPER_TEST_DAEMON_PID_DIR"
+    printf '%s\n' "$$" > "$WALLPAPER_TEST_DAEMON_PID_DIR/$namespace.pid"
+fi
+if [ "${WALLPAPER_TEST_DAEMON_STAY_ALIVE:-0}" -eq 1 ]; then
+    trap 'rm -f "$WALLPAPER_TEST_DAEMON_PID_DIR/$namespace.pid"' EXIT
+    while :; do sleep 1; done
+fi
 AWEOF
     cat > "$root/bin/waypaper" <<'AWEOF'
 #!/usr/bin/env bash
@@ -262,6 +270,87 @@ grep -Fqx "awww:img $direct/home/configured.png" \
 if grep -Fq 'waypaper:' "$direct/log/events"; then
     fail 'Waypaper must not be invoked when its executable is absent'
 fi
+
+# Waypaper stores home-relative values with a literal `~/` prefix.  Expansion
+# must remove that prefix before joining HOME; otherwise the recovery path
+# becomes `$HOME/~/...` and silently misses a valid image.
+tilde="$TEST_DIR/tilde"
+make_fixture "$tilde"
+mkdir -p "$tilde/home/Pictures/Wallpapers/.hidden" \
+    "$tilde/home/.config/waypaper"
+printf 'tilde wallpaper\n' > "$tilde/home/Pictures/Wallpapers/selected.png"
+cat > "$tilde/home/.config/waypaper/config.ini" <<'EOF'
+[Settings]
+wallpaper = ~/Pictures/Wallpapers/selected.png
+EOF
+tilde_image=$(HOME="$tilde/home" FEDORA_WALLPAPER_CONFIG="$tilde/home/.config/waypaper/config.ini" \
+    bash -c 'source "$1"; fedora_wallpaper_configured_image' bash "$SESSION_SCRIPT")
+[ "$tilde_image" = "$tilde/home/Pictures/Wallpapers/selected.png" ] ||
+    fail 'Waypaper ~/ paths must expand without a literal ~/ segment'
+
+# A default state namespace can be left root-owned or otherwise unwritable by
+# a previous privileged repair.  The initializer must keep this login
+# functional by moving only its lock/log to a safe XDG runtime namespace and
+# recording an explicit warning; explicit test state overrides remain strict.
+runtime_fallback="$TEST_DIR/runtime-fallback"
+make_fixture "$runtime_fallback"
+mkdir -p "$runtime_fallback/home/.local/state/shorin-arch-setup" \
+    "$runtime_fallback/runtime"
+chmod 500 "$runtime_fallback/home/.local/state/shorin-arch-setup"
+WALLPAPER_TEST_LOG="$runtime_fallback/log/events" \
+    WALLPAPER_TEST_STATE="$runtime_fallback/state" \
+    XDG_RUNTIME_DIR="$runtime_fallback/runtime" \
+    AWWW_BIN="$runtime_fallback/bin/awww" \
+    AWWW_DAEMON_BIN="$runtime_fallback/bin/awww-daemon" \
+    WAYPAPER_BIN="$runtime_fallback/bin/waypaper" \
+    FEDORA_WALLPAPER_QUERY_TIMEOUT=1 \
+    FEDORA_WALLPAPER_READY_TIMEOUT=2 \
+    FEDORA_WALLPAPER_IMAGE_TIMEOUT=1 \
+    FEDORA_WALLPAPER_WAYPAPER_TIMEOUT=2 \
+    HOME="$runtime_fallback/home" \
+    "$SESSION_SCRIPT"
+grep -Fq 'using session runtime state' \
+    "$runtime_fallback/runtime/shorin-arch-setup/fedora-wallpaper-session.log" ||
+    fail 'unwritable default state must record a runtime fallback warning'
+[ ! -e "$runtime_fallback/home/.local/state/shorin-arch-setup/fedora-wallpaper-session.lock" ] ||
+    fail 'runtime fallback must not write a lock into an unwritable home state namespace'
+
+# A daemon may outlive the initializer.  It must not retain the initializer's
+# flock descriptor, otherwise the second invocation is permanently skipped.
+alive="$TEST_DIR/alive-daemon"
+make_fixture "$alive"
+: > "$alive/log/events"
+mkdir -p "$alive/log/daemon-pids"
+run_session_alive() {
+    WALLPAPER_TEST_LOG="$alive/log/events" \
+        WALLPAPER_TEST_STATE="$alive/state" \
+        WALLPAPER_TEST_DAEMON_STAY_ALIVE=1 \
+        WALLPAPER_TEST_DAEMON_PID_DIR="$alive/log/daemon-pids" \
+        AWWW_BIN="$alive/bin/awww" \
+        AWWW_DAEMON_BIN="$alive/bin/awww-daemon" \
+        WAYPAPER_BIN="$alive/bin/waypaper" \
+        FEDORA_WALLPAPER_STATE_DIR="$alive/log" \
+        FEDORA_WALLPAPER_LOG="$alive/log/session.log" \
+        FEDORA_WALLPAPER_LOCK="$alive/log/session.lock" \
+        FEDORA_WALLPAPER_OVERVIEW_SCRIPT="$alive/bin/overview-blur" \
+        FEDORA_WALLPAPER_AUTO_BLUR_SCRIPT="$alive/bin/auto-blur" \
+        FEDORA_WALLPAPER_QUERY_TIMEOUT=1 \
+        FEDORA_WALLPAPER_READY_TIMEOUT=2 \
+        FEDORA_WALLPAPER_IMAGE_TIMEOUT=1 \
+        FEDORA_WALLPAPER_WAYPAPER_TIMEOUT=2 \
+        HOME="$alive/home" \
+        "$SESSION_SCRIPT"
+}
+run_session_alive
+[ -s "$alive/log/daemon-pids/default.pid" ] ||
+    fail 'alive daemon fixture must record its default namespace pid'
+run_session_alive
+[ "$(grep -Fc 'waypaper:--random' "$alive/log/events")" -eq 2 ] ||
+    fail 'second initializer must run while the first daemon remains alive'
+for pid_file in "$alive"/log/daemon-pids/*.pid; do
+    [ -f "$pid_file" ] || continue
+    kill "$(cat "$pid_file")" 2>/dev/null || true
+done
 
 # A stale socket that never becomes ready is bounded by the retry budget and
 # must surface as a session failure rather than being swallowed.

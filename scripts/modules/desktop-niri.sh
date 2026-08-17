@@ -124,6 +124,10 @@ desktop_niri_inspect() {
         niri_fedora_session_compatibility_satisfied
     desktop_niri_expect "$phase" config:fedora-wallpaper-session \
         niri_fedora_wallpaper_session_satisfied
+    if platform_is_fedora; then
+        desktop_niri_expect "$phase" config:fedora-xwaylandvideobridge-autostart \
+            niri_fedora_xwayland_videobridge_autostart_satisfied
+    fi
     desktop_niri_expect "$phase" config:niri-quickshell-startup \
         niri_quickshell_startup_satisfied \
             "$HOME_DIR/.config/niri/config.kdl"

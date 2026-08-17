@@ -137,6 +137,10 @@ ensure_niri_session_config() {
     niri_desktop_txn_snapshot "$NIRI_LEGACY_UNIT_LINK" || status=1
     niri_desktop_txn_snapshot "$NIRI_FEDORA_WALLPAPER_SESSION_FILE" || status=1
     niri_desktop_txn_snapshot "$NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE" || status=1
+    if platform_is_fedora; then
+        niri_desktop_txn_snapshot \
+            "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE" || status=1
+    fi
     if [ "$status" -ne 0 ]; then
         error 'Unable to snapshot all Niri session targets; session apply was not attempted.'
         niri_desktop_txn_finish 1
