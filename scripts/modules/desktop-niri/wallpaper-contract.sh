@@ -56,7 +56,8 @@ niri_active_wallpaper_backend_in_file() {
         /^[[:space:]]*(#|\/\/)/ { next }
         {
             pattern = "(^|[^[:alnum:]_-])" backend "(-daemon)?([^[:alnum:]_-]|$)"
-            if ($0 ~ pattern) found=1
+            if ($0 ~ pattern ||
+                (backend == "awww" && $0 ~ /shorin-fedora-awww-query/)) found=1
         }
         END { exit !found }
     ' "$file"

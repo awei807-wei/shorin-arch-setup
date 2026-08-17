@@ -20,6 +20,8 @@ niri_session_contract_init() {
     NIRI_LEGACY_UNIT=${NIRI_LEGACY_UNIT:-$HOME_DIR/.config/systemd/user/niri-autostart.service}
     NIRI_LEGACY_UNIT_LINK=${NIRI_LEGACY_UNIT_LINK:-$HOME_DIR/.config/systemd/user/default.target.wants/niri-autostart.service}
     NIRI_LOCKSCREEN_SCRIPT_FILE=${NIRI_LOCKSCREEN_SCRIPT_FILE:-$NIRI_QUICKSHELL_DIR/scripts/lockscreen.sh}
+    NIRI_FEDORA_WALLPAPER_SESSION_FILE=${NIRI_FEDORA_WALLPAPER_SESSION_FILE:-$NIRI_LOCAL_BIN/shorin-fedora-wallpaper-session}
+    NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE=${NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE:-$NIRI_LOCAL_BIN/shorin-fedora-awww-query}
     NIRI_FEDORA_POLKIT_AGENT_PATH=${NIRI_FEDORA_POLKIT_AGENT_PATH:-/usr/libexec/kf6/polkit-kde-authentication-agent-1}
 }
 
@@ -135,29 +137,117 @@ niri_optional_command_guard_contract() {
 niri_fedora_config_file_compatibility_satisfied() {
     local file=$1
     local optional_commands='fd-rdd vicinae waypaper niriswitcherctl niriswitcher waybar hyprpicker'
+    local wallpaper_startup=0
 
     [ -s "$file" ] || return 1
+    [ "$file" = "$NIRI_CONFIG_FILE" ] && wallpaper_startup=1
     awk -v optional="$optional_commands" \
         -v polkit="$NIRI_FEDORA_POLKIT_AGENT_PATH" \
+        -v initializer="$NIRI_FEDORA_WALLPAPER_SESSION_FILE" \
+        -v lockscreen="$NIRI_LOCKSCREEN_SCRIPT_FILE" \
+        -v wallpaper_startup="$wallpaper_startup" \
         -v validate=1 \
         -f "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-config-compatibility.awk" \
         "$file" >/dev/null
 }
 
+niri_fedora_wallpaper_initializer_satisfied() {
+    platform_is_fedora || return 0
+    [ -f "$NIRI_FEDORA_WALLPAPER_SESSION_FILE" ] &&
+        [ ! -L "$NIRI_FEDORA_WALLPAPER_SESSION_FILE" ] &&
+        [ -x "$NIRI_FEDORA_WALLPAPER_SESSION_FILE" ] &&
+        [ "$(stat -c '%U' "$NIRI_FEDORA_WALLPAPER_SESSION_FILE")" = "$TARGET_USER" ] &&
+        grep -Fq 'fedora_wallpaper_session_main' \
+            "$NIRI_FEDORA_WALLPAPER_SESSION_FILE"
+}
+
+niri_fedora_awww_query_wrapper_satisfied() {
+    platform_is_fedora || return 0
+    [ -f "$NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE" ] &&
+        [ ! -L "$NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE" ] &&
+        [ -x "$NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE" ] &&
+        [ "$(stat -c '%U' "$NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE")" = "$TARGET_USER" ] &&
+        grep -Fq 'fedora_wallpaper_query_wrapper' \
+            "$NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE"
+}
+
+niri_fedora_wallpaper_session_satisfied() {
+    niri_fedora_wallpaper_initializer_satisfied &&
+        niri_fedora_awww_query_wrapper_satisfied
+}
+
+niri_fedora_lockscreen_binding_satisfied() {
+    platform_is_fedora || return 0
+    [ -s "$NIRI_BINDS_FILE" ] || return 1
+    awk '
+        /^[[:space:]]*(\/\/|#)/ { next }
+        {
+            candidate=$0
+            sub(/^[[:space:]]*/, "", candidate)
+            lowered=tolower(candidate)
+            if (lowered ~ /^mod[+]alt[+]l([[:space:]]|[{])/) {
+                binding_seen=1
+                if ($0 !~ /spawn(-sh)?[[:space:]]+"([^"]*[/])?lockscreen[.]sh"/) {
+                    invalid=1
+                }
+            }
+        }
+        END { exit !(binding_seen && !invalid) }
+    ' "$NIRI_BINDS_FILE"
+}
+
+ensure_niri_fedora_wallpaper_session() {
+    local user=$1 group source
+
+    require_writable_mode || return
+    platform_is_fedora || return 0
+    source="$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-wallpaper-session.sh"
+    [ -f "$source" ] && [ ! -L "$source" ] && [ -x "$source" ] || return 1
+    group=$(id -gn "$user") || return 1
+    install -d -o "$user" -g "$group" "$NIRI_LOCAL_BIN" || return 1
+    install -m 755 -o "$user" -g "$group" \
+        "$source" "$NIRI_FEDORA_WALLPAPER_SESSION_FILE" || return 1
+    install -m 755 -o "$user" -g "$group" \
+        "$source" "$NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE" || return 1
+    niri_fedora_wallpaper_session_satisfied
+}
+
+ensure_niri_fedora_wallpaper_initializer() {
+    ensure_niri_fedora_wallpaper_session "$@"
+}
+
 niri_fedora_lockscreen_contract_satisfied() {
     local optional_commands='fd-rdd vicinae waypaper niriswitcherctl niriswitcher waybar hyprpicker'
+    local wallpaper_startup=1
 
     platform_is_fedora || return 0
     awk -v optional="$optional_commands" \
         -v polkit="$NIRI_FEDORA_POLKIT_AGENT_PATH" \
+        -v initializer="$NIRI_FEDORA_WALLPAPER_SESSION_FILE" \
+        -v lockscreen="$NIRI_LOCKSCREEN_SCRIPT_FILE" \
+        -v wallpaper_startup="$wallpaper_startup" \
         -v validate=1 \
         -v require_lockscreen=1 \
         -f "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-config-compatibility.awk" \
-        "$NIRI_CONFIG_FILE" "$NIRI_BINDS_FILE" >/dev/null || return 1
+        "$NIRI_CONFIG_FILE" >/dev/null || return 1
+    # Binds are intentionally validated separately.  A user may keep a
+    # wallpaper-related command as an interactive binding; only config.kdl's
+    # startup entries are owned by the session initializer contract.
+    awk -v optional="$optional_commands" \
+        -v polkit="$NIRI_FEDORA_POLKIT_AGENT_PATH" \
+        -v initializer="$NIRI_FEDORA_WALLPAPER_SESSION_FILE" \
+        -v lockscreen="$NIRI_LOCKSCREEN_SCRIPT_FILE" \
+        -v wallpaper_startup=0 \
+        -v validate=1 \
+        -f "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-config-compatibility.awk" \
+        "$NIRI_BINDS_FILE" >/dev/null || return 1
+    niri_fedora_lockscreen_binding_satisfied || return 1
     [ -f "$NIRI_LOCKSCREEN_SCRIPT_FILE" ] &&
         [ ! -L "$NIRI_LOCKSCREEN_SCRIPT_FILE" ] &&
         [ -x "$NIRI_LOCKSCREEN_SCRIPT_FILE" ] &&
-        [ "$(stat -c '%U' "$NIRI_LOCKSCREEN_SCRIPT_FILE")" = "$TARGET_USER" ]
+        [ "$(stat -c '%U' "$NIRI_LOCKSCREEN_SCRIPT_FILE")" = "$TARGET_USER" ] ||
+        return 1
+    niri_fedora_wallpaper_session_satisfied
 }
 
 niri_fedora_session_compatibility_satisfied() {
@@ -170,12 +260,17 @@ niri_fedora_session_compatibility_satisfied() {
 ensure_niri_fedora_config_file_compatibility() {
     local file=$1 user=$2 temporary mode group
     local optional_commands='fd-rdd vicinae waypaper niriswitcherctl niriswitcher waybar hyprpicker'
+    local wallpaper_startup=0
 
     require_writable_mode || return
     platform_is_fedora || return 0
     [ -f "$file" ] || return 1
+    [ "$file" = "$NIRI_CONFIG_FILE" ] && wallpaper_startup=1
     temporary=$(mktemp)
     if ! awk -v optional="$optional_commands" -v polkit="$NIRI_FEDORA_POLKIT_AGENT_PATH" \
+        -v initializer="$NIRI_FEDORA_WALLPAPER_SESSION_FILE" \
+        -v lockscreen="$NIRI_LOCKSCREEN_SCRIPT_FILE" \
+        -v wallpaper_startup="$wallpaper_startup" \
         -f "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-config-compatibility.awk" \
         "$file" > "$temporary"; then
         rm -f "$temporary"
@@ -196,6 +291,7 @@ ensure_niri_fedora_session_compatibility() {
     local user=$1
 
     platform_is_fedora || return 0
+    ensure_niri_fedora_wallpaper_session "$user" || return
     ensure_niri_fedora_config_file_compatibility "$NIRI_CONFIG_FILE" "$user" || return
     ensure_niri_fedora_config_file_compatibility "$NIRI_BINDS_FILE" "$user" || return
     niri_fedora_session_compatibility_satisfied

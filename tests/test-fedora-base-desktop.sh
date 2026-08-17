@@ -464,8 +464,9 @@ ensure_niri_waypaper_backend "$TARGET_USER" ||
     fail 'Fedora wallpaper backend contract must select awww'
 grep -Fq 'awww-daemon' "$NIRI_CONFIG_FILE" ||
     fail 'Fedora Niri config must use awww-daemon'
-grep -Fq 'awww query' "$NIRI_QUICKSHELL_DIR/lockscreen/shell.qml" ||
-    fail 'Fedora staged QuickShell config must use awww query'
+grep -Eq 'shorin-fedora-awww-query|awww query' \
+    "$NIRI_QUICKSHELL_DIR/lockscreen/shell.qml" ||
+    fail 'Fedora staged QuickShell config must use the quiet awww query wrapper'
 grep -Fqx 'backend = awww' "$NIRI_WAYPAPER_CONFIG_FILE" ||
     fail 'Fedora Waypaper config must use awww exactly'
 if grep -R -Eq '(^|[^[:alnum:]_-])swww(-daemon)?([^[:alnum:]_-]|$)' \

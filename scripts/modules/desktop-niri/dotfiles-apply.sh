@@ -274,10 +274,12 @@ deploy_dotfiles() {
         niri_desktop_txn_finish 1
         return 1
     fi
-    mode=$(stat -c '%a' "$source_file")
-    if ! install_if_changed "$source_file" "$NIRI_STARSHIP_CONFIG_FILE" "$mode" ||
-        ! chown "$TARGET_USER:" "$NIRI_STARSHIP_CONFIG_FILE" ||
-        ! niri_starship_config_deployed; then
+    # Starship is a user-owned configuration, not an installer-owned output.
+    # The generic tree deployment above installs the canonical file only when
+    # the destination is absent.  Never replace an existing file here: repair
+    # must preserve user customizations, and the transaction snapshot can then
+    # restore the original on any later failure.
+    if ! niri_starship_config_deployed; then
         niri_desktop_txn_finish 1
         return 1
     fi

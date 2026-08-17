@@ -236,11 +236,13 @@ test_dotfiles_transaction_rolls_back_late_failure() (
     local before_state="$TEST_DIR/txn-before-state"
     local before_matugen="$TEST_DIR/txn-before-matugen"
     local before_fish="$TEST_DIR/txn-before-fish"
+    local before_starship="$TEST_DIR/txn-before-starship"
 
     cp -a "$NIRI_QUICKSHELL_DIR" "$before_quickshell"
     cp -a "$NIRI_QUICKSHELL_SOURCE_STATE_FILE" "$before_state"
     cp -a "$NIRI_MATUGEN_CONFIG_FILE" "$before_matugen"
     cp -a "$NIRI_FISH_CONFIG_FILE" "$before_fish"
+    cp -a "$NIRI_STARSHIP_CONFIG_FILE" "$before_starship"
     niri_deploy_wallpaper_compat_file() { return 1; }
     if deploy_dotfiles "$DOTFILES_CHECKOUT"; then
         fail 'a late Fedora wallpaper conversion failure must fail the dotfile transaction'
@@ -253,6 +255,8 @@ test_dotfiles_transaction_rolls_back_late_failure() (
         fail 'a late dotfile failure must restore Matugen configuration'
     cmp -s "$before_fish" "$NIRI_FISH_CONFIG_FILE" ||
         fail 'a late dotfile failure must restore Fish configuration'
+    cmp -s "$before_starship" "$NIRI_STARSHIP_CONFIG_FILE" ||
+        fail 'a late dotfile failure must restore the user Starship configuration'
 )
 
 test_dotfiles_transaction_rolls_back_late_failure
@@ -453,15 +457,21 @@ input_path = '~/.config/matugen/templates/starship-colors.toml'
 output_path = '~/.config/starship.toml'
 EOF
 deploy_dotfiles "$DOTFILES_CHECKOUT"
-cmp -s "$HOME_DIR/.config/starship.toml" "$STARSHIP_CURRENT_COPY" ||
-    fail 'the verified Starship configuration must replace generated drift'
+grep -Fqx 'Matugen-generated Starship configuration' \
+    "$HOME_DIR/.config/starship.toml" ||
+    fail 'repair must preserve an existing user Starship configuration'
 niri_matugen_starship_output_disabled ||
     fail 'reintroduced Matugen Starship output must be removed'
 printf 'user-owned Starship configuration\n' > "$HOME_DIR/.config/starship.toml"
 deploy_dotfiles "$DOTFILES_CHECKOUT"
-cmp -s "$HOME_DIR/.config/starship.toml" "$STARSHIP_CURRENT_COPY" ||
-    fail 'Starship must remain managed by the verified checkout'
-cp "$STARSHIP_CURRENT_COPY" "$HOME_DIR/.config/starship.toml"
+grep -Fqx 'user-owned Starship configuration' \
+    "$HOME_DIR/.config/starship.toml" ||
+    fail 'a second repair must preserve user Starship customizations'
+rm -f "$HOME_DIR/.config/starship.toml"
+deploy_dotfiles "$DOTFILES_CHECKOUT"
+cmp -s "$HOME_DIR/.config/starship.toml" \
+    "$DOTFILES_CHECKOUT/dotfiles/.config/starship.toml" ||
+    fail 'a missing Starship configuration must install the canonical source'
 desktop_niri_contract_init
 
 LIST_FILE="$TEST_DIR/niri-applist.txt"
@@ -912,6 +922,7 @@ binds {
     Mod+H { spawn "hyprpicker"; }
     Mod+Q { spawn-sh "hyprpicker | wl-copy"; }
     Mod+R { spawn-sh "vicinae toggle"; }
+    Mod+Alt+L { spawn-sh "/usr/bin/quickshell -p ~/.config/quickshell/lockscreen/shell.qml"; }
 }
 EOF
     chown -R "$TARGET_USER:" "$HOME_DIR"
@@ -967,6 +978,22 @@ EOF
         fail 'Fedora Niri compatibility migration must converge'
     niri_fedora_session_compatibility_satisfied ||
         fail 'Fedora Niri compatibility contract must accept guarded commands'
+    lockscreen_binds_copy="$TEST_DIR/fedora-lockscreen-binds-copy.kdl"
+    cp "$NIRI_BINDS_FILE" "$lockscreen_binds_copy"
+    awk 'tolower($0) !~ /^[[:space:]]*mod[+]alt[+]l([[:space:]]|[{])/' \
+        "$NIRI_BINDS_FILE" > "$NIRI_BINDS_FILE.missing"
+    mv "$NIRI_BINDS_FILE.missing" "$NIRI_BINDS_FILE"
+    if niri_fedora_lockscreen_contract_satisfied; then
+        fail 'Fedora lockscreen contract must reject a missing Mod+Alt+L binding'
+    fi
+    cp "$lockscreen_binds_copy" "$NIRI_BINDS_FILE"
+    sed 's#spawn-sh "lockscreen[.]sh"#spawn-sh "quickshell -p ~/.config/quickshell/lockscreen/shell.qml"#' \
+        "$NIRI_BINDS_FILE" > "$NIRI_BINDS_FILE.bypass"
+    mv "$NIRI_BINDS_FILE.bypass" "$NIRI_BINDS_FILE"
+    if niri_fedora_lockscreen_contract_satisfied; then
+        fail 'Fedora lockscreen contract must reject a Mod+Alt+L wrapper bypass'
+    fi
+    cp "$lockscreen_binds_copy" "$NIRI_BINDS_FILE"
     grep -Fq 'spawn-sh-at-startup "command -v' "$NIRI_CONFIG_FILE" ||
         fail 'Fedora startup commands must use shell guards'
     grep -Fq 'command -v waybar >/dev/null 2>&1' "$NIRI_CONFIG_FILE" ||

@@ -24,7 +24,9 @@ desktop_niri_contract_init() {
             NIRI_QUICKSHELL_BACKUP_DIR NIRI_QUICKSHELL_SOURCE_STATE_FILE \
             NIRI_FISH_CONFIG_FILE NIRI_FISH_GUARD_FILE NIRI_FISH_RUSTUP_FILE \
             NIRI_FISH_LOCAL_ENV_FILE NIRI_BASH_PROFILE NIRI_LEGACY_UNIT \
-            NIRI_LEGACY_UNIT_LINK NIRI_LOCKSCREEN_SCRIPT_FILE; do
+            NIRI_LEGACY_UNIT_LINK NIRI_LOCKSCREEN_SCRIPT_FILE \
+            NIRI_FEDORA_WALLPAPER_SESSION_FILE \
+            NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE; do
             value=${!variable:-}
             case "$value" in
                 "$previous_home"|"$previous_home"/*) unset "$variable" ;;

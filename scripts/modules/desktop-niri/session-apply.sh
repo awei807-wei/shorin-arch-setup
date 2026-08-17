@@ -71,6 +71,8 @@ ensure_niri_session_config() {
     niri_desktop_txn_snapshot "$NIRI_BASH_PROFILE" || status=1
     niri_desktop_txn_snapshot "$NIRI_LEGACY_UNIT" || status=1
     niri_desktop_txn_snapshot "$NIRI_LEGACY_UNIT_LINK" || status=1
+    niri_desktop_txn_snapshot "$NIRI_FEDORA_WALLPAPER_SESSION_FILE" || status=1
+    niri_desktop_txn_snapshot "$NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE" || status=1
     if [ "$status" -ne 0 ]; then
         niri_desktop_txn_finish 1
         return 1

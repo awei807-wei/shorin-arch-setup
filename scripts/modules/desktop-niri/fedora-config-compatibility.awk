@@ -82,6 +82,24 @@ function has_legacy_command(text) {
         text ~ /\/usr\/lib[^[:space:]" ]*polkit-gnome/
 }
 
+function is_initializer_command(text) {
+    return (initializer != "" && contains_command(text, initializer)) ||
+        contains_command(text, "shorin-fedora-wallpaper-session")
+}
+
+function is_wallpaper_startup_command(text) {
+    return contains_command(text, "awww-daemon") ||
+        contains_command(text, "waypaper") ||
+        text ~ /niri_set_overview_blur_dark_bg[.]sh/ ||
+        text ~ /niri_auto_blur_bg[.]sh/
+}
+
+function is_lockscreen_quickshell_command(text) {
+    return contains_command(text, "quickshell") &&
+        text ~ /(^|[[:space:]])(-p[[:space:]]+)?[^[:space:]"']*lockscreen([/][^[:space:]"']*)?/ \
+        || text ~ /quickshell[^"']*-[[:space:]]*p[[:space:]]+[^"']*lockscreen/
+}
+
 function shell_quote(value,    result) {
     result=value
     gsub(/\\/, "\\\\", result)
@@ -102,6 +120,7 @@ function replace_fedora_compatibility(text,    result) {
     gsub(/lockscreen-wait[.]sh/, "lockscreen.sh", result)
     gsub(/\/usr\/lib[^[:space:]" ]*polkit-gnome-authentication-agent-1/, polkit, result)
     gsub(/polkit-gnome-authentication-agent-1/, polkit, result)
+    if (is_lockscreen_quickshell_command(result)) result="lockscreen.sh"
     return result
 }
 
@@ -149,6 +168,26 @@ function replace_fedora_compatibility(text,    result) {
         }
         original=parsed_value
         consumed=parsed_end
+        if (wallpaper_startup && index(token,"-at-startup") > 0 &&
+            (is_initializer_command(original) ||
+             is_wallpaper_startup_command(original))) {
+            if (validate) {
+                if (is_initializer_command(original)) initializer_seen++
+                else wallpaper_invalid=1
+                next
+            }
+            if (is_initializer_command(original)) {
+                if (!initializer_seen) print line
+                initializer_seen=1
+            } else if (!initializer_seen) {
+                match(line, /^[[:space:]]*/)
+                print substr(line, 1, RLENGTH) \
+                    "spawn-at-startup \"" (initializer == "" ? \
+                    "~/.local/bin/shorin-fedora-wallpaper-session" : initializer) "\""
+                initializer_seen=1
+            }
+            next
+        }
         if (validate) {
             if (has_legacy_command(original)) invalid=1
             if (require_lockscreen && contains_command(original,"lockscreen.sh")) {
@@ -196,6 +235,26 @@ function replace_fedora_compatibility(text,    result) {
         if (!validate) print line
         next
     }
+    if (wallpaper_startup && index(token,"-at-startup") > 0 &&
+        (is_initializer_command(values[1]) ||
+         is_wallpaper_startup_command(values[1]))) {
+        if (validate) {
+            if (is_initializer_command(values[1])) initializer_seen++
+            else wallpaper_invalid=1
+            next
+        }
+        if (is_initializer_command(values[1])) {
+            if (!initializer_seen) print line
+            initializer_seen=1
+        } else if (!initializer_seen) {
+            match(line, /^[[:space:]]*/)
+            print substr(line, 1, RLENGTH) \
+                "spawn-at-startup \"" (initializer == "" ? \
+                "~/.local/bin/shorin-fedora-wallpaper-session" : initializer) "\""
+            initializer_seen=1
+        }
+        next
+    }
     if (validate) {
         if (has_legacy_command(values[1])) invalid=1
         if (require_lockscreen && contains_command(values[1],"lockscreen.sh")) {
@@ -209,6 +268,12 @@ function replace_fedora_compatibility(text,    result) {
     }
 
     first_original=values[1]
+    if (is_lockscreen_quickshell_command(first_original)) {
+        replacement=token " \"lockscreen.sh\""
+        line=substr(line,1,position-1) replacement substr(rest,consumed)
+        print line
+        next
+    }
     first_updated=replace_fedora_compatibility(first_original)
     base=first_updated
     sub(/^.*\//,"",base)
@@ -237,5 +302,11 @@ function replace_fedora_compatibility(text,    result) {
 }
 
 END {
-    if (validate && (invalid || (require_lockscreen && !lockscreen_seen))) exit 1
+    if (validate && (invalid || wallpaper_invalid ||
+        (require_lockscreen && !lockscreen_seen) ||
+        (wallpaper_startup && initializer_seen != 1))) exit 1
+    if (!validate && wallpaper_startup && !initializer_seen) {
+        print "spawn-at-startup \"" (initializer == "" ? \
+            "~/.local/bin/shorin-fedora-wallpaper-session" : initializer) "\""
+    }
 }

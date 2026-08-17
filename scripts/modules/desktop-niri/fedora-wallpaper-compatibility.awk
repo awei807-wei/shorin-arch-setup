@@ -18,6 +18,10 @@ function replace_query_pipeline(value) {
     value = replace_literal(value, "swww", "awww")
     value = replace_literal(value, "WP_SWWW", "WP_AWWW")
     value = replace_literal(value, "swww query 无返回", "awww query 无返回")
+    # The daemon may still be configuring its Wayland outputs when QuickShell
+    # performs its first query.  Fedora installs this quiet, bounded wrapper;
+    # keep the rest of the source pipeline (sed/grep) unchanged.
+    value = replace_literal(value, "awww query", "shorin-fedora-awww-query")
     return value
 }
 
@@ -37,6 +41,12 @@ function replace_query_pipeline(value) {
     if (FILENAME ~ /scripts\/niri_auto_blur_bg[.]sh$/) {
         line = replace_literal(line, "image:[[:space:]]*([^[:space:]]+)", \
             "currently[[:space:]]+displaying:[[:space:]]*image:[[:space:]]*(.*)")
+    }
+    if (FILENAME ~ /scripts\/niri_auto_blur_bg[.]sh$/ ||
+        FILENAME ~ /scripts\/niri_set_overview_blur_dark_bg[.]sh$/ ||
+        FILENAME ~ /quickshell\/lockscreen\/shell[.]qml$/ ||
+        FILENAME ~ /\/lockscreen\/shell[.]qml$/) {
+        line = replace_literal(line, "awww query", "shorin-fedora-awww-query")
     }
     print line
 }
