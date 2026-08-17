@@ -87,8 +87,13 @@ desktop_niri_inspect() {
         niri_fcitx5_startup_satisfied \
             "$HOME_DIR/.config/niri/config.kdl"
     desktop_niri_expect "$phase" config:niri-path niri_path_satisfied
-    desktop_niri_expect "$phase" config:niri-wallpaper-backend \
-        niri_wallpaper_backend_satisfied
+    if platform_is_fedora; then
+        desktop_niri_expect "$phase" config:niri-wallpaper-backend \
+            niri_fedora_wallpaper_backend_satisfied
+    else
+        desktop_niri_expect "$phase" config:niri-wallpaper-backend \
+            niri_wallpaper_backend_satisfied
+    fi
     desktop_niri_expect "$phase" config:quickshell-wallpaper-backend \
         niri_quickshell_wallpaper_backend_satisfied
     desktop_niri_expect "$phase" config:waypaper-wallpaper-backend \

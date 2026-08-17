@@ -88,7 +88,8 @@ function is_initializer_command(text) {
 }
 
 function is_wallpaper_startup_command(text) {
-    return contains_command(text, "awww-daemon") ||
+    return contains_command(text, "swww-daemon") ||
+        contains_command(text, "awww-daemon") ||
         contains_command(text, "waypaper") ||
         text ~ /niri_set_overview_blur_dark_bg[.]sh/ ||
         text ~ /niri_auto_blur_bg[.]sh/

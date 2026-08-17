@@ -420,12 +420,16 @@ done
 # session path may migrate Niri/Waypaper config but must never rewrite live
 # QuickShell drift.
 NIRI_CONFIG_FILE="$HOME_DIR/niri.kdl"
+NIRI_BINDS_FILE="$HOME_DIR/binds.kdl"
+NIRI_LOCAL_BIN="$HOME_DIR/.local/bin"
 NIRI_QUICKSHELL_DIR="$HOME_DIR/quickshell"
+NIRI_LOCKSCREEN_SCRIPT_FILE="$NIRI_QUICKSHELL_DIR/scripts/lockscreen.sh"
 NIRI_WAYPAPER_CONFIG_FILE="$HOME_DIR/waypaper.ini"
 NIRI_DESKTOP_STATE_DIR="$HOME_DIR/desktop-state"
 NIRI_QUICKSHELL_BACKUP_DIR="$NIRI_DESKTOP_STATE_DIR/quickshell-backups"
 NIRI_QUICKSHELL_SOURCE_STATE_FILE="$NIRI_DESKTOP_STATE_DIR/quickshell-source"
 FEDORA_QUICKSHELL_CHECKOUT="$TEST_DIR/fedora-quickshell-source"
+desktop_niri_contract_init
 mkdir -p "$FEDORA_QUICKSHELL_CHECKOUT/dotfiles/.config/quickshell/scripts" \
     "$FEDORA_QUICKSHELL_CHECKOUT/dotfiles/.config/quickshell/lockscreen" \
     "$FEDORA_QUICKSHELL_CHECKOUT/dotfiles/.config/quickshell/config"
@@ -449,21 +453,37 @@ git -C "$FEDORA_QUICKSHELL_CHECKOUT" \
     -c user.name=Fixture -c user.email=fixture@example.invalid \
     commit -q -m fixture
 mkdir -p "$NIRI_QUICKSHELL_DIR"
-printf 'spawn-at-startup "swww-daemon"\n' > "$NIRI_CONFIG_FILE"
+cat > "$NIRI_CONFIG_FILE" <<'EOF'
+spawn-at-startup "swww-daemon"
+spawn-at-startup "quickshell -p ~/.config/quickshell/lockscreen/shell.qml"
+EOF
+cat > "$NIRI_BINDS_FILE" <<EOF
+binds {
+    Mod+Alt+L { spawn-sh "$NIRI_LOCKSCREEN_SCRIPT_FILE"; }
+}
+EOF
 printf '[Settings]\nbackend = swww\n' > "$NIRI_WAYPAPER_CONFIG_FILE"
 niri_quickshell_stage_and_deploy \
     "$FEDORA_QUICKSHELL_CHECKOUT" "$TARGET_USER" ||
     fail 'Fedora QuickShell source must convert wallpaper references in staging'
 niri_quickshell_deployment_state_satisfied ||
     fail 'Fedora staged QuickShell conversion must satisfy the deployment state'
+ensure_niri_fedora_session_compatibility "$TARGET_USER" ||
+    fail 'Fedora session compatibility must install the initializer before wallpaper convergence'
 ensure_niri_wallpaper_backend "$TARGET_USER" ||
-    fail 'Fedora wallpaper apply must migrate Niri config without live QuickShell edits'
+    fail 'Fedora wallpaper apply must accept initializer-managed Niri startup without live QuickShell edits'
 ensure_niri_waypaper_backend "$TARGET_USER" ||
     fail 'Fedora Waypaper contract must migrate to awww'
 [ "$(niri_wallpaper_backend_name)" = awww ] ||
     fail 'Fedora wallpaper backend contract must select awww'
-grep -Fq 'awww-daemon' "$NIRI_CONFIG_FILE" ||
-    fail 'Fedora Niri config must use awww-daemon'
+grep -Fq 'shorin-fedora-wallpaper-session' "$NIRI_CONFIG_FILE" ||
+    fail 'Fedora Niri config must use the managed wallpaper initializer'
+if grep -Eq 'awww-daemon|waypaper|niri_set_overview_blur_dark_bg|niri_auto_blur_bg' \
+    "$NIRI_CONFIG_FILE"; then
+    fail 'Fedora Niri config must remove the old parallel wallpaper startup chain'
+fi
+grep -Fq 'spawn-sh "lockscreen.sh"' "$NIRI_BINDS_FILE" ||
+    fail 'Fedora lockscreen binding must use the managed wrapper'
 grep -Eq 'shorin-fedora-awww-query|awww query' \
     "$NIRI_QUICKSHELL_DIR/lockscreen/shell.qml" ||
     fail 'Fedora staged QuickShell config must use the quiet awww query wrapper'

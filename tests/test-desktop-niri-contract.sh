@@ -1235,6 +1235,178 @@ EOF
 )
 
 test_fedora_niri_session_compatibility
+
+test_fedora_wallpaper_backend_integration() (
+    local fedora_home="$TEST_DIR/fedora-wallpaper-integration-home"
+    local fedora_checkout="$TEST_DIR/fedora-wallpaper-integration-checkout"
+    local validate_bin="$TEST_DIR/fedora-wallpaper-integration-bin"
+    local check_profile config_copy state_copy helper_digest status output
+
+    export SHORIN_DISTRO=fedora HOME_DIR="$fedora_home"
+    unset NIRI_CONFIG_FILE NIRI_BINDS_FILE NIRI_LOCAL_BIN \
+        NIRI_QUICKSHELL_DIR NIRI_DESKTOP_STATE_DIR \
+        NIRI_QUICKSHELL_BACKUP_DIR NIRI_QUICKSHELL_SOURCE_STATE_FILE \
+        NIRI_WAYPAPER_CONFIG_FILE NIRI_FEDORA_WALLPAPER_SESSION_FILE \
+        NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE
+    desktop_niri_contract_init
+    mkdir -p "$HOME_DIR/.config/niri" "$HOME_DIR/.config/waypaper" \
+        "$HOME_DIR/.config/quickshell" "$HOME_DIR/.local/bin" \
+        "$fedora_checkout/dotfiles/.config/quickshell/lockscreen" \
+        "$fedora_checkout/dotfiles/.config/quickshell/config" \
+        "$fedora_checkout/dotfiles/.config/quickshell/scripts"
+    cat > "$NIRI_CONFIG_FILE" <<'EOF'
+// Fedora wallpaper integration marker
+environment {
+    PATH "/usr/local/bin:/usr/bin"
+}
+spawn-at-startup "swww-daemon"
+spawn-at-startup "waypaper --random"
+spawn-at-startup "niri_set_overview_blur_dark_bg.sh"
+spawn-at-startup "niri_auto_blur_bg.sh"
+spawn-at-startup "quickshell"
+spawn-at-startup "quickshell -p ~/.config/quickshell/lockscreen/shell.qml"
+spawn-at-startup "/usr/bin/fcitx5" "-d"
+EOF
+    cat > "$NIRI_BINDS_FILE" <<EOF
+binds {
+    Mod+Alt+L { spawn-sh "/usr/bin/quickshell -p ~/.config/quickshell/lockscreen/shell.qml"; }
+    Mod+Return { spawn "kitty"; }
+}
+EOF
+    cat > "$NIRI_WAYPAPER_CONFIG_FILE" <<'EOF'
+[Settings]
+folder = ~/Pictures/Wallpapers
+backend = swww
+stylesheet = ~/.config/waypaper/style.css
+swww_transition_type = any
+EOF
+    printf '%s\n' '# Fedora profile marker' > "$NIRI_BASH_PROFILE"
+
+    printf 'import QtQuick 2.0\n' \
+        > "$fedora_checkout/dotfiles/.config/quickshell/shell.qml"
+    cat > "$fedora_checkout/dotfiles/.config/quickshell/lockscreen/shell.qml" <<'EOF'
+import QtQuick 2.0
+command: ["sh", "-c", "swww query"]
+EOF
+    printf 'module Shorin.Config\n' \
+        > "$fedora_checkout/dotfiles/.config/quickshell/config/qmldir"
+    printf '#!/usr/bin/env bash\n' \
+        > "$fedora_checkout/dotfiles/.config/quickshell/scripts/lockscreen.sh"
+    chmod 755 \
+        "$fedora_checkout/dotfiles/.config/quickshell/scripts/lockscreen.sh"
+    ln -s ../config \
+        "$fedora_checkout/dotfiles/.config/quickshell/lockscreen/config"
+    git init -q -b main "$fedora_checkout"
+    git -C "$fedora_checkout" add .
+    git -C "$fedora_checkout" -c user.name=Fixture \
+        -c user.email=fixture@example.invalid commit -q -m fixture
+    chown -R "$TARGET_USER:" "$HOME_DIR" "$fedora_checkout"
+
+    niri_quickshell_stage_and_deploy "$fedora_checkout" "$TARGET_USER" ||
+        fail 'Fedora integration fixture must deploy a valid QuickShell state'
+    niri_quickshell_deployment_state_satisfied ||
+        fail 'Fedora integration fixture must start with a valid QuickShell state'
+
+    ensure_niri_fedora_session_compatibility "$TARGET_USER" ||
+        fail 'Fedora compatibility must converge before wallpaper backend validation'
+    helper_digest=$(sha256sum "$NIRI_FEDORA_WALLPAPER_SESSION_FILE")
+    ensure_niri_wallpaper_backend "$TARGET_USER" ||
+        fail 'Fedora wallpaper backend must accept initializer-managed startup'
+    if niri_wallpaper_backend_satisfied; then
+        fail 'Fedora wallpaper backend must not require direct awww in Niri config'
+    fi
+    niri_fedora_wallpaper_backend_satisfied ||
+        fail 'Fedora initializer-managed wallpaper backend must satisfy its contract'
+
+    state_package_present() { return 1; }
+    mkdir -p "$validate_bin"
+    cat > "$validate_bin/niri" <<'EOF'
+#!/usr/bin/env bash
+[ "${1:-}" = validate ] && [ "${2:-}" = -c ] && [ -s "${3:-}" ]
+EOF
+    chmod 755 "$validate_bin/niri"
+    PATH="$validate_bin:$PATH"
+    export PATH
+    runuser() {
+        [ "$1" = -u ] && [ "$3" = -- ] || return 2
+        shift 3
+        "$@"
+    }
+    export SHORIN_FORCE_RUNUSER=1
+
+    ensure_niri_session_config "$TARGET_USER" ||
+        fail 'managed Fedora session must complete after wallpaper backend convergence'
+    [ "$(sha256sum "$NIRI_FEDORA_WALLPAPER_SESSION_FILE")" = \
+        "$helper_digest" ] ||
+        fail 'managed session must not roll back the Fedora wallpaper helper'
+    grep -Fqx '// Fedora wallpaper integration marker' "$NIRI_CONFIG_FILE" ||
+        fail 'managed session must preserve the Fedora Niri config marker'
+    grep -Fq 'shorin-fedora-wallpaper-session' "$NIRI_CONFIG_FILE" ||
+        fail 'managed session must retain the unique Fedora wallpaper initializer'
+    if grep -Eq 'awww-daemon|waypaper|niri_set_overview_blur_dark_bg|niri_auto_blur_bg' \
+        "$NIRI_CONFIG_FILE"; then
+        fail 'managed Fedora session must remove the old parallel wallpaper startup chain'
+    fi
+    grep -Fq 'spawn-sh "lockscreen.sh"' "$NIRI_BINDS_FILE" ||
+        fail 'managed Fedora session must retain the lockscreen wrapper binding'
+    grep -Fqx '    Mod+Return { spawn "kitty"; }' "$NIRI_BINDS_FILE" ||
+        fail 'managed Fedora session must preserve the user binding'
+    niri_fedora_session_compatibility_satisfied ||
+        fail 'managed Fedora session must retain config/helper/bind compatibility'
+    niri_fedora_wallpaper_backend_satisfied ||
+        fail 'managed Fedora session must retain initializer-managed wallpaper state'
+    niri_waypaper_backend_satisfied ||
+        fail 'managed Fedora session must converge Waypaper separately'
+    niri_quickshell_deployment_state_satisfied ||
+        fail 'managed Fedora session must preserve the valid QuickShell deployment state'
+
+    # Exercise the real desktop_niri.sh dispatcher.  Other desktop targets
+    # may be absent in this focused fixture; the assertion is deliberately
+    # scoped to the platform-specific wallpaper result.
+    check_profile="$TEST_DIR/fedora-wallpaper-check-profile"
+    mkdir -p "$check_profile"
+    : > "$check_profile/niri-packages.list"
+    run_desktop_niri_check() {
+        local check_status=0
+
+        output=$(PATH="$PATH" SHORIN_PROFILE_DIR="$check_profile" \
+            PACKAGE_SOURCE_DIR="$TEST_DIR/package-sources" \
+            bash "$ROOT_DIR/scripts/modules/desktop-niri.sh" check 2>&1) ||
+            check_status=$?
+        printf '%s\n' "$output"
+        return 0
+    }
+    run_desktop_niri_check
+    if grep -Fq 'config:niri-wallpaper-backend' <<< "$output"; then
+        fail 'Fedora initializer-managed desktop check must not report wallpaper backend drift'
+    fi
+
+    rm -f "$NIRI_FEDORA_WALLPAPER_SESSION_FILE"
+    run_desktop_niri_check
+    grep -Fq 'config:niri-wallpaper-backend' <<< "$output" ||
+        fail 'desktop check must report a missing Fedora wallpaper helper'
+    ensure_niri_fedora_wallpaper_session "$TARGET_USER" ||
+        fail 'Fedora wallpaper helper fixture must be restorable'
+
+    state_copy="$TEST_DIR/fedora-wallpaper-check-state-copy"
+    cp "$NIRI_QUICKSHELL_SOURCE_STATE_FILE" "$state_copy"
+    sed -i 's/^digest=.*/digest=broken/' \
+        "$NIRI_QUICKSHELL_SOURCE_STATE_FILE"
+    run_desktop_niri_check
+    grep -Fq 'config:niri-wallpaper-backend' <<< "$output" ||
+        fail 'desktop check must report invalid Fedora QuickShell state'
+    cp "$state_copy" "$NIRI_QUICKSHELL_SOURCE_STATE_FILE"
+
+    config_copy="$TEST_DIR/fedora-wallpaper-check-config-copy"
+    cp "$NIRI_CONFIG_FILE" "$config_copy"
+    printf '\nspawn-at-startup "swww-daemon"\n' >> "$NIRI_CONFIG_FILE"
+    run_desktop_niri_check
+    grep -Fq 'config:niri-wallpaper-backend' <<< "$output" ||
+        fail 'desktop check must report active Fedora swww startup drift'
+    cp "$config_copy" "$NIRI_CONFIG_FILE"
+)
+
+test_fedora_wallpaper_backend_integration
 export SHORIN_DISTRO=arch
 
 # The Fedora compatibility transform must be a no-op for a complete Arch

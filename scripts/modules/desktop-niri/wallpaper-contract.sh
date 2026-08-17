@@ -156,6 +156,15 @@ niri_wallpaper_backend_satisfied() {
         niri_file_has_wallpaper_backend "$NIRI_CONFIG_FILE"
 }
 
+niri_fedora_wallpaper_backend_satisfied() {
+    platform_is_fedora || return 0
+    niri_quickshell_deployment_state_satisfied || return 1
+    niri_fedora_session_compatibility_satisfied || return 1
+    ! niri_active_swww_in_file "$NIRI_CONFIG_FILE" || return 1
+    ! niri_active_swww_in_file "$NIRI_BINDS_FILE" || return 1
+    niri_quickshell_wallpaper_backend_satisfied
+}
+
 niri_quickshell_wallpaper_backend_satisfied() {
     [ -d "$NIRI_QUICKSHELL_DIR" ] &&
         ! niri_tree_has_legacy_swww "$NIRI_QUICKSHELL_DIR" &&
@@ -223,19 +232,19 @@ ensure_niri_wallpaper_backend() {
     local user=$1 file quickshell_before_digest quickshell_after_digest
     local registered_digest
 
-    ensure_wallpaper_backend_in_file "$NIRI_CONFIG_FILE" "$user"
-    [ -d "$NIRI_QUICKSHELL_DIR" ] || return 1
-
     # Fedora's QuickShell wallpaper compatibility is applied to the staged
     # checkout before the live tree is replaced.  Never mutate an active
     # Fedora tree during session convergence: a post-deployment edit must
     # remain drift until the source deployment repairs it.
     if platform_is_fedora; then
-        niri_quickshell_deployment_state_satisfied || return 1
-        niri_wallpaper_backend_satisfied &&
-            niri_quickshell_wallpaper_backend_satisfied
-        return
+        [ -d "$NIRI_QUICKSHELL_DIR" ] || return 1
+        ensure_niri_fedora_session_compatibility "$user" || return 1
+        niri_fedora_wallpaper_backend_satisfied
+        return $?
     fi
+
+    ensure_wallpaper_backend_in_file "$NIRI_CONFIG_FILE" "$user"
+    [ -d "$NIRI_QUICKSHELL_DIR" ] || return 1
 
     # Arch retains the historical one-time swww -> awww migration, but only
     # when the live tree still matches the digest recorded before that
