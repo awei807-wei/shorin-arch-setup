@@ -5,6 +5,34 @@ trap 'printf "ERROR: %s:%s: %s\n" \
   "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 desktop_niri_contract_init() {
+    local previous_home=${NIRI_CONTRACT_HOME_DIR:-} variable value
+
+    # Tests and repair callers may switch HOME_DIR in one shell (for example
+    # when validating a real Niri fixture).  Recompute paths that still point
+    # below the previous home instead of reporting a stale wallpaper/Fish
+    # target as drift.  Explicit paths outside the old home are preserved.
+    if [ -n "$previous_home" ] && [ "$previous_home" != "$HOME_DIR" ]; then
+        for variable in \
+            NIRI_FIREFOX_POLICY_FILE NIRI_NAUTILUS_OVERRIDE_FILE \
+            NIRI_GNOME_TERMINAL_LINK NIRI_PORTAL_CONFIG_FILE NIRI_GTK4_DIR \
+            NIRI_GTK_THEME_DIR \
+            NIRI_WALLPAPER_DIR NIRI_DEFAULT_WALLPAPER_FILE \
+            NIRI_STARSHIP_CONFIG_FILE NIRI_MATUGEN_CONFIG_FILE \
+            NIRI_MATUGEN_STARSHIP_TEMPLATE_FILE NIRI_WAYPAPER_CONFIG_FILE \
+            NIRI_TEMPLATES_DIR NIRI_LOCAL_BIN NIRI_CONFIG_FILE \
+            NIRI_BINDS_FILE NIRI_QUICKSHELL_DIR NIRI_DESKTOP_STATE_DIR \
+            NIRI_QUICKSHELL_BACKUP_DIR NIRI_QUICKSHELL_SOURCE_STATE_FILE \
+            NIRI_FISH_CONFIG_FILE NIRI_FISH_GUARD_FILE NIRI_FISH_RUSTUP_FILE \
+            NIRI_FISH_LOCAL_ENV_FILE NIRI_BASH_PROFILE NIRI_LEGACY_UNIT \
+            NIRI_LEGACY_UNIT_LINK NIRI_LOCKSCREEN_SCRIPT_FILE; do
+            value=${!variable:-}
+            case "$value" in
+                "$previous_home"|"$previous_home"/*) unset "$variable" ;;
+            esac
+        done
+    fi
+    NIRI_CONTRACT_HOME_DIR=$HOME_DIR
+    export NIRI_CONTRACT_HOME_DIR
     NIRI_FIREFOX_POLICY_FILE=${NIRI_FIREFOX_POLICY_FILE:-/etc/firefox/policies/policies.json}
     NIRI_NAUTILUS_VENDOR_FILE=${NIRI_NAUTILUS_VENDOR_FILE:-/usr/share/applications/org.gnome.Nautilus.desktop}
     NIRI_NAUTILUS_OVERRIDE_FILE=${NIRI_NAUTILUS_OVERRIDE_FILE:-$HOME_DIR/.local/share/applications/org.gnome.Nautilus.desktop}
@@ -107,7 +135,7 @@ niri_portal_config_contract() {
 niri_managed_text_matches() {
     local file=$1 renderer=$2 actual expected
 
-    [ -f "$file" ] || return 1
+    [ -f "$file" ] && [ ! -L "$file" ] || return 1
     actual=$(< "$file")
     expected=$($renderer)
     [ "$actual" = "$expected" ]
@@ -187,7 +215,9 @@ niri_gtk_links_match() {
 }
 
 niri_wallpapers_deployed() {
-    [ -s "$NIRI_DEFAULT_WALLPAPER_FILE" ]
+    [ -f "$NIRI_DEFAULT_WALLPAPER_FILE" ] &&
+        [ ! -L "$NIRI_DEFAULT_WALLPAPER_FILE" ] &&
+        [ -s "$NIRI_DEFAULT_WALLPAPER_FILE" ]
 }
 
 niri_starship_config_deployed() {
@@ -210,7 +240,11 @@ niri_matugen_starship_template_absent() {
 }
 
 niri_templates_deployed() {
-    [ -e "$NIRI_TEMPLATES_DIR/new" ] && [ -s "$NIRI_TEMPLATES_DIR/new.sh" ]
+    [ -f "$NIRI_TEMPLATES_DIR/new" ] &&
+        [ ! -L "$NIRI_TEMPLATES_DIR/new" ] &&
+        [ -f "$NIRI_TEMPLATES_DIR/new.sh" ] &&
+        [ ! -L "$NIRI_TEMPLATES_DIR/new.sh" ] &&
+        [ -s "$NIRI_TEMPLATES_DIR/new.sh" ]
 }
 
 niri_optional_hardware_targets_match() {

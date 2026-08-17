@@ -35,6 +35,15 @@ assert_equal() {
 source "$ROOT_DIR/scripts/modules/desktop-niri/targets.sh"
 source "$ROOT_DIR/scripts/modules/desktop-niri/dotfiles-apply.sh"
 
+assert_equal '/tmp/fixture-wallpaper.png' \
+    "$(printf '%s\n' ': eDP-1: 1920x1080, currently displaying: image: /tmp/fixture-wallpaper.png' |
+        niri_awww_query_path_from_output)" \
+    'awww output parsing must accept the real display-prefixed query line'
+assert_equal '' \
+    "$(printf '%s\n' ': eDP-1: 1920x1080, currently displaying: color: #101010' |
+        niri_awww_query_path_from_output)" \
+    'awww colour query output must not be treated as an image path'
+
 niri_user_bus_is_available() {
     return 1
 }
@@ -54,7 +63,11 @@ test_dotfiles_checkout_tracks_latest_and_falls_back_safely() (
         mkdir -p "$repository"
         mkdir -p "$repository/wallpapers" \
             "$repository/dotfiles/.config/niri" \
-            "$repository/dotfiles/.config/quickshell/scripts"
+            "$repository/dotfiles/.config/quickshell/scripts" \
+            "$repository/dotfiles/.config/quickshell/lockscreen" \
+            "$repository/dotfiles/.config/quickshell/config" \
+            "$repository/dotfiles/.config/scripts" \
+            "$repository/dotfiles/.config/matugen"
         git init -q -b main "$repository"
         printf 'gitee-first\n' > "$repository/version.txt"
         printf 'wallpaper\n' > "$repository/wallpapers/$(basename "$NIRI_DEFAULT_WALLPAPER_FILE")"
@@ -62,6 +75,22 @@ test_dotfiles_checkout_tracks_latest_and_falls_back_safely() (
         printf '#!/usr/bin/env bash\n' \
             > "$repository/dotfiles/.config/quickshell/scripts/lockscreen.sh"
         chmod 755 "$repository/dotfiles/.config/quickshell/scripts/lockscreen.sh"
+        printf 'import QtQuick 2.0\n' \
+            > "$repository/dotfiles/.config/quickshell/shell.qml"
+        printf 'import QtQuick 2.0\n' \
+            > "$repository/dotfiles/.config/quickshell/lockscreen/shell.qml"
+        printf 'module Shorin.Config\n' \
+            > "$repository/dotfiles/.config/quickshell/config/qmldir"
+        ln -s ../config \
+            "$repository/dotfiles/.config/quickshell/lockscreen/config"
+        for script in matugen-select-type.sh \
+            niri_set_overview_blur_dark_bg.sh niri_auto_blur_bg.sh; do
+            printf '#!/usr/bin/env bash\n' \
+                > "$repository/dotfiles/.config/scripts/$script"
+            chmod 755 "$repository/dotfiles/.config/scripts/$script"
+        done
+        printf '[config.wallpaper]\ncommand = "awww"\n' \
+            > "$repository/dotfiles/.config/matugen/config.toml"
         printf 'format = "repo"\n' > "$repository/dotfiles/.config/starship.toml"
         git -C "$repository" add .
         git -C "$repository" -c user.name=Fixture \
@@ -141,11 +170,34 @@ mkdir -p "$DOTFILES_CHECKOUT/dotfiles/.config/fish/conf.d"
 mkdir -p "$DOTFILES_CHECKOUT/dotfiles/.config/matugen/templates"
 mkdir -p "$DOTFILES_CHECKOUT/dotfiles/.config/niri" \
     "$DOTFILES_CHECKOUT/dotfiles/.config/quickshell/scripts" \
+    "$DOTFILES_CHECKOUT/dotfiles/.config/quickshell/lockscreen" \
+    "$DOTFILES_CHECKOUT/dotfiles/.config/quickshell/config" \
+    "$DOTFILES_CHECKOUT/dotfiles/.config/scripts" \
     "$DOTFILES_CHECKOUT/wallpapers"
 printf 'niri source\n' > "$DOTFILES_CHECKOUT/dotfiles/.config/niri/config.kdl"
 printf '#!/usr/bin/env bash\n' \
     > "$DOTFILES_CHECKOUT/dotfiles/.config/quickshell/scripts/lockscreen.sh"
 chmod 755 "$DOTFILES_CHECKOUT/dotfiles/.config/quickshell/scripts/lockscreen.sh"
+printf 'import QtQuick 2.0\n' \
+    > "$DOTFILES_CHECKOUT/dotfiles/.config/quickshell/shell.qml"
+printf 'import QtQuick 2.0\n' \
+    > "$DOTFILES_CHECKOUT/dotfiles/.config/quickshell/lockscreen/shell.qml"
+printf 'command: ["sh", "-c", "awww query"]\n' \
+    >> "$DOTFILES_CHECKOUT/dotfiles/.config/quickshell/lockscreen/shell.qml"
+printf 'property string swwwTheme: "preserve-identifier"\n' \
+    >> "$DOTFILES_CHECKOUT/dotfiles/.config/quickshell/lockscreen/shell.qml"
+printf 'module Shorin.Config\n' \
+    > "$DOTFILES_CHECKOUT/dotfiles/.config/quickshell/config/qmldir"
+ln -s ../config \
+    "$DOTFILES_CHECKOUT/dotfiles/.config/quickshell/lockscreen/config"
+for script in matugen-select-type.sh \
+    niri_set_overview_blur_dark_bg.sh niri_auto_blur_bg.sh; do
+    printf '#!/usr/bin/env bash\n' \
+        > "$DOTFILES_CHECKOUT/dotfiles/.config/scripts/$script"
+    chmod 755 "$DOTFILES_CHECKOUT/dotfiles/.config/scripts/$script"
+done
+printf '[config.wallpaper]\ncommand = "awww"\n' \
+    > "$DOTFILES_CHECKOUT/dotfiles/.config/matugen/config.toml"
 printf 'wallpaper source\n' > \
     "$DOTFILES_CHECKOUT/wallpapers/$(basename "$HOME_DIR/Pictures/Wallpapers/black-and-white-3840x2160-21293.jpg")"
 printf 'source "$HOME/.cargo/env.fish"\n' \
@@ -155,6 +207,9 @@ printf '\nsource "$HOME/.local/bin/env.fish"\n' \
 printf 'format = "$directory$character"\n' \
     > "$DOTFILES_CHECKOUT/dotfiles/.config/starship.toml"
 cat > "$DOTFILES_CHECKOUT/dotfiles/.config/matugen/config.toml" <<'EOF'
+[config.wallpaper]
+command = "awww"
+
 [templates.starship]
 input_path = '~/.config/matugen/templates/starship-colors.toml'
 output_path = '~/.config/starship.toml'
@@ -165,9 +220,160 @@ output_path = '~/.config/yazi/theme.toml'
 EOF
 printf 'legacy Matugen Starship template\n' \
     > "$DOTFILES_CHECKOUT/dotfiles/.config/matugen/templates/starship-colors.toml"
+git init -q -b main "$DOTFILES_CHECKOUT"
+git -C "$DOTFILES_CHECKOUT" add .
+git -C "$DOTFILES_CHECKOUT" -c user.name=Fixture \
+    -c user.email=fixture@example.invalid commit -q -m fixture
 deploy_dotfiles "$DOTFILES_CHECKOUT"
+[ -L "$NIRI_QUICKSHELL_DIR/lockscreen/config" ] &&
+    [ "$(readlink "$NIRI_QUICKSHELL_DIR/lockscreen/config")" = ../config ] ||
+    fail 'QuickShell deployment must preserve internal directory symlinks'
 niri_fish_sources_satisfied ||
     fail 'dotfile deployment must immediately remove unsafe Fish environment sources'
+
+test_dotfiles_transaction_rolls_back_late_failure() (
+    local before_quickshell="$TEST_DIR/txn-before-quickshell"
+    local before_state="$TEST_DIR/txn-before-state"
+    local before_matugen="$TEST_DIR/txn-before-matugen"
+    local before_fish="$TEST_DIR/txn-before-fish"
+
+    cp -a "$NIRI_QUICKSHELL_DIR" "$before_quickshell"
+    cp -a "$NIRI_QUICKSHELL_SOURCE_STATE_FILE" "$before_state"
+    cp -a "$NIRI_MATUGEN_CONFIG_FILE" "$before_matugen"
+    cp -a "$NIRI_FISH_CONFIG_FILE" "$before_fish"
+    niri_deploy_wallpaper_compat_file() { return 1; }
+    if deploy_dotfiles "$DOTFILES_CHECKOUT"; then
+        fail 'a late Fedora wallpaper conversion failure must fail the dotfile transaction'
+    fi
+    diff -qr --no-dereference "$before_quickshell" "$NIRI_QUICKSHELL_DIR" >/dev/null ||
+        fail 'a late dotfile failure must restore the QuickShell tree'
+    cmp -s "$before_state" "$NIRI_QUICKSHELL_SOURCE_STATE_FILE" ||
+        fail 'a late dotfile failure must restore QuickShell source state'
+    cmp -s "$before_matugen" "$NIRI_MATUGEN_CONFIG_FILE" ||
+        fail 'a late dotfile failure must restore Matugen configuration'
+    cmp -s "$before_fish" "$NIRI_FISH_CONFIG_FILE" ||
+        fail 'a late dotfile failure must restore Fish configuration'
+)
+
+test_dotfiles_transaction_rolls_back_late_failure
+
+test_quickshell_state_failure_rolls_back_tree() (
+    local stage="$TEST_DIR/quickshell-failing-stage"
+    local before_quickshell="$TEST_DIR/quickshell-state-before-tree"
+    local before_state="$TEST_DIR/quickshell-state-before-state"
+    local real_install_if_changed
+
+    cp -a "$NIRI_QUICKSHELL_DIR" "$before_quickshell"
+    cp -a "$NIRI_QUICKSHELL_SOURCE_STATE_FILE" "$before_state"
+    cp -a "$NIRI_QUICKSHELL_DIR" "$stage"
+    printf 'state failure fixture\n' > "$stage/shell.qml"
+    real_install_if_changed=$(declare -f install_if_changed)
+    eval "${real_install_if_changed/install_if_changed/real_install_if_changed}"
+    install_if_changed() {
+        [ "$2" = "$NIRI_QUICKSHELL_SOURCE_STATE_FILE" ] && return 1
+        real_install_if_changed "$@"
+    }
+    if niri_quickshell_atomic_replace "$stage" "$TARGET_USER" \
+        test-commit arch; then
+        fail 'a QuickShell source-state installation failure must fail deployment'
+    fi
+    diff -qr --no-dereference "$before_quickshell" "$NIRI_QUICKSHELL_DIR" >/dev/null ||
+        fail 'a QuickShell state failure must restore the old tree'
+    cmp -s "$before_state" "$NIRI_QUICKSHELL_SOURCE_STATE_FILE" ||
+        fail 'a QuickShell state failure must restore the old state file'
+)
+
+test_quickshell_state_failure_rolls_back_tree
+
+test_quickshell_old_hold_cleanup_is_nonfatal() (
+    local stage="$TEST_DIR/quickshell-hold-stage"
+    local real_remove_tree old_hold
+
+    cp -a "$NIRI_QUICKSHELL_DIR" "$stage"
+    printf 'old-hold cleanup fixture\n' > "$stage/shell.qml"
+    real_remove_tree=$(declare -f niri_quickshell_remove_tree)
+    eval "${real_remove_tree/niri_quickshell_remove_tree/real_remove_tree}"
+    niri_quickshell_remove_tree() {
+        case "$1" in
+            *.quickshell-old.*) return 1 ;;
+            *) real_remove_tree "$@" ;;
+        esac
+    }
+    niri_quickshell_atomic_replace "$stage" "$TARGET_USER" \
+        hold-cleanup-commit arch ||
+        fail 'an old QuickShell hold cleanup failure must not fail a successful deployment'
+    niri_quickshell_deployment_state_satisfied ||
+        fail 'an old QuickShell hold cleanup failure must leave tree/state consistent'
+    old_hold=$(find "$(dirname "$NIRI_QUICKSHELL_DIR")" -maxdepth 1 \
+        -type d -name '.quickshell-old.*' -print -quit)
+    [ -n "$old_hold" ] ||
+        fail 'a failed old hold cleanup should leave the hold available for recovery'
+    real_remove_tree "$old_hold"
+)
+
+test_quickshell_old_hold_cleanup_is_nonfatal
+
+test_quickshell_drift_is_not_re_registered() (
+    local before_state="$TEST_DIR/quickshell-drift-before-state"
+    local before_quickshell="$TEST_DIR/quickshell-drift-before-tree"
+
+    cp -a "$NIRI_QUICKSHELL_SOURCE_STATE_FILE" "$before_state"
+    cp -a "$NIRI_QUICKSHELL_DIR" "$before_quickshell"
+    printf '%s\n' 'import QtQuick 2.0' 'property string tampered: "drift"' \
+        > "$NIRI_QUICKSHELL_DIR/shell.qml"
+    if niri_quickshell_refresh_state_digest; then
+        fail 'a hand-edited QuickShell tree must not refresh its source digest'
+    fi
+    cmp -s "$before_state" "$NIRI_QUICKSHELL_SOURCE_STATE_FILE" ||
+        fail 'a rejected QuickShell drift must preserve source state'
+    if ensure_niri_session_config "$TARGET_USER"; then
+        fail 'session apply must reject an unregistered QuickShell drift'
+    fi
+    if niri_quickshell_deployment_state_satisfied; then
+        fail 'a rejected QuickShell drift must remain unsatisfied'
+    fi
+
+    niri_quickshell_stage_and_deploy "$DOTFILES_CHECKOUT" "$TARGET_USER" ||
+        fail 'QuickShell repair must redeploy the verified source tree'
+    niri_quickshell_deployment_state_satisfied ||
+        fail 'source redeployment must restore the QuickShell deployment contract'
+)
+
+test_quickshell_drift_is_not_re_registered
+
+test_fedora_quickshell_conversion_is_staged() (
+    local fedora_home="$TEST_DIR/fedora-quickshell-home"
+    local fedora_checkout="$TEST_DIR/fedora-quickshell-checkout"
+
+    export SHORIN_DISTRO=fedora HOME_DIR="$fedora_home"
+    unset NIRI_QUICKSHELL_DIR NIRI_DESKTOP_STATE_DIR \
+        NIRI_QUICKSHELL_BACKUP_DIR NIRI_QUICKSHELL_SOURCE_STATE_FILE
+    desktop_niri_contract_init
+    cp -a "$DOTFILES_CHECKOUT" "$fedora_checkout"
+    cat > "$fedora_checkout/dotfiles/.config/quickshell/lockscreen/shell.qml" <<'EOF'
+import QtQuick 2.0
+property string wallpaper: "swww query"
+EOF
+    niri_quickshell_stage_and_deploy "$fedora_checkout" "$TARGET_USER" ||
+        fail 'Fedora QuickShell conversion must succeed in staging'
+    ! niri_tree_has_legacy_swww "$NIRI_QUICKSHELL_DIR" ||
+        fail 'Fedora live QuickShell must contain only staged wallpaper conversion'
+    niri_quickshell_deployment_state_satisfied ||
+        fail 'Fedora staged QuickShell conversion must satisfy deployment state'
+    printf '%s\n' 'import QtQuick 2.0' 'property string tampered: "drift"' \
+        > "$NIRI_QUICKSHELL_DIR/shell.qml"
+    if niri_quickshell_refresh_state_digest; then
+        fail 'Fedora session refresh must reject a hand-edited QuickShell tree'
+    fi
+    if niri_quickshell_deployment_state_satisfied; then
+        fail 'Fedora hand-edited QuickShell must remain unsatisfied'
+    fi
+)
+
+test_fedora_quickshell_conversion_is_staged
+export SHORIN_DISTRO=arch
+desktop_niri_contract_init
+
 [ ! -e "$HOME_DIR/.config/fish/conf.d/uv.env.fish" ] ||
     fail 'the upstream Fish source with a leading blank line must be migrated'
 niri_starship_config_deployed ||
@@ -391,6 +597,14 @@ export NIRI_LEGACY_UNIT_LINK
 export NIRI_AUTOLOGIN_FILE
 desktop_niri_contract_init
 
+# A directory or stylesheet-like path at the Waypaper config location is not
+# a valid config file and must never satisfy the backend contract.
+mkdir -p "$NIRI_WAYPAPER_CONFIG_FILE"
+if niri_waypaper_backend_satisfied; then
+    fail 'a Waypaper config directory must not satisfy the backend contract'
+fi
+rmdir "$NIRI_WAYPAPER_CONFIG_FILE"
+
 mkdir -p "$(dirname "$NIRI_FIREFOX_POLICY_FILE")" \
     "$(dirname "$NIRI_NAUTILUS_OVERRIDE_FILE")" \
     "$(dirname "$NIRI_GNOME_TERMINAL_LINK")" \
@@ -462,6 +676,7 @@ cat > "$NIRI_WAYPAPER_CONFIG_FILE" <<'EOF'
 [Settings]
 folder = ~/Pictures/Wallpapers
 backend = swww
+stylesheet = ~/.config/waypaper/style.css
 swww_transition_type = any
 EOF
 printf 'source "$HOME/.cargo/env.fish"\n' > "$NIRI_FISH_RUSTUP_FILE"
@@ -478,6 +693,8 @@ fi
 EOF
 printf '[Service]\nExecStart=/usr/bin/niri-session\n' > "$NIRI_LEGACY_UNIT"
 ln -s ../niri-autostart.service "$NIRI_LEGACY_UNIT_LINK"
+niri_quickshell_stage_and_deploy "$DOTFILES_CHECKOUT" "$TARGET_USER" ||
+    fail 'the active QuickShell fixture must be restored from verified source'
 
 VALIDATE_BIN_DIR="$TEST_DIR/validate-bin"
 NIRI_VALIDATE_LOG="$TEST_DIR/niri-validate.log"
@@ -509,8 +726,14 @@ niri_quickshell_wallpaper_backend_satisfied ||
     fail 'QuickShell commands must migrate swww to awww'
 niri_waypaper_backend_satisfied ||
     fail 'Waypaper must use the installed awww backend'
+grep -Fqx 'folder = ~/Pictures/Wallpapers' "$NIRI_WAYPAPER_CONFIG_FILE" ||
+    fail 'Waypaper folder setting must survive backend migration'
+grep -Fqx 'stylesheet = ~/.config/waypaper/style.css' \
+    "$NIRI_WAYPAPER_CONFIG_FILE" ||
+    fail 'Waypaper stylesheet setting must survive backend migration'
 niri_bindings_satisfied || fail 'Niri clipboard and FocusShift bindings must be exact'
 niri_fish_sources_satisfied || fail 'Fish environment sources must be conditional'
+niri_fish_config_satisfied || fail 'the managed Fish config block must satisfy its static contract'
 [ -f "$NIRI_FISH_GUARD_FILE" ] ||
     fail 'Fish guards must use a dedicated installer-managed conf.d file'
 grep -Fqx '    set -gx PATH "$HOME/.cargo/bin" $PATH' "$NIRI_FISH_GUARD_FILE" ||
@@ -522,6 +745,88 @@ if grep -Fq 'source "$HOME/' "$NIRI_FISH_GUARD_FILE"; then
 fi
 [ ! -e "$NIRI_FISH_RUSTUP_FILE" ] && [ ! -e "$NIRI_FISH_LOCAL_ENV_FILE" ] ||
     fail 'known legacy Fish source files must be migrated without duplicate sourcing'
+
+FISH_CONFIG_USER_COPY="$TEST_DIR/fish-config-user-copy"
+cat > "$NIRI_FISH_CONFIG_FILE" <<'EOF'
+# user content before the managed block
+if test "$USER_CUSTOM_CONDITION" = preserved
+    starship init fish | source
+end
+# >>> shorin fish init >>>
+if status is-interactive
+    starship init fish | source
+# deliberately incomplete managed block
+EOF
+cp "$NIRI_FISH_CONFIG_FILE" "$FISH_CONFIG_USER_COPY"
+if ensure_niri_fish_config "$TARGET_USER"; then
+    fail 'an unclosed Fish marker block must fail safely'
+fi
+cmp -s "$FISH_CONFIG_USER_COPY" "$NIRI_FISH_CONFIG_FILE" ||
+    fail 'an unclosed Fish marker block must remain byte-for-byte unchanged'
+cat > "$NIRI_FISH_CONFIG_FILE" <<'EOF'
+# user content before the managed block
+if test "$USER_CUSTOM_CONDITION" = preserved
+    starship init fish | source
+end
+# >>> shorin fish init >>>
+old managed content
+# <<< shorin fish init <<<
+# user content after the managed block
+EOF
+ensure_niri_fish_config "$TARGET_USER" ||
+    fail 'a closed Fish marker block must converge'
+grep -Fqx '# user content before the managed block' "$NIRI_FISH_CONFIG_FILE" ||
+    fail 'Fish convergence must preserve user content before the managed block'
+grep -Fqx '# user content after the managed block' "$NIRI_FISH_CONFIG_FILE" ||
+    fail 'Fish convergence must preserve user content after the managed block'
+grep -Fqx '        set -l thefuck_alias (thefuck --alias 2>/dev/null)' \
+    "$NIRI_FISH_CONFIG_FILE" ||
+    fail 'Fish thefuck guard must suppress stderr and capture its output'
+grep -Fqx '        if test $status -eq 0; and test (count $thefuck_alias) -gt 0' \
+    "$NIRI_FISH_CONFIG_FILE" ||
+    fail 'Fish thefuck guard must require successful non-empty output'
+
+# Only the three exact, top-level legacy commands are installer-owned.  The
+# same text inside user functions/conditions must remain untouched, while a
+# static contract check must reject any top-level residue before apply.
+cat > "$NIRI_FISH_CONFIG_FILE" <<'EOF'
+starship init fish | source
+zoxide init fish --cmd cd | source
+thefuck --alias | source
+if test "$USER_CUSTOM_CONDITION" = preserved
+    starship init fish | source
+end
+function user_custom_fish_init
+    zoxide init fish --cmd cd | source
+end
+begin
+    thefuck --alias | source
+end
+# >>> shorin fish init >>>
+old managed content
+# <<< shorin fish init <<<
+EOF
+if niri_fish_config_satisfied; then
+    fail 'Fish static contract must reject top-level legacy initialization lines'
+fi
+ensure_niri_fish_config "$TARGET_USER" ||
+    fail 'Fish apply must remove exact top-level legacy initialization lines'
+niri_fish_config_satisfied ||
+    fail 'Fish static contract must accept the cleaned managed configuration'
+for legacy_line in \
+    'starship init fish | source' \
+    'zoxide init fish --cmd cd | source' \
+    'thefuck --alias | source'; do
+    if grep -Fqx "$legacy_line" "$NIRI_FISH_CONFIG_FILE"; then
+        fail "Fish top-level legacy line must be removed: $legacy_line"
+    fi
+done
+grep -Fqx '    starship init fish | source' "$NIRI_FISH_CONFIG_FILE" ||
+    fail 'Fish condition block must preserve the user starship line'
+grep -Fqx '    zoxide init fish --cmd cd | source' "$NIRI_FISH_CONFIG_FILE" ||
+    fail 'Fish function block must preserve the user zoxide line'
+grep -Fqx '    thefuck --alias | source' "$NIRI_FISH_CONFIG_FILE" ||
+    fail 'Fish begin block must preserve the user thefuck line'
 niri_bash_profile_satisfied || fail 'TTY1 Niri startup must use the managed profile block'
 niri_session_entry_satisfied ||
     fail 'Niri session entry must use niri-session and avoid a bare niri launch'
@@ -774,6 +1079,22 @@ EOF
 test_fedora_niri_session_compatibility
 export SHORIN_DISTRO=arch
 
+# The Fedora compatibility transform must be a no-op for a complete Arch
+# deployment; preserve upstream source bytes rather than applying Fedora-only
+# substitutions on Arch.
+ARCH_WALLPAPER_TREE="$TEST_DIR/arch-wallpaper-tree"
+mkdir -p "$ARCH_WALLPAPER_TREE/quickshell/lockscreen"
+printf '%s\n' 'command: ["sh", "-c", "swww query"]' \
+    > "$ARCH_WALLPAPER_TREE/quickshell/lockscreen/shell.qml"
+ARCH_WALLPAPER_COPY="$TEST_DIR/arch-wallpaper-copy.qml"
+cp "$ARCH_WALLPAPER_TREE/quickshell/lockscreen/shell.qml" \
+    "$ARCH_WALLPAPER_COPY"
+niri_transform_wallpaper_tree "$ARCH_WALLPAPER_TREE" ||
+    fail 'Arch wallpaper deployment must keep the Fedora transform disabled'
+cmp -s "$ARCH_WALLPAPER_COPY" \
+    "$ARCH_WALLPAPER_TREE/quickshell/lockscreen/shell.qml" ||
+    fail 'Arch wallpaper deployment must preserve upstream source bytes'
+
 printf 'set -gx USER_CUSTOM_ENV preserved\n' > "$NIRI_FISH_RUSTUP_FILE"
 FISH_CUSTOM_COPY="$TEST_DIR/custom-rustup.fish"
 cp "$NIRI_FISH_RUSTUP_FILE" "$FISH_CUSTOM_COPY"
@@ -793,6 +1114,15 @@ ensure_niri_fish_sources "$TARGET_USER"
     fail 'legacy Fish symlinks are user-owned and must never be deleted'
 niri_fish_sources_satisfied ||
     fail 'a user-owned legacy Fish symlink must satisfy the migration boundary'
+
+# A preserved user-owned symlink is outside the migration boundary. If it
+# points at a missing generated file, the Fish login contract must fail rather
+# than hide the startup error; remove the fixture before the remaining session
+# convergence checks.
+if niri_fish_login_satisfied; then
+    fail 'a broken user-owned Fish symlink must not satisfy the zero-stderr contract'
+fi
+rm -f "$NIRI_FISH_RUSTUP_FILE"
 
 # A previously deployed tty1 block without -l loops through the login shell;
 # it must drift and be upgraded in place.
@@ -848,6 +1178,10 @@ cp "$NIRI_CONFIG_FILE" "$SESSION_COPY_DIR/rollback-config.kdl"
 cp "$NIRI_BINDS_FILE" "$SESSION_COPY_DIR/rollback-binds.kdl"
 cp "$NIRI_QUICKSHELL_DIR/lockscreen/shell.qml" \
     "$SESSION_COPY_DIR/rollback-shell.qml"
+cp "$NIRI_WAYPAPER_CONFIG_FILE" "$SESSION_COPY_DIR/rollback-waypaper.ini"
+cp "$NIRI_FISH_CONFIG_FILE" "$SESSION_COPY_DIR/rollback-fish-config.fish"
+cp "$NIRI_QUICKSHELL_SOURCE_STATE_FILE" \
+    "$SESSION_COPY_DIR/rollback-quickshell-source"
 NIRI_VALIDATE_FAIL=1
 export NIRI_VALIDATE_FAIL
 if ensure_niri_session_config "$TARGET_USER"; then
@@ -855,11 +1189,22 @@ if ensure_niri_session_config "$TARGET_USER"; then
 fi
 cmp -s "$NIRI_CONFIG_FILE" "$SESSION_COPY_DIR/rollback-config.kdl" &&
     cmp -s "$NIRI_BINDS_FILE" "$SESSION_COPY_DIR/rollback-binds.kdl" &&
-    cmp -s "$NIRI_QUICKSHELL_DIR/lockscreen/shell.qml" \
-        "$SESSION_COPY_DIR/rollback-shell.qml" ||
+cmp -s "$NIRI_QUICKSHELL_DIR/lockscreen/shell.qml" \
+    "$SESSION_COPY_DIR/rollback-shell.qml" ||
     fail 'failed validation must atomically restore Niri and QuickShell files'
+cmp -s "$NIRI_WAYPAPER_CONFIG_FILE" \
+    "$SESSION_COPY_DIR/rollback-waypaper.ini" ||
+    fail 'failed validation must atomically restore Waypaper configuration'
+cmp -s "$NIRI_FISH_CONFIG_FILE" \
+    "$SESSION_COPY_DIR/rollback-fish-config.fish" ||
+    fail 'failed validation must atomically restore Fish configuration'
+cmp -s "$NIRI_QUICKSHELL_SOURCE_STATE_FILE" \
+    "$SESSION_COPY_DIR/rollback-quickshell-source" ||
+    fail 'failed validation must atomically restore QuickShell source state'
 NIRI_VALIDATE_FAIL=0
 export NIRI_VALIDATE_FAIL
+niri_quickshell_stage_and_deploy "$DOTFILES_CHECKOUT" "$TARGET_USER" ||
+    fail 'source redeployment must repair the QuickShell tree before session apply'
 ensure_niri_session_config "$TARGET_USER"
 unset SHORIN_FORCE_RUNUSER
 unset -f runuser
@@ -935,6 +1280,7 @@ niri_starship_config_deployed ||
     fail 'the deployed Starship configuration must satisfy the desktop state'
 niri_templates_deployed ||
     fail 'deployed template files must satisfy the template state'
+
 printf 'imv\n' > "$PROFILE_DIR/niri-packages.list"
 for package in nautilus-open-any-terminal swaylock-effects; do
     printf 'source=aur\nversion=1.0\n' > "$PACKAGE_SOURCES/$package"
@@ -957,6 +1303,27 @@ output=$(PATH="$BIN_DIR:$PATH" SHORIN_PROFILE_DIR="$PROFILE_DIR" \
     PACKAGE_SOURCE_DIR="$PACKAGE_SOURCES" \
     bash "$ROOT_DIR/scripts/modules/desktop-niri.sh" check 2>&1) || status=$?
 [ "$status" -eq 0 ] || fail 'complete desktop managed state must check successfully'
+
+# Read-only desktop inspection must not rewrite managed files or execute any
+# user startup shell.  The fixture is complete, so check should be clean.
+CHECK_NO_SIDE_EFFECT_COPY="$TEST_DIR/check-no-side-effects"
+mkdir -p "$CHECK_NO_SIDE_EFFECT_COPY"
+cp "$NIRI_FISH_CONFIG_FILE" "$CHECK_NO_SIDE_EFFECT_COPY/fish-config"
+cp "$NIRI_WAYPAPER_CONFIG_FILE" "$CHECK_NO_SIDE_EFFECT_COPY/waypaper"
+cp "$NIRI_QUICKSHELL_SOURCE_STATE_FILE" "$CHECK_NO_SIDE_EFFECT_COPY/quickshell-state"
+status=0
+PATH="$BIN_DIR:$PATH" SHORIN_PROFILE_DIR="$PROFILE_DIR" \
+    PACKAGE_SOURCE_DIR="$PACKAGE_SOURCES" \
+    bash "$ROOT_DIR/scripts/modules/desktop-niri.sh" check >/dev/null 2>&1 ||
+    status=$?
+[ "$status" -eq 0 ] || fail 'desktop check must accept a complete fixture'
+cmp -s "$CHECK_NO_SIDE_EFFECT_COPY/fish-config" "$NIRI_FISH_CONFIG_FILE" ||
+    fail 'desktop check must not rewrite Fish config'
+cmp -s "$CHECK_NO_SIDE_EFFECT_COPY/waypaper" "$NIRI_WAYPAPER_CONFIG_FILE" ||
+    fail 'desktop check must not rewrite Waypaper config'
+cmp -s "$CHECK_NO_SIDE_EFFECT_COPY/quickshell-state" \
+    "$NIRI_QUICKSHELL_SOURCE_STATE_FILE" ||
+    fail 'desktop check must not rewrite QuickShell source state'
 
 mv "$NIRI_STARSHIP_CONFIG_FILE" "$NIRI_STARSHIP_CONFIG_FILE.missing"
 status=0

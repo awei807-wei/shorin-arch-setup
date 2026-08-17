@@ -58,12 +58,34 @@ ensure_niri_managed_config_files() {
 ensure_niri_session_config() {
     local user=$1 status=0
 
-    ensure_niri_managed_config_files "$user" || status=$?
-    # The shell startup targets are independent of the niri config chain.
-    # Converge them even when the config work fails, so a broken or missing
-    # config can never block fish and .bash_profile restoration.
-    ensure_niri_waypaper_backend "$user" || status=1
-    ensure_niri_fish_sources "$user" || status=1
-    ensure_niri_bash_profile "$user" || status=1
-    return "$status"
+    niri_desktop_txn_begin || return 1
+    niri_desktop_txn_snapshot "$NIRI_CONFIG_FILE" || status=1
+    niri_desktop_txn_snapshot "$NIRI_BINDS_FILE" || status=1
+    niri_desktop_txn_snapshot "$NIRI_QUICKSHELL_DIR" || status=1
+    niri_desktop_txn_snapshot "$NIRI_DESKTOP_STATE_DIR" || status=1
+    niri_desktop_txn_snapshot "$NIRI_WAYPAPER_CONFIG_FILE" || status=1
+    niri_desktop_txn_snapshot "$NIRI_FISH_GUARD_FILE" || status=1
+    niri_desktop_txn_snapshot "$NIRI_FISH_CONFIG_FILE" || status=1
+    niri_desktop_txn_snapshot "$NIRI_FISH_RUSTUP_FILE" || status=1
+    niri_desktop_txn_snapshot "$NIRI_FISH_LOCAL_ENV_FILE" || status=1
+    niri_desktop_txn_snapshot "$NIRI_BASH_PROFILE" || status=1
+    niri_desktop_txn_snapshot "$NIRI_LEGACY_UNIT" || status=1
+    niri_desktop_txn_snapshot "$NIRI_LEGACY_UNIT_LINK" || status=1
+    if [ "$status" -ne 0 ]; then
+        niri_desktop_txn_finish 1
+        return 1
+    fi
+
+    if ! ensure_niri_managed_config_files "$user"; then
+        niri_desktop_txn_finish 1
+        return 1
+    fi
+    if ! ensure_niri_waypaper_backend "$user" ||
+        ! ensure_niri_fish_sources "$user" ||
+        ! ensure_niri_fish_config "$user" ||
+        ! ensure_niri_bash_profile "$user"; then
+        niri_desktop_txn_finish 1
+        return 1
+    fi
+    niri_desktop_txn_finish 0
 }

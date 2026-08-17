@@ -11,12 +11,61 @@ niri_wallpaper_backend_name() {
     printf '%s\n' awww
 }
 
+# awww prints the active wallpaper with an output/display prefix, for example:
+#   : eDP-1: ... currently displaying: image: /absolute/path
+# Do not accept a generic "image:" line: other awww query output and stale
+# swww-compatible parsers can otherwise select the wrong field.  In
+# particular, a colour query has a `currently displaying: color:` payload and
+# must produce no path.
+niri_awww_query_path_from_output() {
+    awk '
+        {
+            sub(/\r$/, "")
+            # The leading colon and output name are part of awww query output;
+            # requiring them keeps arbitrary log lines from being accepted.
+            if ($0 !~ /^[[:space:]]*:[[:space:]]*[^:]+:.*currently displaying:[[:space:]]*image:[[:space:]]*/) {
+                next
+            }
+            value=$0
+            sub(/^[[:space:]]*:[[:space:]]*[^:]+:.*currently displaying:[[:space:]]*image:[[:space:]]*/, "", value)
+            sub(/[[:space:]]+$/, "", value)
+            if (length(value) > 0) {
+                print value
+                exit
+            }
+        }
+    '
+}
+
+niri_active_swww_in_file() {
+    local file=$1
+
+    [ -f "$file" ] || return 1
+    awk '
+        /^[[:space:]]*(#|\/\/)/ { next }
+        /(^|[^[:alnum:]_-])swww(-daemon)?([^[:alnum:]_-]|$)/ { found=1 }
+        END { exit !found }
+    ' "$file"
+}
+
+niri_active_wallpaper_backend_in_file() {
+    local file=$1 backend=$2
+
+    [ -f "$file" ] || return 1
+    awk -v backend="$backend" '
+        /^[[:space:]]*(#|\/\/)/ { next }
+        {
+            pattern = "(^|[^[:alnum:]_-])" backend "(-daemon)?([^[:alnum:]_-]|$)"
+            if ($0 ~ pattern) found=1
+        }
+        END { exit !found }
+    ' "$file"
+}
+
 niri_file_has_wallpaper_backend() {
     local file=$1 backend=${2:-$(niri_wallpaper_backend_name)}
 
-    grep -Iq . "$file" &&
-        grep -Eq "(^|[^[:alnum:]_-])${backend}(-daemon)?([^[:alnum:]_-]|$)" \
-            "$file"
+    niri_active_wallpaper_backend_in_file "$file" "$backend"
 }
 
 # Historical callers use this name while collecting files for rollback.  The
@@ -30,9 +79,74 @@ niri_tree_has_legacy_swww() {
 
     [ -d "$root" ] || return 1
     while IFS= read -r -d '' file; do
-        niri_file_has_legacy_swww "$file" && return 0
+        niri_active_swww_in_file "$file" && return 0
     done < <(find "$root" -type f -print0)
     return 1
+}
+
+niri_wallpaper_scripts_satisfied() {
+    local script
+
+    for script in \
+        "$NIRI_QUICKSHELL_DIR/lockscreen/shell.qml" \
+        "$HOME_DIR/.config/scripts/matugen-select-type.sh" \
+        "$HOME_DIR/.config/scripts/niri_set_overview_blur_dark_bg.sh" \
+        "$HOME_DIR/.config/scripts/niri_auto_blur_bg.sh" \
+        "$NIRI_MATUGEN_CONFIG_FILE"; do
+        [ -f "$script" ] && [ ! -L "$script" ] || return 1
+        ! niri_active_swww_in_file "$script" || return 1
+    done
+    grep -Fq 'command = "awww"' "$NIRI_MATUGEN_CONFIG_FILE" || return 1
+}
+
+niri_transform_wallpaper_file_in_place() {
+    local file=$1 temporary mode
+
+    platform_is_fedora || return 0
+    [ -f "$file" ] && [ ! -L "$file" ] || return 1
+    case "$file" in
+        */quickshell/lockscreen/shell.qml|*/lockscreen/shell.qml|*/scripts/matugen-select-type.sh|\
+        */scripts/niri_set_overview_blur_dark_bg.sh|*/scripts/niri_auto_blur_bg.sh|\
+        */matugen/config.toml) ;;
+        *) return 0 ;;
+    esac
+    temporary=$(mktemp)
+    awk -f "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-wallpaper-compatibility.awk" \
+        "$file" > "$temporary"
+    if cmp -s "$temporary" "$file"; then
+        rm -f "$temporary"
+        return 0
+    fi
+    mode=$(stat -c '%a' "$file")
+    install -m "$mode" "$temporary" "$file"
+    rm -f "$temporary"
+}
+
+niri_deploy_wallpaper_compat_file() {
+    local source=$1 destination=$2 user=$3 temporary mode
+
+    [ -f "$source" ] && [ ! -L "$source" ] || return 1
+    mode=$(stat -c '%a' "$source")
+    if ! platform_is_fedora; then
+        install_if_changed "$source" "$destination" "$mode" || return
+        chown "$user:$(id -gn "$user")" "$destination"
+        return 0
+    fi
+    temporary=$(mktemp)
+    awk -f "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-wallpaper-compatibility.awk" \
+        "$source" > "$temporary"
+    install_if_changed "$temporary" "$destination" "$mode"
+    rm -f "$temporary"
+    chown "$user:$(id -gn "$user")" "$destination"
+}
+
+niri_transform_wallpaper_tree() {
+    local root=$1 file
+
+    [ -d "$root" ] || return 1
+    while IFS= read -r -d '' file; do
+        niri_transform_wallpaper_file_in_place "$file" || return
+    done < <(find "$root" -type f -print0)
 }
 
 niri_wallpaper_backend_satisfied() {
@@ -58,7 +172,9 @@ niri_tree_has_wallpaper_backend() {
 }
 
 niri_waypaper_backend_satisfied() {
-    [ -s "$NIRI_WAYPAPER_CONFIG_FILE" ] || return 1
+    [ -f "$NIRI_WAYPAPER_CONFIG_FILE" ] &&
+        [ ! -L "$NIRI_WAYPAPER_CONFIG_FILE" ] &&
+        [ -s "$NIRI_WAYPAPER_CONFIG_FILE" ] || return 1
     awk -v expected_backend="$(niri_wallpaper_backend_name)" '
         /^[[:space:]]*\[Settings\][[:space:]]*$/ {
             settings++
@@ -103,16 +219,43 @@ ensure_awww_in_file() {
 }
 
 ensure_niri_wallpaper_backend() {
-    local user=$1 file
+    local user=$1 file quickshell_before_digest quickshell_after_digest
+    local registered_digest
 
     ensure_wallpaper_backend_in_file "$NIRI_CONFIG_FILE" "$user"
     [ -d "$NIRI_QUICKSHELL_DIR" ] || return 1
+
+    # Fedora's QuickShell wallpaper compatibility is applied to the staged
+    # checkout before the live tree is replaced.  Never mutate an active
+    # Fedora tree during session convergence: a post-deployment edit must
+    # remain drift until the source deployment repairs it.
+    if platform_is_fedora; then
+        niri_quickshell_deployment_state_satisfied || return 1
+        niri_wallpaper_backend_satisfied &&
+            niri_quickshell_wallpaper_backend_satisfied
+        return
+    fi
+
+    # Arch retains the historical one-time swww -> awww migration, but only
+    # when the live tree still matches the digest recorded before that
+    # controlled transformation.  Arbitrary edits must fail rather than be
+    # re-registered as a new source state.
+    quickshell_before_digest=$(niri_quickshell_tree_digest "$NIRI_QUICKSHELL_DIR") ||
+        return 1
+    registered_digest=$(niri_quickshell_state_value digest) || return 1
+    [ "$quickshell_before_digest" = "$registered_digest" ] || return 1
     while IFS= read -r -d '' file; do
         grep -Iq . "$file" || continue
         ensure_wallpaper_backend_in_file "$file" "$user"
     done < <(find "$NIRI_QUICKSHELL_DIR" -type f -print0)
-    niri_wallpaper_backend_satisfied &&
-        niri_quickshell_wallpaper_backend_satisfied
+    niri_wallpaper_backend_satisfied || return 1
+    niri_quickshell_wallpaper_backend_satisfied || return 1
+    quickshell_after_digest=$(niri_quickshell_tree_digest "$NIRI_QUICKSHELL_DIR") ||
+        return 1
+    if [ "$quickshell_after_digest" != "$quickshell_before_digest" ]; then
+        niri_quickshell_refresh_state_digest "$quickshell_before_digest" ||
+            return 1
+    fi
 }
 
 ensure_niri_waypaper_backend() {
@@ -121,7 +264,9 @@ ensure_niri_waypaper_backend() {
     backend=$(niri_wallpaper_backend_name)
 
     niri_waypaper_backend_satisfied && return 0
-    [ -s "$NIRI_WAYPAPER_CONFIG_FILE" ] || return 1
+    [ -f "$NIRI_WAYPAPER_CONFIG_FILE" ] &&
+        [ ! -L "$NIRI_WAYPAPER_CONFIG_FILE" ] &&
+        [ -s "$NIRI_WAYPAPER_CONFIG_FILE" ] || return 1
     temporary=$(mktemp)
     if ! awk -v expected_backend="$backend" '
         /^[[:space:]]*\[Settings\][[:space:]]*$/ {

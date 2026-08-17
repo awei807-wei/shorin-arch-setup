@@ -415,31 +415,88 @@ for unsupported in clipse clipse-gui waypaper niriswitcher python-pywalfox \
     fi
 done
 
-# Check/apply/verify must share the same Fedora wallpaper backend contract and
-# migrate old swww references without leaving a missing command in config.
+# Check/apply/verify must share the same Fedora wallpaper backend contract.
+# Fedora QuickShell conversion belongs to the staged source deployment; the
+# session path may migrate Niri/Waypaper config but must never rewrite live
+# QuickShell drift.
 NIRI_CONFIG_FILE="$HOME_DIR/niri.kdl"
 NIRI_QUICKSHELL_DIR="$HOME_DIR/quickshell"
 NIRI_WAYPAPER_CONFIG_FILE="$HOME_DIR/waypaper.ini"
+NIRI_DESKTOP_STATE_DIR="$HOME_DIR/desktop-state"
+NIRI_QUICKSHELL_BACKUP_DIR="$NIRI_DESKTOP_STATE_DIR/quickshell-backups"
+NIRI_QUICKSHELL_SOURCE_STATE_FILE="$NIRI_DESKTOP_STATE_DIR/quickshell-source"
+FEDORA_QUICKSHELL_CHECKOUT="$TEST_DIR/fedora-quickshell-source"
+mkdir -p "$FEDORA_QUICKSHELL_CHECKOUT/dotfiles/.config/quickshell/scripts" \
+    "$FEDORA_QUICKSHELL_CHECKOUT/dotfiles/.config/quickshell/lockscreen" \
+    "$FEDORA_QUICKSHELL_CHECKOUT/dotfiles/.config/quickshell/config"
+printf 'import QtQuick 2.0\n' \
+    > "$FEDORA_QUICKSHELL_CHECKOUT/dotfiles/.config/quickshell/shell.qml"
+cat > "$FEDORA_QUICKSHELL_CHECKOUT/dotfiles/.config/quickshell/lockscreen/shell.qml" <<'EOF'
+import QtQuick 2.0
+command: ["sh", "-c", "swww query"]
+EOF
+printf 'module Shorin.Config\n' \
+    > "$FEDORA_QUICKSHELL_CHECKOUT/dotfiles/.config/quickshell/config/qmldir"
+printf '#!/usr/bin/env bash\n' \
+    > "$FEDORA_QUICKSHELL_CHECKOUT/dotfiles/.config/quickshell/scripts/lockscreen.sh"
+chmod 755 \
+    "$FEDORA_QUICKSHELL_CHECKOUT/dotfiles/.config/quickshell/scripts/lockscreen.sh"
+ln -s ../config \
+    "$FEDORA_QUICKSHELL_CHECKOUT/dotfiles/.config/quickshell/lockscreen/config"
+git init -q -b main "$FEDORA_QUICKSHELL_CHECKOUT"
+git -C "$FEDORA_QUICKSHELL_CHECKOUT" add .
+git -C "$FEDORA_QUICKSHELL_CHECKOUT" \
+    -c user.name=Fixture -c user.email=fixture@example.invalid \
+    commit -q -m fixture
 mkdir -p "$NIRI_QUICKSHELL_DIR"
 printf 'spawn-at-startup "swww-daemon"\n' > "$NIRI_CONFIG_FILE"
-printf 'command: ["sh", "-c", "swww query"]\n' > "$NIRI_QUICKSHELL_DIR/shell.qml"
 printf '[Settings]\nbackend = swww\n' > "$NIRI_WAYPAPER_CONFIG_FILE"
+niri_quickshell_stage_and_deploy \
+    "$FEDORA_QUICKSHELL_CHECKOUT" "$TARGET_USER" ||
+    fail 'Fedora QuickShell source must convert wallpaper references in staging'
+niri_quickshell_deployment_state_satisfied ||
+    fail 'Fedora staged QuickShell conversion must satisfy the deployment state'
 ensure_niri_wallpaper_backend "$TARGET_USER" ||
-    fail 'Fedora wallpaper apply must migrate swww configuration to awww'
+    fail 'Fedora wallpaper apply must migrate Niri config without live QuickShell edits'
 ensure_niri_waypaper_backend "$TARGET_USER" ||
     fail 'Fedora Waypaper contract must migrate to awww'
 [ "$(niri_wallpaper_backend_name)" = awww ] ||
     fail 'Fedora wallpaper backend contract must select awww'
 grep -Fq 'awww-daemon' "$NIRI_CONFIG_FILE" ||
     fail 'Fedora Niri config must use awww-daemon'
-grep -Fq 'awww query' "$NIRI_QUICKSHELL_DIR/shell.qml" ||
-    fail 'Fedora QuickShell config must use awww query'
+grep -Fq 'awww query' "$NIRI_QUICKSHELL_DIR/lockscreen/shell.qml" ||
+    fail 'Fedora staged QuickShell config must use awww query'
 grep -Fqx 'backend = awww' "$NIRI_WAYPAPER_CONFIG_FILE" ||
     fail 'Fedora Waypaper config must use awww exactly'
 if grep -R -Eq '(^|[^[:alnum:]_-])swww(-daemon)?([^[:alnum:]_-]|$)' \
     "$NIRI_CONFIG_FILE" "$NIRI_QUICKSHELL_DIR" "$NIRI_WAYPAPER_CONFIG_FILE"; then
     fail 'Fedora desktop config must not retain legacy swww command references'
 fi
+QUICKSHELL_STATE_BEFORE_DRIFT="$TEST_DIR/fedora-quickshell-state-before-drift"
+cp "$NIRI_QUICKSHELL_SOURCE_STATE_FILE" "$QUICKSHELL_STATE_BEFORE_DRIFT"
+cat > "$NIRI_QUICKSHELL_DIR/shell.qml" <<'EOF'
+import QtQuick 2.0
+property string tampered: "drift"
+EOF
+if ensure_niri_wallpaper_backend "$TARGET_USER"; then
+    fail 'Fedora wallpaper apply must reject live QuickShell drift'
+fi
+grep -Fq 'tampered' "$NIRI_QUICKSHELL_DIR/shell.qml" ||
+    fail 'Fedora live QuickShell drift must not be rewritten by session apply'
+cmp -s "$QUICKSHELL_STATE_BEFORE_DRIFT" \
+    "$NIRI_QUICKSHELL_SOURCE_STATE_FILE" ||
+    fail 'Fedora live QuickShell drift must not refresh source state'
+if niri_quickshell_refresh_state_digest; then
+    fail 'Fedora QuickShell refresh must reject an edited live tree'
+fi
+if niri_quickshell_deployment_state_satisfied; then
+    fail 'Fedora live QuickShell drift must remain unsatisfied'
+fi
+niri_quickshell_stage_and_deploy \
+    "$FEDORA_QUICKSHELL_CHECKOUT" "$TARGET_USER" ||
+    fail 'Fedora QuickShell repair must redeploy the verified source tree'
+niri_quickshell_deployment_state_satisfied ||
+    fail 'Fedora QuickShell source repair must converge deployment state'
 
 declare -Ag MOCK_DESKTOP_INSTALLED=()
 state_package_present() {

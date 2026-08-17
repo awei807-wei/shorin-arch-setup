@@ -9,6 +9,10 @@ niri_session_contract_init() {
     NIRI_CONFIG_FILE=${NIRI_CONFIG_FILE:-$HOME_DIR/.config/niri/config.kdl}
     NIRI_BINDS_FILE=${NIRI_BINDS_FILE:-$HOME_DIR/.config/niri/binds.kdl}
     NIRI_QUICKSHELL_DIR=${NIRI_QUICKSHELL_DIR:-$HOME_DIR/.config/quickshell}
+    NIRI_DESKTOP_STATE_DIR=${NIRI_DESKTOP_STATE_DIR:-$HOME_DIR/.local/state/shorin-arch-setup/desktop-niri}
+    NIRI_QUICKSHELL_BACKUP_DIR=${NIRI_QUICKSHELL_BACKUP_DIR:-$NIRI_DESKTOP_STATE_DIR/quickshell-backups}
+    NIRI_QUICKSHELL_SOURCE_STATE_FILE=${NIRI_QUICKSHELL_SOURCE_STATE_FILE:-$NIRI_DESKTOP_STATE_DIR/quickshell-source}
+    NIRI_FISH_CONFIG_FILE=${NIRI_FISH_CONFIG_FILE:-$HOME_DIR/.config/fish/config.fish}
     NIRI_FISH_GUARD_FILE=${NIRI_FISH_GUARD_FILE:-$HOME_DIR/.config/fish/conf.d/shorin-env.fish}
     NIRI_FISH_RUSTUP_FILE=${NIRI_FISH_RUSTUP_FILE:-$HOME_DIR/.config/fish/conf.d/rustup.fish}
     NIRI_FISH_LOCAL_ENV_FILE=${NIRI_FISH_LOCAL_ENV_FILE:-$HOME_DIR/.config/fish/conf.d/uv.env.fish}

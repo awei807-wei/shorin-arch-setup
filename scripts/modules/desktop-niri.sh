@@ -57,6 +57,10 @@ desktop_niri_inspect() {
     desktop_niri_expect "$phase" file:wallpapers niri_wallpapers_deployed
     desktop_niri_expect "$phase" file:starship-config \
         niri_starship_config_deployed
+    desktop_niri_expect "$phase" config:quickshell-tree \
+        niri_quickshell_deployment_state_satisfied
+    desktop_niri_expect "$phase" config:wallpaper-scripts \
+        niri_wallpaper_scripts_satisfied
     desktop_niri_expect "$phase" config:matugen-starship-output \
         niri_matugen_starship_output_disabled
     desktop_niri_expect "$phase" legacy:matugen-starship-template-absent \
@@ -103,6 +107,8 @@ desktop_niri_inspect() {
     fi
     desktop_niri_expect "$phase" config:fish-env-sources \
         niri_fish_sources_satisfied
+    desktop_niri_expect "$phase" config:fish-config \
+        niri_fish_config_satisfied
     desktop_niri_expect "$phase" config:tty1-niri-session \
         niri_bash_profile_satisfied
     desktop_niri_expect "$phase" legacy:niri-autostart-absent \

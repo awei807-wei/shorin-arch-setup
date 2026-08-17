@@ -7,7 +7,10 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 SHORIN_ROOT=${SHORIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}
 source "$SHORIN_ROOT/scripts/lib/core.sh"
 source "$SHORIN_ROOT/scripts/modules/desktop-niri/config-contract.sh"
+source "$SHORIN_ROOT/scripts/modules/desktop-niri/transaction.sh"
+source "$SHORIN_ROOT/scripts/modules/desktop-niri/quickshell-contract.sh"
 source "$SHORIN_ROOT/scripts/modules/desktop-niri/wallpaper-contract.sh"
+source "$SHORIN_ROOT/scripts/modules/desktop-niri/quickshell-deploy.sh"
 source "$SHORIN_ROOT/scripts/modules/desktop-niri/awww.sh"
 source "$SHORIN_ROOT/scripts/modules/desktop-niri/session-files.sh"
 source "$SHORIN_ROOT/scripts/modules/desktop-niri/session-apply.sh"
