@@ -106,8 +106,14 @@ log "Required and selected desktop packages converged."
 # STEP 6: Dotfiles
 # ==============================================================================
 section "Step 5/9" "Dotfiles, Wallpapers, and Templates"
-bash "$SCRIPT_DIR/modules/desktop-niri/dotfiles-apply.sh" || APPLY_STATUS=$?
-ensure_niri_session_config "$TARGET_USER" || APPLY_STATUS=$?
+if niri_apply_dotfiles_and_session "$TARGET_USER" \
+  "$SCRIPT_DIR/modules/desktop-niri/dotfiles-apply.sh"; then
+  :
+else
+  APPLY_STATUS=$?
+  [ "$APPLY_STATUS" -ne 0 ] || APPLY_STATUS=1
+  exit "$APPLY_STATUS"
+fi
 
 # ==============================================================================
 # STEP 8: Hardware Tools

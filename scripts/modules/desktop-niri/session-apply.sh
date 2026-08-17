@@ -4,6 +4,42 @@ set -Eeuo pipefail
 trap 'printf "ERROR: %s:%s: %s\n" \
   "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
+niri_session_step() {
+    local label=$1 status
+    shift
+
+    if "$@"; then
+        return 0
+    else
+        status=$?
+    fi
+    [ "$status" -ne 0 ] || status=1
+    error "Niri session apply step failed: $label (status $status)."
+    return "$status"
+}
+
+niri_apply_dotfiles_and_session() {
+    local user=$1 dotfiles_script=$2 status
+
+    if bash "$dotfiles_script"; then
+        log 'Dotfiles apply completed; continuing with session configuration.'
+    else
+        status=$?
+        [ "$status" -ne 0 ] || status=1
+        error "Dotfiles apply failed (status $status); session apply was not attempted."
+        return "$status"
+    fi
+    if ensure_niri_session_config "$user"; then
+        log 'Session configuration apply completed.'
+        return 0
+    else
+        status=$?
+        [ "$status" -ne 0 ] || status=1
+        error "Session configuration apply failed (status $status); stopping before hardware and autologin."
+        return "$status"
+    fi
+}
+
 ensure_niri_managed_config_files() {
     local user=$1 config_backup binds_backup config_mode binds_mode group status=0
     local file backup index
@@ -29,16 +65,30 @@ ensure_niri_managed_config_files() {
         quickshell_modes+=("$(stat -c '%a' "$file")")
     done < <(find "$NIRI_QUICKSHELL_DIR" -type f -print0)
 
-    ensure_niri_fedora_session_compatibility "$user" || status=$?
-    [ "$status" -ne 0 ] || ensure_niri_quickshell_startup "$NIRI_CONFIG_FILE" "$user" || status=$?
-    [ "$status" -ne 0 ] || ensure_niri_optional_startup "$user" || status=$?
-    [ "$status" -ne 0 ] || ensure_niri_fcitx5_startup \
-        "$NIRI_CONFIG_FILE" "$user" || status=$?
-    [ "$status" -ne 0 ] || ensure_niri_path "$user" || status=$?
-    [ "$status" -ne 0 ] || ensure_niri_wallpaper_backend "$user" || status=$?
-    [ "$status" -ne 0 ] || ensure_niri_bindings "$user" || status=$?
-    [ "$status" -ne 0 ] || niri_config_valid "$user" || status=$?
+    [ "$status" -ne 0 ] ||
+        niri_session_step 'Fedora session compatibility' \
+            ensure_niri_fedora_session_compatibility "$user" || status=$?
+    [ "$status" -ne 0 ] ||
+        niri_session_step 'QuickShell startup' \
+            ensure_niri_quickshell_startup "$NIRI_CONFIG_FILE" "$user" || status=$?
+    [ "$status" -ne 0 ] ||
+        niri_session_step 'optional startup' ensure_niri_optional_startup \
+            "$user" || status=$?
+    [ "$status" -ne 0 ] ||
+        niri_session_step 'Fcitx5 startup' ensure_niri_fcitx5_startup \
+            "$NIRI_CONFIG_FILE" "$user" || status=$?
+    [ "$status" -ne 0 ] ||
+        niri_session_step 'PATH convergence' ensure_niri_path "$user" || status=$?
+    [ "$status" -ne 0 ] ||
+        niri_session_step 'wallpaper backend' \
+            ensure_niri_wallpaper_backend "$user" || status=$?
+    [ "$status" -ne 0 ] ||
+        niri_session_step 'Niri bindings' ensure_niri_bindings "$user" || status=$?
+    [ "$status" -ne 0 ] ||
+        niri_session_step 'Niri config validation' niri_config_valid \
+            "$user" || status=$?
     if [ "$status" -ne 0 ]; then
+        error 'Niri session apply failed; restoring the session transaction.'
         install_if_changed "$config_backup" "$NIRI_CONFIG_FILE" "$config_mode" || status=1
         install_if_changed "$binds_backup" "$NIRI_BINDS_FILE" "$binds_mode" || status=1
         chown "$user:$group" "$NIRI_CONFIG_FILE" "$NIRI_BINDS_FILE"
@@ -58,7 +108,10 @@ ensure_niri_managed_config_files() {
 ensure_niri_session_config() {
     local user=$1 status=0
 
-    niri_desktop_txn_begin || return 1
+    if ! niri_desktop_txn_begin; then
+        error 'Unable to start the Niri session transaction.'
+        return 1
+    fi
     niri_desktop_txn_snapshot "$NIRI_CONFIG_FILE" || status=1
     niri_desktop_txn_snapshot "$NIRI_BINDS_FILE" || status=1
     niri_desktop_txn_snapshot "$NIRI_QUICKSHELL_DIR" || status=1
@@ -74,18 +127,24 @@ ensure_niri_session_config() {
     niri_desktop_txn_snapshot "$NIRI_FEDORA_WALLPAPER_SESSION_FILE" || status=1
     niri_desktop_txn_snapshot "$NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE" || status=1
     if [ "$status" -ne 0 ]; then
+        error 'Unable to snapshot all Niri session targets; session apply was not attempted.'
         niri_desktop_txn_finish 1
         return 1
     fi
 
-    if ! ensure_niri_managed_config_files "$user"; then
+    if ! niri_session_step 'managed Niri config files' \
+        ensure_niri_managed_config_files "$user"; then
         niri_desktop_txn_finish 1
         return 1
     fi
-    if ! ensure_niri_waypaper_backend "$user" ||
-        ! ensure_niri_fish_sources "$user" ||
-        ! ensure_niri_fish_config "$user" ||
-        ! ensure_niri_bash_profile "$user"; then
+    if ! niri_session_step 'Waypaper backend' ensure_niri_waypaper_backend \
+        "$user" ||
+        ! niri_session_step 'Fish environment sources' ensure_niri_fish_sources \
+            "$user" ||
+        ! niri_session_step 'Fish config' ensure_niri_fish_config "$user" ||
+        ! niri_session_step 'TTY session profile' ensure_niri_bash_profile \
+            "$user"; then
+        error 'Niri session post-processing failed; restoring the session transaction.'
         niri_desktop_txn_finish 1
         return 1
     fi

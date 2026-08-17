@@ -55,6 +55,7 @@ test_dotfiles_checkout_tracks_latest_and_falls_back_safely() (
     local dirty_checkout="$TEST_DIR/dotfiles-checkout-dirty"
     local untrusted_checkout="$TEST_DIR/dotfiles-checkout-untrusted"
     local current_user first_commit second_commit actual_checkout
+    local clean_cache before_ephemeral after_ephemeral
 
     current_user=$(id -un)
     mkdir -p "$HOME_DIR"
@@ -140,13 +141,75 @@ test_dotfiles_checkout_tracks_latest_and_falls_back_safely() (
     assert_equal "$second_commit" "$(git -C "$actual_checkout" rev-parse HEAD)" \
         'an idempotent fallback run must not move the checkout unexpectedly'
 
+    # Restore the real Git helper before exercising a dirty GitHub checkout;
+    # the first part of this fixture intentionally forces GitHub fallback.
+    eval "$(declare -f real_ensure_git_checkout |
+        sed 's/^real_ensure_git_checkout /ensure_git_checkout /')"
     git clone -q "$github_repo" "$dirty_checkout"
     printf 'dirty\n' >> "$dirty_checkout/version.txt"
+    printf 'ignored dotfiles content\n' \
+        > "$dirty_checkout/dotfiles/.config/ignored.local"
+    printf '/dotfiles/.config/ignored.local\n' \
+        >> "$dirty_checkout/.git/info/exclude"
     export NIRI_DOTFILES_CHECKOUT="$dirty_checkout"
     export NIRI_DOTFILES_FALLBACK_CHECKOUT="$TEST_DIR/unused-gitee"
-    if ensure_dotfiles_checkout "$current_user" "$HOME_DIR"; then
-        fail 'a dirty existing GitHub checkout must be refused'
+    if dotfiles_checkout_is_safe "$current_user" "$github_repo" \
+        "$dirty_checkout" "$HOME_DIR"; then
+        fail 'ignored dotfiles content must make a checkout unsafe'
     fi
+    ensure_dotfiles_checkout "$current_user" "$HOME_DIR" >/dev/null ||
+        fail 'a dirty existing GitHub checkout must use a clean source'
+    actual_checkout=$DOTFILES_SELECTED_SOURCE
+    [ "$actual_checkout" != "$dirty_checkout" ] ||
+        fail 'a dirty checkout must never be used as the deployment source'
+    [ "$(< "$dirty_checkout/version.txt")" = $'gitee-first\ndirty' ] ||
+        fail 'a dirty checkout must be preserved byte-for-byte'
+    dotfiles_checkout_is_current "$current_user" "$github_repo" main \
+        "$actual_checkout" "$HOME_DIR" ||
+        fail 'a dirty checkout replacement must track the latest origin/main'
+    dotfiles_source_contract "$actual_checkout" ||
+        fail 'a dirty checkout replacement must satisfy the source contract'
+
+    clean_cache="${dirty_checkout}.clean"
+    printf 'dirty clean-cache marker\n' >> "$clean_cache/version.txt"
+    before_ephemeral=$(find "$TEST_DIR" -maxdepth 1 -type d \
+        -name '.dotfiles-source.*' | wc -l)
+    ensure_dotfiles_checkout "$current_user" "$HOME_DIR" >/dev/null ||
+        fail 'a dirty clean-cache must use a fresh independent source'
+    actual_checkout=$DOTFILES_SELECTED_SOURCE
+    [ "$actual_checkout" != "$dirty_checkout" ] &&
+        [ "$actual_checkout" != "$clean_cache" ] ||
+        fail 'a dirty clean-cache must never be used as deployment source'
+    after_ephemeral=$(find "$TEST_DIR" -maxdepth 1 -type d \
+        -name '.dotfiles-source.*' | wc -l)
+    [ "$after_ephemeral" -eq $((before_ephemeral + 1)) ] ||
+        fail 'a dirty clean-cache must register one ephemeral source'
+    grep -Fqx 'dirty clean-cache marker' "$clean_cache/version.txt" ||
+        fail 'a dirty clean-cache must remain byte-preserved'
+    dotfiles_cleanup_ephemeral_source ||
+        fail 'ephemeral source cleanup must succeed'
+    after_ephemeral=$(find "$TEST_DIR" -maxdepth 1 -type d \
+        -name '.dotfiles-source.*' | wc -l)
+    [ "$after_ephemeral" -eq "$before_ephemeral" ] ||
+        fail 'ephemeral source cleanup must remove the fresh candidate'
+
+    # A failed network path must not fall back to the dirty bytes.  The
+    # original checkout remains available for the user to recover manually.
+    export NIRI_DOTFILES_FALLBACK_CHECKOUT="$TEST_DIR/no-network-gitee"
+    before_ephemeral=$(find "$TEST_DIR" -maxdepth 1 -type d \
+        -name '.dotfiles-source.*' | wc -l)
+    ensure_git_checkout() { return 1; }
+    if ensure_dotfiles_checkout "$current_user" "$HOME_DIR"; then
+        fail 'network failure must not deploy from the dirty checkout'
+    fi
+    [ "$(< "$dirty_checkout/version.txt")" = $'gitee-first\ndirty' ] ||
+        fail 'a no-network failure must preserve dirty checkout bytes'
+    after_ephemeral=$(find "$TEST_DIR" -maxdepth 1 -type d \
+        -name '.dotfiles-source.*' | wc -l)
+    [ "$after_ephemeral" -eq "$before_ephemeral" ] ||
+        fail 'failed fresh source creation must clean its ephemeral candidate'
+    eval "$(declare -f real_ensure_git_checkout |
+        sed 's/^real_ensure_git_checkout /ensure_git_checkout /')"
 
     mkdir -p "$untrusted_checkout"
     printf 'sentinel\n' > "$untrusted_checkout/sentinel"
@@ -157,7 +220,7 @@ test_dotfiles_checkout_tracks_latest_and_falls_back_safely() (
     [ "$(< "$untrusted_checkout/sentinel")" = sentinel ] ||
         fail 'an untrusted checkout path must not be replaced'
 
-    unset -f ensure_git_checkout real_ensure_git_checkout runuser
+    unset -f real_ensure_git_checkout runuser
     unset NIRI_DOTFILES_GITHUB_URL NIRI_DOTFILES_GITEE_URL \
         NIRI_DOTFILES_CHECKOUT NIRI_DOTFILES_FALLBACK_CHECKOUT
 )
@@ -288,6 +351,74 @@ test_quickshell_state_failure_rolls_back_tree() (
 )
 
 test_quickshell_state_failure_rolls_back_tree
+
+test_quickshell_top_level_symlink_replaced_and_restored() (
+    local symlink_home="$TEST_DIR/quickshell-symlink-home"
+    local live_target="$TEST_DIR/quickshell-symlink-target"
+    local stage="$TEST_DIR/quickshell-symlink-stage"
+    local before_shell="$TEST_DIR/quickshell-symlink-before-shell"
+    local real_install_if_changed digest backup metadata stage_success
+
+    mkdir -p "$symlink_home/.local/state" "$live_target"
+    cp -a "$DOTFILES_CHECKOUT/dotfiles/.config/quickshell/." "$live_target/"
+    ln -s ../quickshell-symlink-target "$symlink_home/quickshell"
+    cp "$live_target/shell.qml" "$before_shell"
+    cp -a "$live_target" "$stage"
+    printf 'symlink replacement fixture\n' > "$stage/shell.qml"
+
+    NIRI_QUICKSHELL_DIR="$symlink_home/quickshell"
+    NIRI_DESKTOP_STATE_DIR="$symlink_home/.local/state/desktop-niri"
+    NIRI_QUICKSHELL_BACKUP_DIR="$NIRI_DESKTOP_STATE_DIR/quickshell-backups"
+    NIRI_QUICKSHELL_SOURCE_STATE_FILE="$NIRI_DESKTOP_STATE_DIR/quickshell-source"
+    mkdir -p "$NIRI_DESKTOP_STATE_DIR"
+    digest=$(niri_quickshell_tree_digest "$NIRI_QUICKSHELL_DIR")
+    printf 'commit=before\nplatform=arch\ndigest=%s\n' "$digest" \
+        > "$NIRI_QUICKSHELL_SOURCE_STATE_FILE"
+
+    real_install_if_changed=$(declare -f install_if_changed)
+    eval "${real_install_if_changed/install_if_changed/real_install_if_changed}"
+    install_if_changed() {
+        [ "$2" = "$NIRI_QUICKSHELL_SOURCE_STATE_FILE" ] && return 1
+        real_install_if_changed "$@"
+    }
+    if niri_quickshell_atomic_replace "$stage" "$TARGET_USER" \
+        symlink-rollback-commit arch; then
+        fail 'a QuickShell state failure must reject symlink replacement'
+    fi
+    [ -L "$NIRI_QUICKSHELL_DIR" ] ||
+        fail 'a failed replacement must restore the top-level QuickShell symlink'
+    [ "$(readlink "$NIRI_QUICKSHELL_DIR")" = ../quickshell-symlink-target ] ||
+        fail 'a failed replacement must restore the original symlink target'
+    cmp -s "$before_shell" "$live_target/shell.qml" ||
+        fail 'a failed replacement must preserve the symlink target contents'
+
+    unset -f install_if_changed
+    eval "${real_install_if_changed/install_if_changed/real_install_if_changed}"
+    install_if_changed() { real_install_if_changed "$@"; }
+    stage_success="$TEST_DIR/quickshell-symlink-success-stage"
+    cp -a "$live_target" "$stage_success"
+    printf 'symlink success fixture\n' > "$stage_success/shell.qml"
+    niri_quickshell_atomic_replace "$stage_success" "$TARGET_USER" \
+        symlink-success-commit arch ||
+        fail 'a relative QuickShell symlink must be atomically replaced'
+    [ ! -L "$NIRI_QUICKSHELL_DIR" ] && [ -d "$NIRI_QUICKSHELL_DIR" ] ||
+        fail 'a successful replacement must leave a managed QuickShell directory'
+    backup=$(find "$NIRI_QUICKSHELL_BACKUP_DIR" -mindepth 1 -maxdepth 1 \
+        -type d -name '*symlink-succ' -print -quit)
+    [ -n "$backup" ] ||
+        fail 'a successful symlink replacement must keep an identifiable backup'
+    [ -L "$backup/quickshell" ] ||
+        fail 'the symlink backup must preserve the original link object'
+    [ "$(readlink "$backup/quickshell")" = ../quickshell-symlink-target ] ||
+        fail 'the symlink backup must preserve the original relative link text'
+    metadata="$backup/quickshell.link"
+    grep -Fqx 'link_target=../quickshell-symlink-target' "$metadata" ||
+        fail 'the symlink backup must record the original link text'
+    grep -Fqx "path=$NIRI_QUICKSHELL_DIR" "$metadata" ||
+        fail 'the symlink backup must record the original live path'
+)
+
+test_quickshell_top_level_symlink_replaced_and_restored
 
 test_quickshell_old_hold_cleanup_is_nonfatal() (
     local stage="$TEST_DIR/quickshell-hold-stage"
@@ -1292,6 +1423,58 @@ fi
 if grep -Fq 'niri-autostart.service' "$APPLY_SCRIPT"; then
     fail 'desktop apply must not recreate the retired Niri user service'
 fi
+grep -Fq 'Dotfiles apply failed' \
+    "$ROOT_DIR/scripts/modules/desktop-niri/session-apply.sh" ||
+    fail 'desktop apply must diagnose a dotfiles failure'
+grep -Fq 'session apply was not attempted' \
+    "$ROOT_DIR/scripts/modules/desktop-niri/session-apply.sh" ||
+    fail 'desktop apply must stop before session apply after dotfiles failure'
+if grep -Eq 'dotfiles-apply[.]sh"[[:space:]]*\|\|[[:space:]]*APPLY_STATUS' \
+    "$APPLY_SCRIPT"; then
+    fail 'desktop apply must not continue to session apply after dotfiles failure'
+fi
+session_exit_line=$(grep -n 'exit "\$APPLY_STATUS"' "$APPLY_SCRIPT" | head -1 | cut -d: -f1)
+hardware_line=$(grep -n '^section "Step 7/9"' "$APPLY_SCRIPT" | head -1 | cut -d: -f1)
+[ -n "$session_exit_line" ] && [ -n "$hardware_line" ] &&
+    [ "$session_exit_line" -lt "$hardware_line" ] ||
+    fail 'session failure must exit before hardware and autologin steps'
+
+test_niri_apply_flow_stops_after_failure() (
+    local dotfiles_fail="$TEST_DIR/dotfiles-fail.sh"
+    local dotfiles_ok="$TEST_DIR/dotfiles-ok.sh"
+    local session_called="$TEST_DIR/session-called"
+    local dotfiles_called="$TEST_DIR/dotfiles-called"
+    local status
+
+    printf '#!/usr/bin/env bash\nexit 17\n' > "$dotfiles_fail"
+    printf '#!/usr/bin/env bash\ntouch %q\n' "$dotfiles_called" > "$dotfiles_ok"
+    chmod 755 "$dotfiles_fail" "$dotfiles_ok"
+
+    ensure_niri_session_config() {
+        touch "$session_called"
+        return 23
+    }
+    rm -f "$session_called" "$dotfiles_called"
+    status=0
+    niri_apply_dotfiles_and_session "$TARGET_USER" "$dotfiles_fail" ||
+        status=$?
+    [ "$status" -eq 17 ] ||
+        fail 'apply flow must return the dotfiles failure status'
+    [ ! -e "$session_called" ] ||
+        fail 'apply flow must not invoke session apply after dotfiles failure'
+
+    status=0
+    niri_apply_dotfiles_and_session "$TARGET_USER" "$dotfiles_ok" ||
+        status=$?
+    [ "$status" -eq 23 ] ||
+        fail 'apply flow must return the session failure status'
+    [ -e "$dotfiles_called" ] ||
+        fail 'apply flow must execute a successful dotfiles script'
+    [ -e "$session_called" ] ||
+        fail 'apply flow must invoke session apply after dotfiles success'
+)
+
+test_niri_apply_flow_stops_after_failure
 
 PROFILE_DIR="$TEST_DIR/profile"
 BIN_DIR="$TEST_DIR/mock-bin"

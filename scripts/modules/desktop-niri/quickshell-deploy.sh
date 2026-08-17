@@ -138,6 +138,31 @@ niri_quickshell_tree_equal() {
     [ "$left_digest" = "$right_digest" ]
 }
 
+niri_quickshell_backup_live_tree() {
+    local live=$1 backup=$2 target mode uid gid
+
+    if [ -L "$live" ]; then
+        # cp -a "$live/." would follow a top-level symlink and lose the
+        # user's indirection.  Keep the exact link text and lstat metadata as
+        # a durable recovery record while the live path is atomically replaced
+        # by a directory.  The metadata also preserves relative links whose
+        # target would resolve differently below the backup directory.
+        target=$(readlink "$live") || return 1
+        mode=$(stat -c '%a' "$live") || return 1
+        uid=$(stat -c '%u' "$live") || return 1
+        gid=$(stat -c '%g' "$live") || return 1
+        ln -s "$target" "$backup/quickshell"
+        chown -h "$uid:$gid" "$backup/quickshell" || return 1
+        printf 'version=1\npath=%s\nlink_target=%s\nmode=%s\nuid=%s\ngid=%s\n' \
+            "$live" "$target" "$mode" "$uid" "$gid" \
+            > "$backup/quickshell.link"
+        chown "$uid:$gid" "$backup/quickshell.link" || return 1
+        return 0
+    fi
+    [ -d "$live" ] || return 1
+    cp -a "$live/." "$backup/"
+}
+
 niri_quickshell_atomic_replace() {
     local staged=$1 user=$2 commit=$3 platform=$4
     local parent old_hold backup state_tmp state_backup digest live_digest group
@@ -204,7 +229,8 @@ niri_quickshell_atomic_replace() {
             fi
             return 1
         fi
-        if ! cp -a "$NIRI_QUICKSHELL_DIR/." "$backup/"; then
+        if ! niri_quickshell_backup_live_tree "$NIRI_QUICKSHELL_DIR" \
+            "$backup"; then
             niri_quickshell_remove_tree "$backup" || true
             niri_quickshell_remove_tree "$staged" || true
             niri_quickshell_remove_tree "$state_backup" || true
