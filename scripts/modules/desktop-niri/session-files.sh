@@ -294,6 +294,10 @@ EOF
 niri_bash_profile_satisfied() {
     local actual expected begin_count end_count
 
+    if platform_is_fedora; then
+        niri_fedora_bash_profile_managed_block_satisfied
+        return $?
+    fi
     [ -f "$NIRI_BASH_PROFILE" ] || return 1
     ! grep -Fq '# shorin:niri-session:start' "$NIRI_BASH_PROFILE" || return 1
     ! grep -Fq '# shorin:niri-session:end' "$NIRI_BASH_PROFILE" || return 1
@@ -312,6 +316,10 @@ niri_bash_profile_satisfied() {
 niri_session_entry_satisfied() {
     local file
 
+    if platform_is_fedora; then
+        niri_fedora_wayland_session_entry_satisfied
+        return $?
+    fi
     niri_bash_profile_satisfied || return 1
     file=$NIRI_BASH_PROFILE
     awk '
@@ -419,6 +427,13 @@ ensure_niri_bash_profile() {
     local user=$1 temporary filtered mode=644 begin_count end_count
     local legacy_begin_count legacy_end_count
 
+    if platform_is_fedora; then
+        niri_fedora_remove_bash_profile_managed_blocks "$user" || return
+        niri_fedora_remove_legacy_autostart "$user" || return
+        niri_fedora_bash_profile_managed_block_satisfied || return
+        niri_legacy_autostart_absent
+        return $?
+    fi
     niri_bash_profile_satisfied && niri_legacy_autostart_absent && return 0
     begin_count=$(grep -Fxc '# >>> shorin niri tty1 >>>' "$NIRI_BASH_PROFILE" 2>/dev/null || true)
     end_count=$(grep -Fxc '# <<< shorin niri tty1 <<<' "$NIRI_BASH_PROFILE" 2>/dev/null || true)

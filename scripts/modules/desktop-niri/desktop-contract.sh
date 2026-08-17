@@ -26,7 +26,8 @@ desktop_niri_contract_init() {
             NIRI_FISH_LOCAL_ENV_FILE NIRI_BASH_PROFILE NIRI_LEGACY_UNIT \
             NIRI_LEGACY_UNIT_LINK NIRI_LOCKSCREEN_SCRIPT_FILE \
             NIRI_FEDORA_WALLPAPER_SESSION_FILE \
-            NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE; do
+            NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE NIRI_WAYLAND_SESSION_FILE \
+            NIRI_STATE_HOME NIRI_SHORIN_STATE_DIR; do
             value=${!variable:-}
             case "$value" in
                 "$previous_home"|"$previous_home"/*) unset "$variable" ;;
@@ -51,11 +52,23 @@ desktop_niri_contract_init() {
     NIRI_WAYPAPER_CONFIG_FILE=${NIRI_WAYPAPER_CONFIG_FILE:-$HOME_DIR/.config/waypaper/config.ini}
     NIRI_TEMPLATES_DIR=${NIRI_TEMPLATES_DIR:-$HOME_DIR/Templates}
     NIRI_AUTOLOGIN_FILE=${NIRI_AUTOLOGIN_FILE:-/etc/systemd/system/getty@tty1.service.d/autologin.conf}
+    NIRI_WAYLAND_SESSION_FILE=${NIRI_WAYLAND_SESSION_FILE:-/usr/share/wayland-sessions/niri.desktop}
+    NIRI_DISPLAY_MANAGER_UNIT=${NIRI_DISPLAY_MANAGER_UNIT:-display-manager.service}
+    NIRI_STATE_HOME=${NIRI_STATE_HOME:-${XDG_STATE_HOME:-$HOME_DIR/.local/state}}
+    NIRI_SHORIN_STATE_DIR=${NIRI_SHORIN_STATE_DIR:-$NIRI_STATE_HOME/shorin-arch-setup}
     niri_session_contract_init
 }
 
 niri_detect_display_manager() {
     local dm
+
+    # Fedora's display manager is selected by the systemd alias, not by a
+    # package-name guess.  Keep the old package probe for Arch, where it is
+    # still used to decide whether tty1 autologin is appropriate.
+    if platform_is_fedora; then
+        niri_fedora_display_manager_provider && return 0
+        return 1
+    fi
 
     for dm in gdm sddm lightdm lxdm slim xorg-xdm ly greetd; do
         if package_is_installed "$dm"; then
@@ -73,7 +86,7 @@ niri_autologin_contract() {
 niri_autologin_managed_user() {
     local line user actual expected
 
-    [ -f "$NIRI_AUTOLOGIN_FILE" ] || return 1
+    [ -f "$NIRI_AUTOLOGIN_FILE" ] && [ ! -L "$NIRI_AUTOLOGIN_FILE" ] || return 1
     line=$(sed -n '3p' "$NIRI_AUTOLOGIN_FILE")
     user=$(printf '%s\n' "$line" | sed -n \
         's|^ExecStart=-/sbin/agetty --noreset --noclear --autologin \([^ ]*\) - ${TERM}$|\1|p')
@@ -96,6 +109,18 @@ niri_autologin_matches_target() {
 niri_autologin_state_satisfied() {
     local managed_user
 
+    # Fedora always enters Niri through the display manager.  An absent
+    # autologin drop-in is therefore the desired state; any Shorin-owned old
+    # drop-in is removed by ensure_niri_autologin_state below.  A non-Shorin
+    # drop-in is user-owned and is intentionally preserved without turning
+    # every Fedora repair into permanent drift.
+    if platform_is_fedora; then
+        if [ ! -e "$NIRI_AUTOLOGIN_FILE" ] && [ ! -L "$NIRI_AUTOLOGIN_FILE" ]; then
+            return 0
+        fi
+        niri_autologin_managed_user >/dev/null && return 1
+        return 0
+    fi
     managed_user=$(niri_autologin_managed_user) || return 0
     if niri_detect_display_manager >/dev/null; then
         return 1
@@ -106,6 +131,17 @@ niri_autologin_state_satisfied() {
 ensure_niri_autologin_state() {
     local user=$1 skip=$2 temporary
 
+    if platform_is_fedora; then
+        # Never create a tty fallback on Fedora.  Exact Shorin-generated
+        # content is a constrained migration boundary; arbitrary drop-ins,
+        # including bare niri commands, are left untouched and reported as
+        # drift by the formal-session contract.
+        if niri_autologin_managed_user >/dev/null; then
+            rm -f "$NIRI_AUTOLOGIN_FILE"
+            systemctl daemon-reload
+        fi
+        return 0
+    fi
     if [ "$skip" = true ]; then
         if niri_autologin_managed_user >/dev/null; then
             rm -f "$NIRI_AUTOLOGIN_FILE"
@@ -217,9 +253,24 @@ niri_gtk_links_match() {
 }
 
 niri_wallpapers_deployed() {
-    [ -f "$NIRI_DEFAULT_WALLPAPER_FILE" ] &&
+    niri_path_is_safe_no_symlink "$NIRI_WALLPAPER_DIR" || return 1
+    [ -d "$NIRI_WALLPAPER_DIR" ] &&
+        [ "$(stat -c '%U' "$NIRI_WALLPAPER_DIR")" = "$TARGET_USER" ] &&
+        [ -f "$NIRI_DEFAULT_WALLPAPER_FILE" ] &&
         [ ! -L "$NIRI_DEFAULT_WALLPAPER_FILE" ] &&
-        [ -s "$NIRI_DEFAULT_WALLPAPER_FILE" ]
+        [ -s "$NIRI_DEFAULT_WALLPAPER_FILE" ] &&
+        [ "$(stat -c '%U' "$NIRI_DEFAULT_WALLPAPER_FILE")" = "$TARGET_USER" ]
+}
+
+niri_wallpaper_directory_satisfied() {
+    local user=${1:-$TARGET_USER}
+
+    niri_path_is_safe_no_symlink "$NIRI_WALLPAPER_DIR" || return 1
+    [ -d "$NIRI_WALLPAPER_DIR" ] && [ ! -L "$NIRI_WALLPAPER_DIR" ] || return 1
+    [ "$(stat -c '%u' "$NIRI_WALLPAPER_DIR")" -eq "$(id -u "$user")" ] ||
+        return 1
+    niri_run_as_user "$user" test -r "$NIRI_WALLPAPER_DIR" || return 1
+    niri_run_as_user "$user" test -w "$NIRI_WALLPAPER_DIR"
 }
 
 niri_starship_config_deployed() {

@@ -200,7 +200,7 @@ fedora_package_name() {
         fcitx5-configtool) printf '%s\n' fcitx5-configtool ;;
         fcitx5-mozc) printf '%s\n' fcitx5-mozc ;;
         fcitx5-rime) printf '%s\n' fcitx5-rime ;;
-        fcitx5-gtk|fcitx5-qt|fcitx5|flatpak|flatseal|fastfetch|firefox|fish|fuzzel|fzf|git|niri|gdm|sddm|lightdm|lxdm|slim|ly|greetd|btrfs-progs|snapper|btrfs-assistant|\
+        fcitx5-gtk|fcitx5-qt|fcitx5|flatpak|flatseal|fastfetch|firefox|fish|fuzzel|fzf|git|niri|gdm|sddm|lightdm|lxdm|slim|ly|greetd|plasma-login-manager|kscreenlocker|kwin|btrfs-progs|snapper|btrfs-assistant|\
         gnome-calendar|gnome-clocks|gnome-disk-utility|gnome-font-viewer|\
         gnome-keyring|gnome-software|gnome-text-editor|gvfs-smb|\
         imv|jq|kitty|less|libnotify|lsof|mako|mangohud|mpv|nautilus|\

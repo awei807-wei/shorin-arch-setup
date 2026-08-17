@@ -94,6 +94,19 @@ main() {
         error "Failed desktop package targets: ${failed_targets[*]}"
         return 1
     fi
+    if platform_is_fedora; then
+        # Keep Plasma's lockscreen/KWin ABI pair on the same repository
+        # revision.  This is intentionally Fedora-only; Arch retains its
+        # existing package transaction semantics.
+        local runtime_target runtime_failed=0
+        for runtime_target in kscreenlocker kwin; do
+            niri_fedora_runtime_target_upgrade "$runtime_target" || {
+                error "Failed to converge Fedora runtime package: $runtime_target"
+                runtime_failed=1
+            }
+        done
+        [ "$runtime_failed" -eq 0 ] || return 1
+    fi
 }
 
 main "$@"

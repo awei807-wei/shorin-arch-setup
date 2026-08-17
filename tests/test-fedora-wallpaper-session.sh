@@ -49,6 +49,9 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 case "$action" in
+    img)
+        touch "$state/$namespace.image"
+        ;;
     query)
         if [ "${WALLPAPER_DELAY_MODE:-0}" -eq 1 ]; then
             count_file=${WALLPAPER_QUERY_COUNT_FILE:?}
@@ -108,6 +111,11 @@ AWEOF
 set -Eeuo pipefail
 
 printf 'waypaper:%s\n' "$*" >> "${WALLPAPER_TEST_LOG:?}"
+if [ -n "${WALLPAPER_TEST_CONFIG_FILE:-}" ]; then
+    mkdir -p "$(dirname "$WALLPAPER_TEST_CONFIG_FILE")"
+    printf 'wallpaper = %s\n' "${WALLPAPER_TEST_CONFIG_IMAGE:?}" \
+        > "$WALLPAPER_TEST_CONFIG_FILE"
+fi
 if [ "${WALLPAPER_TEST_MODE:-image}" = image ]; then
     touch "${WALLPAPER_TEST_STATE:?}/default.image"
 fi
@@ -166,6 +174,37 @@ grep -Fq 'awww:kill' "$happy/log/events" ||
 grep -Fq 'daemon:--no-cache --namespace overview' "$happy/log/events" ||
     fail 'overview daemon must use its own namespace'
 
+# An available Waypaper must still perform --random even when its config
+# already has a wallpaper; the refreshed config is then applied through awww.
+random_config="$TEST_DIR/random-config"
+make_fixture "$random_config"
+mkdir -p "$random_config/home/.config/waypaper"
+printf 'selected wallpaper\n' > "$random_config/home/selected.png"
+: > "$random_config/log/events"
+WALLPAPER_TEST_LOG="$random_config/log/events" \
+    WALLPAPER_TEST_STATE="$random_config/state" \
+    WALLPAPER_TEST_CONFIG_FILE="$random_config/home/.config/waypaper/config.ini" \
+    WALLPAPER_TEST_CONFIG_IMAGE="$random_config/home/selected.png" \
+    AWWW_BIN="$random_config/bin/awww" \
+    AWWW_DAEMON_BIN="$random_config/bin/awww-daemon" \
+    WAYPAPER_BIN="$random_config/bin/waypaper" \
+    FEDORA_WALLPAPER_STATE_DIR="$random_config/log" \
+    FEDORA_WALLPAPER_LOG="$random_config/log/session.log" \
+    FEDORA_WALLPAPER_LOCK="$random_config/log/session.lock" \
+    FEDORA_WALLPAPER_OVERVIEW_SCRIPT="$random_config/bin/overview-blur" \
+    FEDORA_WALLPAPER_AUTO_BLUR_SCRIPT="$random_config/bin/auto-blur" \
+    FEDORA_WALLPAPER_QUERY_TIMEOUT=1 \
+    FEDORA_WALLPAPER_READY_TIMEOUT=2 \
+    FEDORA_WALLPAPER_IMAGE_TIMEOUT=1 \
+    FEDORA_WALLPAPER_WAYPAPER_TIMEOUT=2 \
+    HOME="$random_config/home" \
+    "$SESSION_SCRIPT"
+random_line=$(grep -n -F 'waypaper:--random' "$random_config/log/events" | cut -d: -f1)
+apply_line=$(grep -n -F "awww:img $random_config/home/selected.png" \
+    "$random_config/log/events" | cut -d: -f1)
+[ -n "$random_line" ] && [ -n "$apply_line" ] && [ "$random_line" -lt "$apply_line" ] ||
+    fail 'Waypaper random selection must precede awww application of refreshed config'
+
 # A stale namespace is not reused blindly: query fails, awww kill removes the
 # stale session, and the coordinator starts one replacement daemon.
 stale="$TEST_DIR/stale"
@@ -190,6 +229,66 @@ fi
 if grep -Fq 'notify' "$color/log/session.log" 2>/dev/null; then
     fail 'color timeout must not emit a desktop notification'
 fi
+
+# Waypaper is optional during recovery.  A valid image recorded in its config
+# is handed directly to awww even when the Waypaper executable is absent.
+direct="$TEST_DIR/direct"
+make_fixture "$direct"
+mkdir -p "$direct/home/.config/waypaper"
+printf 'configured wallpaper\n' > "$direct/home/configured.png"
+cat > "$direct/home/.config/waypaper/config.ini" <<EOF
+wallpaper = $direct/home/configured.png
+EOF
+PATH="$direct/bin:/usr/bin:/bin" \
+    WALLPAPER_TEST_LOG="$direct/log/events" \
+    WALLPAPER_TEST_STATE="$direct/state" \
+    AWWW_BIN="$direct/bin/awww" \
+    AWWW_DAEMON_BIN="$direct/bin/awww-daemon" \
+    WAYPAPER_BIN="$direct/bin/waypaper-missing" \
+    FEDORA_WALLPAPER_STATE_DIR="$direct/log" \
+    FEDORA_WALLPAPER_LOG="$direct/log/session.log" \
+    FEDORA_WALLPAPER_LOCK="$direct/log/session.lock" \
+    FEDORA_WALLPAPER_OVERVIEW_SCRIPT="$direct/bin/overview-blur" \
+    FEDORA_WALLPAPER_AUTO_BLUR_SCRIPT="$direct/bin/auto-blur" \
+    FEDORA_WALLPAPER_QUERY_TIMEOUT=1 \
+    FEDORA_WALLPAPER_READY_TIMEOUT=2 \
+    FEDORA_WALLPAPER_IMAGE_TIMEOUT=1 \
+    FEDORA_WALLPAPER_WAYPAPER_TIMEOUT=2 \
+    HOME="$direct/home" \
+    "$SESSION_SCRIPT"
+grep -Fqx "awww:img $direct/home/configured.png" \
+    "$direct/log/events" ||
+    fail 'a valid configured image must be applied directly when Waypaper is absent'
+if grep -Fq 'waypaper:' "$direct/log/events"; then
+    fail 'Waypaper must not be invoked when its executable is absent'
+fi
+
+# A stale socket that never becomes ready is bounded by the retry budget and
+# must surface as a session failure rather than being swallowed.
+failed="$TEST_DIR/failed"
+make_fixture "$failed"
+printf '0\n' > "$failed/log/query-count"
+if WALLPAPER_TEST_LOG="$failed/log/events" \
+    WALLPAPER_TEST_STATE="$failed/state" \
+    WALLPAPER_DELAY_MODE=1 \
+    WALLPAPER_DELAY_NEVER_READY=1 \
+    WALLPAPER_QUERY_COUNT_FILE="$failed/log/query-count" \
+    AWWW_BIN="$failed/bin/awww" \
+    AWWW_DAEMON_BIN="$failed/bin/awww-daemon" \
+    WAYPAPER_BIN="$failed/bin/waypaper" \
+    FEDORA_WALLPAPER_STATE_DIR="$failed/log" \
+    FEDORA_WALLPAPER_LOG="$failed/log/session.log" \
+    FEDORA_WALLPAPER_LOCK="$failed/log/session.lock" \
+    FEDORA_WALLPAPER_QUERY_TIMEOUT=1 \
+    FEDORA_WALLPAPER_READY_TIMEOUT=1 \
+    FEDORA_WALLPAPER_IMAGE_TIMEOUT=1 \
+    FEDORA_WALLPAPER_MAX_RETRIES=2 \
+    HOME="$failed/home" \
+    "$SESSION_SCRIPT"; then
+    fail 'unready stale daemon must produce a failure status'
+fi
+[ "$(grep -Fxc 'daemon:--no-cache' "$failed/log/events")" -eq 2 ] ||
+    fail 'unready stale daemon must honor the bounded retry budget'
 
 # QuickShell's first query is a quiet no-op while a daemon is unavailable, but
 # forwards the normal query output once the namespace becomes ready.

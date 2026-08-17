@@ -480,11 +480,54 @@ configure_desktop_theme() {
 }
 
 deploy_wallpapers_and_templates() {
-    local checkout=$1 temporary
+    local checkout=$1 temporary source_file relative destination
 
     if [ -d "$checkout/wallpapers" ]; then
+        [ ! -L "$checkout/wallpapers" ] || {
+            error 'Refusing a symlinked wallpaper source tree.'
+            return 1
+        }
+        niri_path_is_safe_no_symlink "$NIRI_WALLPAPER_DIR" || {
+            error "Refusing unsafe wallpaper destination ($NIRI_PATH_SAFETY_REASON)."
+            return 1
+        }
+        # Validate every managed destination before any mkdir/install/chown;
+        # this prevents a user-created nested symlink from redirecting a
+        # deployment into an external directory.
+        while IFS= read -r -d '' source_file; do
+            [ ! -L "$source_file" ] || {
+                error 'Refusing a symlink in the verified wallpaper source.'
+                return 1
+            }
+            relative=${source_file#"$checkout/wallpapers"/}
+            destination="$NIRI_WALLPAPER_DIR/$relative"
+            niri_path_is_safe_no_symlink "$destination" || {
+                error "Refusing unsafe wallpaper destination ($NIRI_PATH_SAFETY_REASON)."
+                return 1
+            }
+        done < <(find "$checkout/wallpapers" -mindepth 1 -print0)
+        niri_safe_install_directory "$TARGET_USER" \
+            "$(id -gn "$TARGET_USER")" "$NIRI_WALLPAPER_DIR" || return 1
         deploy_user_tree_without_quickshell "$checkout/wallpapers" \
             "$NIRI_WALLPAPER_DIR" "$TARGET_USER" || return 1
+        # Existing user wallpaper files are not recursively claimed.  Files
+        # present in the verified installer source, however, are managed
+        # deployment outputs and must remain usable by the target user even
+        # after repairing a root-owned directory from an older run.
+        while IFS= read -r -d '' source_file; do
+            relative=${source_file#"$checkout/wallpapers"/}
+            destination="$NIRI_WALLPAPER_DIR/$relative"
+            [ -f "$destination" ] && [ ! -L "$destination" ] || continue
+            niri_path_is_safe_no_symlink "$destination" || return 1
+            chown "$TARGET_USER:$(id -gn "$TARGET_USER")" "$destination" || return 1
+        done < <(find "$checkout/wallpapers" -type f -print0)
+    else
+        niri_path_is_safe_no_symlink "$NIRI_WALLPAPER_DIR" || {
+            error "Refusing unsafe wallpaper destination ($NIRI_PATH_SAFETY_REASON)."
+            return 1
+        }
+        niri_safe_install_directory "$TARGET_USER" \
+            "$(id -gn "$TARGET_USER")" "$NIRI_WALLPAPER_DIR" || return 1
     fi
     install -d -o "$TARGET_USER" -g "$(id -gn "$TARGET_USER")" \
         "$NIRI_TEMPLATES_DIR" || return 1

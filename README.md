@@ -8,6 +8,10 @@ AppImage，以及固定校验和的上游源码构建，不会调用 AUR、`yay`
 `common-applist.txt` 是跨发行版的逻辑清单，Fedora 映射在 `scripts/lib/platform.sh`
 与 `scripts/lib/fedora.sh` 中维护，不会修改该文件。
 Fedora 的 `awww` 源码输入固定为上游 `v0.12.1` 对应的 Codeberg immutable commit，下载后先校验 SHA-256，再以目标用户构建。
+Fedora 的 Niri 会话必须通过已启用且正在运行的正式 display manager（Plasmalogin、SDDM
+或 GDM）进入，并提供 `/usr/share/wayland-sessions/niri.desktop`，其中唯一的会话命令为
+`Exec=niri-session`；Fedora 不创建 tty1 自动登录或 TTY 回退。Arch 保留 tty1 的托管
+`~/.bash_profile` 会话入口。
 
 执行模型如下：
 
@@ -227,7 +231,7 @@ bash install.sh verify --user shorin grub
 | --- | --- | --- | --- |
 | `storage` | 必需 | 无 | Btrfs、Snapper 与安装安全检查点 |
 | `base` | 必需 | 无 | 软件源、基础包、用户、locale、音频、输入法、电源和 GPU |
-| `desktop-niri` | 必需 | `storage base` | Niri 桌面、QuickShell、portal、TTY1 会话和用户配置 |
+| `desktop-niri` | 必需 | `storage base` | Niri 桌面、QuickShell、portal、正式显示管理器会话（Arch 保留 tty1）和用户配置 |
 | `applications` | 可选 | `base` | Repo、AUR、Flatpak、GitHub 应用及应用配置 |
 | `virtualization` | 可选 | `base` | QEMU/KVM、libvirt、用户组和默认网络 |
 | `nas-rime` | 可选 | `base` | NFS、Rime 同步和用户定时器 |
@@ -252,7 +256,11 @@ Arch 仍使用 `power-profiles-daemon` 原始包和服务。
 
 桌面修复还会收敛以下持久状态：Niri 的 `PATH` 包含目标用户 `~/.local/bin`；`Mod+Alt+V` 调用 `niri-clip toggle`；`Mod+ALT+C` 调用 `focus-shift`；Fish 直接且幂等地加入 `~/.cargo/bin` 与 `~/.local/bin`，不依赖安装器生成的 `env.fish`；`~/.config/starship.toml` 从已验证、目标用户所有的 dotfiles checkout 部署，且 Matugen 不再生成或覆盖该文件，旧 `starship-colors.toml` 模板会被清理；配置仓库声明的默认壁纸存在；Niri、QuickShell 和 Waypaper 在 Arch 与 Fedora 上统一使用上游 `awww` 后端。Fedora 不把 `awww` 冒充成 DNF 包，而是从固定版本的官方 Codeberg 源码归档校验后以目标用户构建 `awww` 与 `awww-daemon`；缺少任一命令都会保持为 DRIFT/失败，不会误报收敛。旧配置中的 `swww` 命令只作为迁移输入改写为 `awww`。Niri 配置修改后必须通过 `niri validate`，失败时会恢复原 `config.kdl` 和 `binds.kdl`。
 
-TTY1 会话由 `~/.bash_profile` 中的托管块启动 `niri-session -l`。`-l` 声明当前已处于登录 Shell；不带它时 `niri-session` 会重新拉起登录 Shell 导入环境，若登录 Shell 是 bash 会再次读取 `.bash_profile` 形成启动循环。旧版 `niri-autostart.service` 及 wants 链接会被清理；存在用户 bus 时同步执行 `daemon-reload` 和失败状态清理，避免后台重复启动一个没有 TTY 的 Niri 会话。Fedora 应从 Plasmalogin 的 Niri 会话入口启动，或在 tty1 执行 `niri-session -l`；不要直接从 tty2 裸执行 `niri`，安装器也不会在配置中强行启动 `graphical-session.target`。
+Arch 的 tty1 会话由 `~/.bash_profile` 中的托管块启动 `niri-session -l`。`-l` 声明当前已处于登录 Shell；不带它时 `niri-session` 会重新拉起登录 Shell 导入环境，若登录 Shell 是 bash 会再次读取 `.bash_profile` 形成启动循环。旧版 `niri-autostart.service` 及 wants 链接会被清理；存在用户 bus 时同步执行 `daemon-reload` 和失败状态清理，避免后台重复启动一个没有 TTY 的 Niri 会话。
+
+Fedora 只接受正式图形登录：display-manager service 必须 enabled 且 active，Wayland 会话文件必须存在并且只声明 `Exec=niri-session`。修复不会创建或保留 Shorin 托管的 tty1 autologin，也不会把 `graphical-session.target` 当作会话入口；缺少正式 display manager 或会话文件时保持 DRIFT/失败，不静默回退到 TTY。不要从 tty2 裸执行 `niri`。
+
+Fedora 的壁纸会话由 Niri 启动一次 `fedora-wallpaper-session.sh`，使用 awww 的 default/overview namespace、受锁保护的状态目录和有限重试；优先复用 Waypaper 的随机选择并显式应用已选图片，Waypaper 不可用时从其配置读取可用图片。awww 未就绪、图片不可用或命令合同不满足都会记录到目标用户状态日志并保持失败，不会把短暂启动成功误报为壁纸已收敛。
 
 Fedora 的 Niri 配置收敛保留现有用户文件，不会用上游树盲目覆盖 `config.kdl` 或 `binds.kdl`。事务内会备份并迁移旧的 `~/.config/quickshell/scripts/lockscreen-wait.sh` 到 `lockscreen.sh`，并替换 polkit-gnome 路径；来源 checkout 必须提供普通、可执行的 `dotfiles/.config/quickshell/scripts/lockscreen.sh`，目标文件必须归目标用户所有。缺少来源的 `fd-rdd`、`vicinae`、`waypaper`、`niriswitcher`、`niriswitcherctl`、`waybar` 和 `hyprpicker` 只改为 `command -v` shell guard，后续安装对应程序后即可自动启用，当前不会伪造命令或宣称功能已安装。迁移后的配置必须通过 `niri validate`，失败会恢复原文件。
 

@@ -21,6 +21,15 @@ niri_session_step() {
 niri_apply_dotfiles_and_session() {
     local user=$1 dotfiles_script=$2 status
 
+    if niri_session_step 'Shorin state ownership' \
+        ensure_niri_shorin_state_ownership "$user"; then
+        :
+    else
+        status=$?
+        [ "$status" -ne 0 ] || status=1
+        error "Shorin state ownership repair failed (status $status)."
+        return "$status"
+    fi
     if bash "$dotfiles_script"; then
         log 'Dotfiles apply completed; continuing with session configuration.'
     else
@@ -99,6 +108,8 @@ ensure_niri_managed_config_files() {
         done
         rm -f "$config_backup" "$binds_backup"
         rm -f "${quickshell_backups[@]}"
+        ensure_niri_shorin_state_ownership "$user" ||
+            error 'Unable to restore Shorin state ownership after session rollback.'
         return "$status"
     fi
     rm -f "$config_backup" "$binds_backup"
@@ -135,6 +146,8 @@ ensure_niri_session_config() {
     if ! niri_session_step 'managed Niri config files' \
         ensure_niri_managed_config_files "$user"; then
         niri_desktop_txn_finish 1
+        ensure_niri_shorin_state_ownership "$user" ||
+            error 'Unable to restore Shorin state ownership after session rollback.'
         return 1
     fi
     if ! niri_session_step 'Waypaper backend' ensure_niri_waypaper_backend \
@@ -146,6 +159,8 @@ ensure_niri_session_config() {
             "$user"; then
         error 'Niri session post-processing failed; restoring the session transaction.'
         niri_desktop_txn_finish 1
+        ensure_niri_shorin_state_ownership "$user" ||
+            error 'Unable to restore Shorin state ownership after session rollback.'
         return 1
     fi
     niri_desktop_txn_finish 0

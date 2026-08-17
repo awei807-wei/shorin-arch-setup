@@ -52,7 +52,23 @@ fi
 # DM Check
 SKIP_AUTOLOGIN=false
 DM_FOUND=""
-if DM_FOUND=$(niri_detect_display_manager); then
+APPLY_STATUS=0
+if platform_is_fedora; then
+  # Fedora is a graphical-login-only platform for this module.  Never prompt
+  # for, create, or preserve a tty fallback; the formal display-manager and
+  # Wayland-session contracts below report missing/broken providers clearly.
+  SKIP_AUTOLOGIN=true
+  if DM_FOUND=$(niri_fedora_display_manager_provider); then
+    info_kv "Display manager" "$DM_FOUND"
+    if ! niri_fedora_display_manager_package_satisfied "$DM_FOUND"; then
+      warn "Fedora display-manager provider '$DM_FOUND' has no matching installed package."
+      APPLY_STATUS=1
+    fi
+  else
+    warn "Fedora display-manager contract is missing or inactive; no TTY fallback will be created."
+    APPLY_STATUS=1
+  fi
+elif DM_FOUND=$(niri_detect_display_manager); then
   info_kv "Conflict" "${H_RED}$DM_FOUND${NC}"
   SKIP_AUTOLOGIN=true
 else
@@ -73,8 +89,15 @@ fi
 section "Step 1/9" "Core Components"
 # Package failures must not block the user-data restoration below; the module
 # still exits non-zero at the end so the runner records the failure.
-APPLY_STATUS=0
 bash "$SCRIPT_DIR/modules/desktop-niri/packages-apply.sh" || APPLY_STATUS=$?
+if platform_is_fedora && ! niri_fedora_wayland_session_entry_satisfied; then
+  warn "Fedora Niri Wayland session desktop entry is missing or does not use Exec=niri-session."
+  APPLY_STATUS=1
+fi
+if platform_is_fedora && ! niri_fedora_kwin_wayland_runtime_satisfied; then
+  warn "Fedora kwin_wayland runtime ABI check failed (${NIRI_FEDORA_KWIN_RUNTIME_REASON:-unknown}); desktop session remains failed."
+  APPLY_STATUS=1
+fi
 
 log "Configuring Firefox Policies..."
 POL_DIR=$(dirname "$NIRI_FIREFOX_POLICY_FILE")

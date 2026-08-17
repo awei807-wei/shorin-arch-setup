@@ -84,6 +84,10 @@ desktop_niri_inspect() {
         niri_portal_config_matches
     desktop_niri_expect "$phase" link:gtk4-theme niri_gtk_links_match
     desktop_niri_expect "$phase" file:wallpapers niri_wallpapers_deployed
+    desktop_niri_expect "$phase" access:wallpaper-directory \
+        niri_wallpaper_directory_satisfied "$TARGET_USER"
+    desktop_niri_expect "$phase" access:shorin-state \
+        niri_shorin_state_ownership_satisfied "$TARGET_USER"
     desktop_niri_expect "$phase" file:starship-config \
         niri_starship_config_deployed
     desktop_niri_expect "$phase" config:quickshell-tree \
@@ -103,6 +107,19 @@ desktop_niri_inspect() {
         niri_session_files_accessible "$TARGET_USER"
     desktop_niri_expect "$phase" config:niri-session-entry \
         niri_session_entry_satisfied
+    if platform_is_fedora; then
+        desktop_niri_expect "$phase" config:fedora-display-manager \
+            niri_fedora_display_manager_satisfied
+        desktop_niri_expect "$phase" config:fedora-wayland-session \
+            niri_fedora_wayland_session_entry_satisfied
+        if niri_fedora_kwin_wayland_runtime_satisfied; then
+            :
+        elif [ "$phase" = check ]; then
+            module_drift "runtime:fedora-kwin-wayland-abi:${NIRI_FEDORA_KWIN_RUNTIME_REASON:-unknown}"
+        else
+            module_verify_failed "runtime:fedora-kwin-wayland-abi:${NIRI_FEDORA_KWIN_RUNTIME_REASON:-unknown}"
+        fi
+    fi
     desktop_niri_expect "$phase" config:fedora-session-compatibility \
         niri_fedora_session_compatibility_satisfied
     desktop_niri_expect "$phase" config:fedora-wallpaper-session \
@@ -145,12 +162,22 @@ desktop_niri_inspect() {
         niri_fish_sources_satisfied
     desktop_niri_expect "$phase" config:fish-config \
         niri_fish_config_satisfied
-    desktop_niri_expect "$phase" config:tty1-niri-session \
-        niri_bash_profile_satisfied
+    if platform_is_fedora; then
+        desktop_niri_expect "$phase" config:fedora-profile-clean \
+            niri_fedora_bash_profile_managed_block_satisfied
+    else
+        desktop_niri_expect "$phase" config:tty1-niri-session \
+            niri_bash_profile_satisfied
+    fi
     desktop_niri_expect "$phase" legacy:niri-autostart-absent \
         niri_legacy_autostart_absent
-    desktop_niri_expect "$phase" config:tty1-autologin \
-        niri_autologin_state_satisfied
+    if platform_is_fedora; then
+        desktop_niri_expect "$phase" config:fedora-no-tty-autologin \
+            niri_autologin_state_satisfied
+    else
+        desktop_niri_expect "$phase" config:tty1-autologin \
+            niri_autologin_state_satisfied
+    fi
 }
 
 desktop_niri_check() { desktop_niri_inspect check; }

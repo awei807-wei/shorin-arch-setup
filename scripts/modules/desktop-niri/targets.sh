@@ -13,8 +13,11 @@ source "$SHORIN_ROOT/scripts/modules/desktop-niri/wallpaper-contract.sh"
 source "$SHORIN_ROOT/scripts/modules/desktop-niri/quickshell-deploy.sh"
 source "$SHORIN_ROOT/scripts/modules/desktop-niri/awww.sh"
 source "$SHORIN_ROOT/scripts/modules/desktop-niri/session-files.sh"
+source "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-profile-contract.sh"
 source "$SHORIN_ROOT/scripts/modules/desktop-niri/session-apply.sh"
 source "$SHORIN_ROOT/scripts/modules/desktop-niri/desktop-contract.sh"
+source "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-session-contract.sh"
+source "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-runtime-contract.sh"
 
 # Required desktop targets are independent of the user's optional package
 # selection. Keep their source prefix so check, apply, and verify agree.
@@ -58,6 +61,7 @@ if platform_is_fedora; then
         file-roller gnome-keyring
         gst-plugins-base gst-plugins-good gst-libav nautilus quickshell
         qt6-wayland qt6-multimedia bluez-utils matugen awww swayidle swaylock
+        kscreenlocker kwin
     )
 fi
 
