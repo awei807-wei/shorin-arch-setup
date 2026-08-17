@@ -294,6 +294,8 @@ fedora_install_application_target() {
                 ;;
             copr) fedora_install_lact "$user" "$home" ;;
             release) fedora_install_yazi "$user" "$home" ;;
+            target-user) fedora_install_starship "$user" "$home" ;;
+            font) fedora_install_font_provider_target "$package" "$user" "$home" ;;
             *)
                 error "Unsupported Fedora provider for application target: $package"
                 return 1

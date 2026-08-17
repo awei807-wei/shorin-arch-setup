@@ -206,7 +206,7 @@ fedora_package_name() {
         imv|jq|kitty|less|libnotify|lsof|mako|mangohud|mpv|nautilus|\
         neovim|obs-studio|pavucontrol|\
         pciutils|pipewire|pipewire-alsa|\
-        polkit-kde|power-profiles-daemon|tuned-ppd|quickshell|ripgrep|slurp|starship|\
+        polkit-kde|power-profiles-daemon|tuned-ppd|quickshell|ripgrep|slurp|\
         swayidle|swaylock|swayosd|usbutils|virt-manager|\
         wf-recorder|wine|wireplumber|xdg-desktop-portal-gnome|\
         xdg-desktop-portal-gtk|xwayland-satellite|zoxide|btop|baobab|\
@@ -225,8 +225,8 @@ fedora_package_name() {
         cairo-gobject-devel|gdk-pixbuf2-devel|graphene-devel|\
         gtk4-layer-shell-devel|sqlite-devel|wayland-devel|\
         wayland-protocols-devel|pkgconf-pkg-config|wtype|\
-        lz4-devel|curl|unzip|\
-        xdg-user-dirs|xfsprogs|udftools|breeze-gtk|jetbrains-mono-fonts|\
+        lz4-devel|curl|unzip|xz|tar|\
+        xdg-user-dirs|xfsprogs|udftools|breeze-gtk|jetbrains-mono-fonts|fontconfig|\
         glibc-langpack-zh|nfs-utils|tsukimi|\
         qt5ct|qt6ct|qt6-qtbase|qt6-qtdeclarative|\
         wl-clipboard|cliphist|satty|swayosd)
@@ -261,8 +261,6 @@ fedora_package_name() {
         lib32-openal) printf '%s\n' openal-soft.i686 ;;
         lib32-*) return 1 ;;
         libva-nvidia-driver) printf '%s\n' xorg-x11-drv-nvidia-cuda ;;
-        ttf-jetbrains-mono-nerd|ttf-jetbrains-maple-mono-nf-xx-xx)
-            printf '%s\n' jetbrains-mono-fonts ;;
         xdg-user-dirs) printf '%s\n' xdg-user-dirs ;;
         qemu-full) printf '%s\n' qemu-kvm ;;
         *) return 1 ;;

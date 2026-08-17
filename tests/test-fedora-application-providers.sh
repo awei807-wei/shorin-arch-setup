@@ -211,6 +211,10 @@ for lazyvim_package in "${LAZYVIM_PACKAGES[@]}"; do
     INSTALLED_PACKAGES["$lazyvim_package"]=1
 done
 INSTALLED_PACKAGES[fd]=0
+# LazyVim's Nerd Font is now a target-user exact-family provider rather than
+# the ordinary Fedora jetbrains-mono-fonts package.  Keep this application
+# fixture focused on its fd-find contract and stub the independent provider.
+fedora_font_target_satisfied() { return 0; }
 lazyvim_config_satisfied() { return 0; }
 lazyvim_target_satisfied ||
     fail 'Fedora LazyVim contract must route fd through fd-find and /usr/bin/fd'

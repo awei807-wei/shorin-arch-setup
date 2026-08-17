@@ -36,6 +36,26 @@ HOME_DIR=$(getent passwd "$TARGET_USER" | cut -d: -f6)
 desktop_niri_contract_init
 info_kv "Target" "$TARGET_USER"
 
+# Fedora's Starship and icon/font assets are target-user providers rather than
+# DNF package aliases.  Resolve them before changing desktop configuration so
+# a network, checksum, archive or fontconfig failure leaves the existing
+# desktop tree untouched.
+if platform_is_fedora; then
+  section "Step 0/9" "Fedora Starship and Exact Fonts"
+  fedora_provider_architecture_satisfied || {
+    error "Fedora target-user providers support x86_64 only; refusing system changes."
+    exit 1
+  }
+  ensure_packages curl unzip xz tar util-linux fontconfig || {
+    error "Fedora provider prerequisites did not converge; refusing desktop mutations."
+    exit 1
+  }
+  fedora_install_desktop_providers "$TARGET_USER" "$HOME_DIR" || {
+    error "Fedora target-user providers did not converge; refusing desktop mutations."
+    exit 1
+  }
+fi
+
 # DM Check
 SKIP_AUTOLOGIN=false
 DM_FOUND=""

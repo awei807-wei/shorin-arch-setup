@@ -4,8 +4,8 @@ set -Eeuo pipefail
 trap 'printf "ERROR: %s:%s: %s\n" \
   "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
-# Fedora provider contracts. These functions are sourced by fedora.sh after
-# the shared artifact helpers have been defined.
+# Fedora provider contracts. Target-user implementations are sourced by
+# fedora.sh from the focused Starship/font provider libraries below it.
 
 # Application targets whose Fedora source is not the Arch package-manager
 # namespace. Keep this contract in one place: applications check, apply and
@@ -18,12 +18,61 @@ FEDORA_YAZI_VERSION=${FEDORA_YAZI_VERSION:-26.8.15}
 FEDORA_YAZI_X86_64_SHA256=${FEDORA_YAZI_X86_64_SHA256:-cc67eb7991550c2f9407cda52d3f5af0937627aa6884e7de99a04fcf059807e0}
 FEDORA_YAZI_AARCH64_SHA256=${FEDORA_YAZI_AARCH64_SHA256:-f5a85771f06bb0e8c488136ae0aedaec8d341a7cee995549df391d7d852fe8d1}
 
+# Fedora deliberately keeps the ordinary JetBrains Mono, Source Han and Noto
+# families in DNF.  The desktop assets below are different contracts:
+# Starship is a target-user command, while Nerd Fonts, Maple Mono and Material
+# Design Icons are target-user font assets.  Do not add these to the generic
+# Fedora package-name mapper: a package with a similar name is not an exact
+# family/provider match.
+#
+# These values are deliberately assigned, rather than initialized from the
+# environment; ordinary environment variables cannot change a production
+# download.
+FEDORA_STARSHIP_VERSION_PINNED=1.26.0
+FEDORA_STARSHIP_URL_PINNED=https://github.com/starship/starship/releases/download/v1.26.0/starship-x86_64-unknown-linux-musl.tar.gz
+FEDORA_STARSHIP_SHA256_PINNED=b7c232b0e8249d8e55a40beb79c5c43a7d370f3f9408bd215deb0170daeaadf3
+FEDORA_JETBRAINSMONO_NERD_VERSION_PINNED=3.5.0
+FEDORA_JETBRAINSMONO_NERD_URL_PINNED=https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.0/JetBrainsMono.tar.xz
+FEDORA_JETBRAINSMONO_NERD_SHA256_PINNED=0227b220360a6f819b9ead92343e8112b34733054782561af50cfba1e8afab63
+FEDORA_MATERIAL_DESIGN_ICONS_VERSION_PINNED=7.4.47
+FEDORA_MATERIAL_DESIGN_ICONS_URL_PINNED=https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/57b567a448bd579892174cd47c47f9e187ea56c6/fonts/materialdesignicons-webfont.ttf
+FEDORA_MATERIAL_DESIGN_ICONS_SHA256_PINNED=61e8aba5a4e981fe22cf7c8e8bcdbea00476e75c62c37f01bf7ee33361d68428
+FEDORA_JETBRAINS_MAPLE_VERSION_PINNED=1.2304.79
+FEDORA_JETBRAINS_MAPLE_URL_PINNED=https://github.com/SpaceTimee/Fusion-JetBrainsMapleMono/releases/download/1.2304.79/JetBrainsMapleMono-NF-XX-XX-XX.zip
+FEDORA_JETBRAINS_MAPLE_SHA256_PINNED=50b36f9efaa3fd76de6636db6e632e537f4c5c3bdff6c783d6937493f8b4ae6e
+FEDORA_SHORIN_FONT_DIR_NAME_PINNED=shorin
+FEDORA_NERD_FONT_FAMILY_PINNED='JetBrainsMono Nerd Font'
+FEDORA_MAPLE_FONT_FAMILY_PINNED='JetBrains Maple Mono'
+FEDORA_MDI_FONT_FAMILY_PINNED='Material Design Icons'
+FEDORA_MDI_GLYPHS_PINNED='f0493 f033e f0425'
+
+FEDORA_STARSHIP_VERSION=$FEDORA_STARSHIP_VERSION_PINNED
+FEDORA_STARSHIP_URL=$FEDORA_STARSHIP_URL_PINNED
+FEDORA_STARSHIP_SHA256=$FEDORA_STARSHIP_SHA256_PINNED
+FEDORA_JETBRAINSMONO_NERD_VERSION=$FEDORA_JETBRAINSMONO_NERD_VERSION_PINNED
+FEDORA_JETBRAINSMONO_NERD_URL=$FEDORA_JETBRAINSMONO_NERD_URL_PINNED
+FEDORA_JETBRAINSMONO_NERD_SHA256=$FEDORA_JETBRAINSMONO_NERD_SHA256_PINNED
+FEDORA_MATERIAL_DESIGN_ICONS_VERSION=$FEDORA_MATERIAL_DESIGN_ICONS_VERSION_PINNED
+FEDORA_MATERIAL_DESIGN_ICONS_URL=$FEDORA_MATERIAL_DESIGN_ICONS_URL_PINNED
+FEDORA_MATERIAL_DESIGN_ICONS_SHA256=$FEDORA_MATERIAL_DESIGN_ICONS_SHA256_PINNED
+FEDORA_JETBRAINS_MAPLE_VERSION=$FEDORA_JETBRAINS_MAPLE_VERSION_PINNED
+FEDORA_JETBRAINS_MAPLE_URL=$FEDORA_JETBRAINS_MAPLE_URL_PINNED
+FEDORA_JETBRAINS_MAPLE_SHA256=$FEDORA_JETBRAINS_MAPLE_SHA256_PINNED
+FEDORA_SHORIN_FONT_DIR_NAME=$FEDORA_SHORIN_FONT_DIR_NAME_PINNED
+FEDORA_NERD_FONT_FAMILY=$FEDORA_NERD_FONT_FAMILY_PINNED
+FEDORA_MAPLE_FONT_FAMILY=$FEDORA_MAPLE_FONT_FAMILY_PINNED
+FEDORA_MDI_FONT_FAMILY=$FEDORA_MDI_FONT_FAMILY_PINNED
+FEDORA_MDI_GLYPHS=$FEDORA_MDI_GLYPHS_PINNED
+
 fedora_application_provider_kind() {
     case "$1" in
         code|curtail|mission-center|steam) printf '%s\n' flatpak ;;
         fd) printf '%s\n' package ;;
         lact) printf '%s\n' copr ;;
         yazi) printf '%s\n' release ;;
+        starship) printf '%s\n' target-user ;;
+        ttf-jetbrains-mono-nerd|ttf-jetbrains-maple-mono-nf-xx-xx|material-design-icons)
+            printf '%s\n' font ;;
         *) return 1 ;;
     esac
 }
@@ -37,6 +86,10 @@ fedora_application_provider_id() {
         fd) printf '%s\n' fd-find ;;
         lact) printf '%s\n' lact ;;
         yazi) printf '%s\n' "yazi-v$FEDORA_YAZI_VERSION" ;;
+        starship) printf '%s\n' "starship-v$FEDORA_STARSHIP_VERSION" ;;
+        ttf-jetbrains-mono-nerd) printf '%s\n' "$FEDORA_NERD_FONT_FAMILY" ;;
+        ttf-jetbrains-maple-mono-nf-xx-xx) printf '%s\n' "$FEDORA_MAPLE_FONT_FAMILY" ;;
+        material-design-icons) printf '%s\n' "$FEDORA_MDI_FONT_FAMILY" ;;
         *) return 1 ;;
     esac
 }
@@ -50,6 +103,10 @@ fedora_application_provider_description() {
         fd) printf '%s\n' 'Fedora package fd-find (/usr/bin/fd)' ;;
         lact) printf '%s\n' "COPR $FEDORA_LACT_COPR, package lact, service $FEDORA_LACT_SERVICE" ;;
         yazi) printf '%s\n' "GitHub release v$FEDORA_YAZI_VERSION (verified GNU ZIP, yazi + ya)" ;;
+        starship) printf '%s\n' "GitHub release v$FEDORA_STARSHIP_VERSION (verified musl x86_64, target-user ~/.local/bin/starship)" ;;
+        ttf-jetbrains-mono-nerd) printf '%s\n' "Nerd Fonts JetBrainsMono v$FEDORA_JETBRAINSMONO_NERD_VERSION (target-user exact family $FEDORA_NERD_FONT_FAMILY)" ;;
+        ttf-jetbrains-maple-mono-nf-xx-xx) printf '%s\n' "Fusion JetBrainsMapleMono v$FEDORA_JETBRAINS_MAPLE_VERSION (target-user exact family $FEDORA_MAPLE_FONT_FAMILY)" ;;
+        material-design-icons) printf '%s\n' "Material Design Icons v$FEDORA_MATERIAL_DESIGN_ICONS_VERSION (target-user exact family $FEDORA_MDI_FONT_FAMILY)" ;;
         *) return 1 ;;
     esac
 }
@@ -306,6 +363,8 @@ fedora_application_target_provider_satisfied() {
         package) fedora_fd_target_satisfied ;;
         copr) fedora_lact_target_satisfied ;;
         release) fedora_yazi_target_satisfied "$user" "$home" ;;
+        target-user) fedora_starship_target_satisfied "$user" "$home" ;;
+        font) fedora_font_target_satisfied "$package" "$user" "$home" ;;
         *) return 1 ;;
     esac
 }

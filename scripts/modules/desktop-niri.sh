@@ -20,7 +20,7 @@ desktop_niri_expect() {
 }
 
 desktop_niri_inspect() {
-    local phase=$1 entry source_file niri_package_status=0
+    local phase=$1 entry source_file niri_package_status=0 kitty_status=0
     local manifest=${SHORIN_PROFILE_DIR:-/etc/shorin-arch-setup}/niri-packages.list
 
     if [ -f "$manifest" ] && [ -r "$manifest" ]; then
@@ -45,6 +45,35 @@ desktop_niri_inspect() {
         return
     fi
     desktop_niri_contract_init
+    if platform_is_fedora; then
+        # Fedora's exact target-user providers are separate from DNF package
+        # targets.  Keep each contract visible in MODULE_REASON so a missing
+        # command/family/glyph reports actionable drift instead of a generic
+        # package failure.
+        desktop_niri_expect "$phase" provider:architecture \
+            fedora_provider_architecture_satisfied
+        desktop_niri_expect "$phase" provider:prerequisites \
+            fedora_target_user_provider_prerequisites_satisfied \
+            "$TARGET_USER" "$HOME_DIR"
+        desktop_niri_expect "$phase" provider:starship \
+            fedora_starship_target_satisfied "$TARGET_USER" "$HOME_DIR"
+        desktop_niri_expect "$phase" provider:font:jetbrains-nerd \
+            fedora_font_target_satisfied ttf-jetbrains-mono-nerd \
+            "$TARGET_USER" "$HOME_DIR"
+        if fedora_kitty_maple_font_required "$HOME_DIR"; then
+            desktop_niri_expect "$phase" provider:font:jetbrains-maple \
+                fedora_font_target_satisfied ttf-jetbrains-maple-mono-nf-xx-xx \
+                "$TARGET_USER" "$HOME_DIR"
+        else
+            kitty_status=$?
+            if [ "$kitty_status" -ne 1 ]; then
+                desktop_niri_expect "$phase" provider:kitty-config false
+            fi
+        fi
+        desktop_niri_expect "$phase" provider:font:material-design-icons \
+            fedora_font_target_satisfied material-design-icons \
+            "$TARGET_USER" "$HOME_DIR"
+    fi
     desktop_niri_expect "$phase" file:firefox-policy \
         niri_firefox_policy_matches
     desktop_niri_expect "$phase" file:nautilus-user-override \

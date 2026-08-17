@@ -348,10 +348,18 @@ fi
 if printf '%s\n' "${TARGETS[@]}" | grep -Fxq swww; then
     fail 'Fedora desktop target contract must not migrate awww to legacy swww'
 fi
-for target in wlogout ddcutil jetbrains-mono-fonts swaylock; do
+for target in wlogout ddcutil ttf-jetbrains-maple-mono-nf-xx-xx swaylock; do
     printf '%s\n' "${TARGETS[@]}" | grep -Fqx "$target" ||
         fail "Fedora desktop target translation is missing $target"
 done
+for target in ttf-jetbrains-mono-nerd ttf-jetbrains-maple-mono-nf-xx-xx; do
+    if fedora_arch_target_name "$target" >/dev/null 2>&1; then
+        fail "Fedora exact font target must not map to ordinary jetbrains-mono-fonts: $target"
+    fi
+done
+if fedora_arch_target_name starship >/dev/null 2>&1; then
+    fail 'Fedora Starship target must use the target-user provider, not DNF'
+fi
 for mapping in \
     'breeze=plasma-breeze' \
     'breeze5=kf5-qqc2-breeze-style' \
@@ -376,7 +384,7 @@ for target in python-pywalfox niriswitcher ttf-lxgw-wenkai-screen; do
         fail "unsupported Fedora optional target must be skipped: $target"
     fi
 done
-for target in bluetui hyprpicker nwg-look satty starship swayosd; do
+for target in bluetui hyprpicker nwg-look satty swayosd; do
     if printf '%s\n' "${TARGETS[@]}" | grep -Fqx "$target"; then
         fail "unavailable Fedora optional target must be skipped: $target"
     fi

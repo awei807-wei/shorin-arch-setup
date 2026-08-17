@@ -46,10 +46,11 @@ base_declared_packages() {
             alsa-firmware alsa-ucm-conf base-devel fastfetch \
             glibc-langpack-zh fcitx5 fcitx5-chinese-addons \
             fcitx5-configtool fcitx5-gtk fcitx5-mozc fcitx5-qt fcitx5-rime \
-            flatpak libva-utils noto-fonts noto-fonts-cjk noto-fonts-emoji \
+            flatpak fontconfig jetbrains-mono-fonts libva-utils noto-fonts \
+            noto-fonts-cjk noto-fonts-emoji \
             pavucontrol pciutils pipewire pipewire-alsa pipewire-jack \
             pipewire-pulse sof-firmware terminus-fonts-console \
-            ttf-jetbrains-mono-nerd usbutils vim wireplumber xdg-user-dirs
+            usbutils vim wireplumber xdg-user-dirs
         return 0
     fi
 

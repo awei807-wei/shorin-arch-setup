@@ -86,7 +86,7 @@ niri_fedora_optional_target_is_skipped() {
         # the shared check/apply/verify stream instead of handing a known
         # missing name to dnf and turning an optional feature into a module
         # failure.
-        bluetui|hyprpicker|nwg-look|satty|starship|swayosd)
+        bluetui|hyprpicker|nwg-look|satty|swayosd)
             return 0
             ;;
         *) return 1 ;;
@@ -131,7 +131,14 @@ niri_package_target_canonical() {
             if platform_is_fedora; then printf '%s\n' swaylock; else printf '%s\n' "$1"; fi
             ;;
         AUR:ttf-jetbrains-maple-mono-nf-xx-xx)
-            if platform_is_fedora; then printf '%s\n' jetbrains-mono-fonts; else printf '%s\n' "$1"; fi
+            # Fedora does not have a trustworthy package equivalent.  Convert
+            # the legacy AUR label to an explicit provider target; Arch
+            # retains the pacman/AUR path unchanged.
+            if platform_is_fedora; then
+                printf '%s\n' ttf-jetbrains-maple-mono-nf-xx-xx
+            else
+                printf '%s\n' "$1"
+            fi
             ;;
         AUR:clipse|AUR:clipse-gui|AUR:python-pywalfox|AUR:waypaper|\
         AUR:niriswitcher|AUR:nautilus-open-any-terminal|\
@@ -209,6 +216,21 @@ niri_package_target_satisfied() {
     local target=$1
 
     case "$target" in
+        starship)
+            if platform_is_fedora; then
+                fedora_starship_target_satisfied \
+                    "${TARGET_USER:-}" "${HOME_DIR:-}"
+            else
+                state_package_present "$target"
+            fi
+            ;;
+        ttf-jetbrains-maple-mono-nf-xx-xx)
+            if platform_is_fedora; then
+                fedora_font_target_satisfied "$target" "$TARGET_USER" "$HOME_DIR"
+            else
+                state_package_present "$target"
+            fi
+            ;;
         awww)
             if platform_is_fedora; then
                 fedora_awww_satisfied "${TARGET_USER:-}" "${HOME_DIR:-}"
@@ -216,7 +238,15 @@ niri_package_target_satisfied() {
                 state_package_present "$target"
             fi
             ;;
-        AUR:*) declared_package_target_satisfied "$target" ;;
+        AUR:*)
+            if platform_is_fedora &&
+                fedora_application_provider_target "${target#AUR:}"; then
+                fedora_application_target_satisfied "${target#AUR:}" \
+                    "${TARGET_USER:-}" "${HOME_DIR:-}"
+            else
+                declared_package_target_satisfied "$target"
+            fi
+            ;;
         flatpak:*) state_flatpak_present "${target#flatpak:}" ;;
         GitHub:*) return 1 ;;
         imagemagick) state_package_present imagemagick ;;
@@ -231,6 +261,21 @@ ensure_niri_package_target() {
     for attempt in 1 2 3; do
         [ "$attempt" -eq 1 ] || sleep 3
         case "$target" in
+            starship)
+                if platform_is_fedora; then
+                    fedora_install_starship "$TARGET_USER" "$HOME_DIR"
+                else
+                    ensure_package "$target"
+                fi
+                ;;
+            ttf-jetbrains-maple-mono-nf-xx-xx)
+                if platform_is_fedora; then
+                    fedora_install_font_provider_target "$target" \
+                        "$TARGET_USER" "$HOME_DIR"
+                else
+                    ensure_package "$target"
+                fi
+                ;;
             awww)
                 if platform_is_fedora; then
                     fedora_install_awww "${TARGET_USER:-}" "${HOME_DIR:-}"

@@ -62,6 +62,31 @@ XDG Downloads，包括中文 `下载`、以及 `/tmp`）发现官方 RPM；`tsuk
 路径，不会把“依赖已安装”冒充为主程序已安装；这类目标会记录为 `pending/skip`，写入
 `~/Documents/安装待处理的软件.txt`，且不会阻断其他独立可选模块。
 
+Fedora 的 Starship 和桌面精确字体不走 DNF 的近似包映射，而由 target-user provider
+幂等安装到目标用户目录。provider 只接受下表固定上游资产，下载到临时目录后先做
+SHA-256 校验和安全解压，只复制白名单文件；安装完成后使用 `fc-match`、`fc-query`
+和 `fc-scan` 验收精确 family，Material Design Icons 还必须包含 U+F0493、U+F033E
+和 U+F0425。已有可运行的 Starship 或已匹配的精确字体会被保留，不会覆盖用户自装
+内容；下载、校验、解压或 fontconfig 失败会 fail-closed，并回滚本次新文件。
+该 Fedora provider 当前仅支持 x86_64；其他架构会在下载前明确报告不支持并保持已有资产不变。
+
+| 目标 | 固定来源/版本 | 许可证 | 安装位置 |
+| --- | --- | --- | --- |
+| Starship | [`starship-x86_64-unknown-linux-musl.tar.gz`](https://github.com/starship/starship/releases/download/v1.26.0/starship-x86_64-unknown-linux-musl.tar.gz)，v1.26.0，SHA-256 `b7c232b0e8249d8e55a40beb79c5c43a7d370f3f9408bd215deb0170daeaadf3` | ISC | `~/.local/bin/starship` |
+| JetBrainsMono Nerd Font | [`JetBrainsMono.tar.xz`](https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.0/JetBrainsMono.tar.xz)，v3.5.0，SHA-256 `0227b220360a6f819b9ead92343e8112b34733054782561af50cfba1e8afab63`，family `JetBrainsMono Nerd Font` | OFL | `~/.local/share/fonts/shorin/` |
+| Material Design Icons | [fixed commit font](https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/57b567a448bd579892174cd47c47f9e187ea56c6/fonts/materialdesignicons-webfont.ttf)，v7.4.47，SHA-256 `61e8aba5a4e981fe22cf7c8e8bcdbea00476e75c62c37f01bf7ee33361d68428`，family `Material Design Icons` | Apache-2.0 | `~/.local/share/fonts/shorin/` |
+| Fusion JetBrainsMapleMono | [`JetBrainsMapleMono-NF-XX-XX-XX.zip`](https://github.com/SpaceTimee/Fusion-JetBrainsMapleMono/releases/download/1.2304.79/JetBrainsMapleMono-NF-XX-XX-XX.zip)，v1.2304.79，SHA-256 `50b36f9efaa3fd76de6636db6e632e537f4c5c3bdff6c783d6937493f8b4ae6e`，family `JetBrains Maple Mono` | OFL/随包 LICENSE | `~/.local/share/fonts/shorin/` |
+
+Fusion JetBrainsMapleMono 是第三方融合上游的社区归档，不是 JetBrains 官方发布；固定 ZIP
+约 152.3 MB（约 145 MiB），只有活动 Kitty 配置明确包含 `font_family JetBrains Maple Mono` 时才会下载、
+校验和安装。没有该配置引用时不会下载或验收 Maple，避免为未使用的字体引入体积和来源。
+
+普通 `jetbrains-mono-fonts`、Source Han 和 Noto Emoji 仍由 Fedora 包管理；
+`ttf-jetbrains-mono-nerd` 与 `ttf-jetbrains-maple-mono-nf-xx-xx` 不再伪映射为普通
+JetBrains Mono。Arch 继续使用原有 pacman/AUR 目标。Kitty、QuickShell 和 Fish 的
+配置只在对应命令/字体合同通过后报告收敛，Starship provider 不修改
+`~/.config/starship.toml`。
+
 Vicinae 的自动收敛路径是目标用户 `~/.local/bin/vicinae.AppImage` 加托管的
 `~/.local/share/applications/vicinae.desktop`，并要求 Gear Lever Flatpak 已安装；
 只有这三个状态同时满足时才报告已集成。也可以通过 `FEDORA_VICINAE_APPIMAGE`
@@ -253,7 +278,12 @@ scripts/
     state.sh                     # 只读状态谓词
     packages.sh                  # pacman、AUR 与系统级 Flatpak
     platform.sh                  # Arch/Fedora 检测与 Fedora 包名翻译
-    fedora.sh                    # Fedora Flatpak、COPR、RPM/AppImage 目标
+    fedora.sh                    # Fedora Flatpak、COPR、RPM/AppImage/provider 目标
+    fedora-providers.sh          # Fedora provider 合同与目标路由
+    fedora-starship-provider.sh  # Starship target-user provider
+    fedora-font-provider.sh      # 精确字体 family/glyph 合同
+    fedora-font-installer.sh     # 固定字体资产下载、解压与回滚
+    fedora-provider-transaction.sh # Starship 与字体跨 provider 事务
     files.sh                     # 原子写入、模板和结构化文件原语
     git.sh                       # 降权、固定版本的 Git checkout
     snapshots.sh                 # 成对快照查找与回滚标识
@@ -310,7 +340,7 @@ tests/                           # 原语、runner、入口及真实模块合同
 在 Fedora 目标上，无前缀条目会经过显式 Fedora 包名白名单翻译；`AUR:` 条目不会
 进入 `dnf` 的原始 Arch 包名路径，而是交给 Fedora 映射器处理。`desktop-niri` 中
 没有可靠 Fedora 来源且不属于会话核心的 `bluetui`、`hyprpicker`、`nwg-look`、
-`satty`、`starship` 和 `swayosd` 会记录明确的 optional/skip 原因，既不会交给
+`satty` 和 `swayosd` 会记录明确的 optional/skip 原因，既不会交给
 `dnf`，也不会进入 required 验收；`swayosd` 的缺失启动项会同步清理。其余未登记
 可靠来源的目标会给出人工交接提示，不会静默宣称已安装。
 

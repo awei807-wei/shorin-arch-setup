@@ -163,4 +163,8 @@ EOF
 # Provider and application target implementations are kept separate from
 # shared Fedora artifact helpers to keep each library focused and auditable.
 source "$SHORIN_LIB_DIR/fedora-providers.sh"
+source "$SHORIN_LIB_DIR/fedora-starship-provider.sh"
+source "$SHORIN_LIB_DIR/fedora-font-provider.sh"
+source "$SHORIN_LIB_DIR/fedora-font-installer.sh"
+source "$SHORIN_LIB_DIR/fedora-provider-transaction.sh"
 source "$SHORIN_LIB_DIR/fedora-applications.sh"
