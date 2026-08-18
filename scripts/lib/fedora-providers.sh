@@ -339,6 +339,20 @@ fedora_yazi_version_output_satisfied() {
     grep -Eq "^[[:blank:]]*Version:[[:blank:]]+${expected_pattern}[[:blank:]]+\\(" <<< "$output"
 }
 
+_fedora_yazi_run_as_target_user() {
+    local user=$1 home=$2 binary=$3 target_uid current_uid
+
+    target_uid=$(id -u "$user" 2>/dev/null) || return 2
+    current_uid=$(id -u 2>/dev/null) || return 2
+    if [ "$current_uid" -eq "$target_uid" ]; then
+        env HOME="$home" PATH="$home/.local/bin:${PATH:-}" \
+            "$binary" --version
+    else
+        runuser -u "$user" -- env HOME="$home" \
+            PATH="$home/.local/bin:${PATH:-}" "$binary" --version
+    fi
+}
+
 fedora_yazi_target_satisfied() {
     local user=$1 home=$2 binary output status=0 group owner
 
@@ -350,8 +364,7 @@ fedora_yazi_target_satisfied() {
         [ -x "$binary" ] || return 1
         owner=$(stat -c '%U:%G' "$binary" 2>/dev/null) || return 2
         [ "$owner" = "$user:$group" ] || return 1
-        output=$(runuser -u "$user" -- env HOME="$home" \
-            PATH="$home/.local/bin:${PATH:-}" "$binary" --version 2>&1) || {
+        output=$(_fedora_yazi_run_as_target_user "$user" "$home" "$binary" 2>&1) || {
             status=$?
             [ "$status" -gt 1 ] || status=2
             return "$status"

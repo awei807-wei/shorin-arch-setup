@@ -240,7 +240,9 @@ second_copr_count=$(grep -c '^dnf:copr enable -y ilyaz/LACT$' "$PROVIDER_CALLS" 
 [ "$first_copr_count" -eq "$second_copr_count" ] ||
     fail 'LACT provider must not re-enable an already enabled COPR'
 
+RUNUSER_CALLS=0
 runuser() {
+    RUNUSER_CALLS=$((RUNUSER_CALLS + 1))
     [ "${1:-}" = -u ] && shift 2
     [ "${1:-}" = -- ] && shift
     "$@"
@@ -336,6 +338,19 @@ for binary in yazi ya; do
     "$HOME_DIR/.local/bin/$binary" --version | grep -Fq 26.8.15 ||
         fail "Yazi $binary version verification failed"
 done
+RUNUSER_CALLS=0
+fedora_yazi_target_satisfied "$TARGET_USER" "$HOME_DIR" ||
+    fail 'Yazi same-user verification fixture must converge without runuser'
+[ "$RUNUSER_CALLS" -eq 0 ] ||
+    fail 'Yazi same-user verification must not invoke runuser'
+OTHER_USER=$(awk -F: -v current_uid="$(id -u)" '$3 != current_uid { print $1; exit }' /etc/passwd)
+[ -n "$OTHER_USER" ] || fail 'Yazi test requires a distinct local user fixture'
+RUNUSER_CALLS=0
+_fedora_yazi_run_as_target_user "$OTHER_USER" "$HOME_DIR" \
+    "$HOME_DIR/.local/bin/yazi" >/dev/null ||
+    fail 'Yazi different-user verification fixture must use runuser successfully'
+[ "$RUNUSER_CALLS" -eq 1 ] ||
+    fail 'Yazi different-user verification must invoke runuser'
 cat > "$HOME_DIR/.local/bin/yazi" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' 'Yazi'
