@@ -154,12 +154,7 @@ fedora_application_target_pending() {
             return 0
             ;;
         wechat-appimage)
-            if ! fedora_installer_sha256_valid FEDORA_WECHAT_SHA256; then
-                FEDORA_APPLICATION_PENDING_REASON='official-rpm-sha256-required:label=WeChat Linux:env=FEDORA_WECHAT_SHA256:sidecar=ignored'
-                return 0
-            fi
-            fedora_rpm_file 'WeChatLinux*.rpm' >/dev/null && return 1
-            FEDORA_APPLICATION_PENDING_REASON='official-rpm-missing:pattern=WeChatLinux*.rpm:search=FEDORA_RPM_DIR,SHORIN_ARTIFACT_DIR,target-Downloads,target-下载,/tmp'
+            FEDORA_APPLICATION_PENDING_REASON="official-download-at-apply:x86_64:v$FEDORA_WECHAT_VERSION:$FEDORA_WECHAT_ASSET"
             return 0
             ;;
         lsfg-vk-bin)
@@ -168,12 +163,7 @@ fedora_application_target_pending() {
             return 0
             ;;
         thorium-browser-bin)
-            if ! fedora_installer_sha256_valid FEDORA_THORIUM_SHA256; then
-                FEDORA_APPLICATION_PENDING_REASON='official-rpm-sha256-required:label=Thorium Browser:env=FEDORA_THORIUM_SHA256:sidecar=ignored'
-                return 0
-            fi
-            fedora_rpm_file 'thorium-browser*.rpm' >/dev/null && return 1
-            FEDORA_APPLICATION_PENDING_REASON='official-rpm-missing:pattern=thorium-browser*.rpm:search=FEDORA_RPM_DIR,SHORIN_ARTIFACT_DIR,target-Downloads,target-下载,/tmp'
+            FEDORA_APPLICATION_PENDING_REASON="official-download-at-apply:x86_64:v$FEDORA_THORIUM_VERSION:$FEDORA_THORIUM_ASSET"
             return 0
             ;;
         mark-shot)

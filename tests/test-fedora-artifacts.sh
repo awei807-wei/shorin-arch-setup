@@ -117,6 +117,26 @@ rm -f "$RPM_DIR/lsfg-vk-1.0.x86_64.rpm"
 
 fedora_rpm_or_command() { return 1; }
 status=0
+fedora_application_target_pending wechat-appimage "$HOME_DIR" || status=$?
+[ "$status" -eq 0 ] ||
+    fail 'WeChat must enter apply as a fixed official download, even without SHA env'
+[ "$FEDORA_APPLICATION_PENDING_REASON" = \
+    "official-download-at-apply:x86_64:v$FEDORA_WECHAT_VERSION:$FEDORA_WECHAT_ASSET" ] ||
+    fail 'WeChat pending reason must describe its fixed apply-time download'
+status=0
+fedora_application_target_pending thorium-browser-bin "$HOME_DIR" || status=$?
+[ "$status" -eq 0 ] ||
+    fail 'Thorium must enter apply as a fixed official download, even without SHA env'
+[ "$FEDORA_APPLICATION_PENDING_REASON" = \
+    "official-download-at-apply:x86_64:v$FEDORA_THORIUM_VERSION:$FEDORA_THORIUM_ASSET" ] ||
+    fail 'Thorium pending reason must describe its fixed apply-time download'
+status=0
+fedora_application_target_pending typora-free "$HOME_DIR" || status=$?
+[ "$status" -eq 0 ] || fail 'Typora must remain a pending target'
+[ "$FEDORA_APPLICATION_PENDING_REASON" = \
+    'no-declared-official-fedora-source:manual-target-required' ] ||
+    fail 'Typora pending reason must remain unchanged'
+status=0
 fedora_install_application_target wechat-appimage "$TARGET_USER" "$HOME_DIR" ||
     status=$?
 [ "$status" -eq "$RC_SKIPPED" ] ||
