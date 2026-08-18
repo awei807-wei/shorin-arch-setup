@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 trap 'printf "ERROR: %s:%s: %s\n" \
-  "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
+  "${BASH_SOURCE[0]:-unknown}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 # LSFG-VK is an implicit Vulkan layer.  Fedora's graphical session keeps it
 # disabled by default because unrelated desktop programs can load it and
@@ -97,7 +97,7 @@ niri_fedora_lsfg_user_manager_satisfied() {
     niri_user_bus_is_available "$user" || return 0
     uid=$(id -u "$user") || return 2
     runtime="${SHORIN_USER_RUNTIME_ROOT:-/run/user}/$uid"
-    output=$(runuser -u "$user" -- env XDG_RUNTIME_DIR="$runtime" \
+    output=$(niri_run_as_user "$user" env XDG_RUNTIME_DIR="$runtime" \
         DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
         systemctl --user show-environment 2>/dev/null) || return 2
     grep -Fxq 'DISABLE_LSFG=1' <<< "$output"
@@ -207,7 +207,7 @@ niri_fedora_lsfg_refresh_user_manager() {
     niri_user_bus_is_available "$user" || return 0
     uid=$(id -u "$user") || return 2
     runtime="${SHORIN_USER_RUNTIME_ROOT:-/run/user}/$uid"
-    runuser -u "$user" -- env XDG_RUNTIME_DIR="$runtime" \
+    niri_run_as_user "$user" env XDG_RUNTIME_DIR="$runtime" \
         DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
         systemctl --user set-environment DISABLE_LSFG=1
 }

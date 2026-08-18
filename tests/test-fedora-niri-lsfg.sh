@@ -40,12 +40,13 @@ EOF
 printf '%s\n' 'binds {}' > "$NIRI_BINDS_FILE"
 
 # Keep the fixture independent of a live graphical session while still
-# exercising the user-manager contract and refresh command.
+# exercising the user-manager contract and refresh command.  This test runs
+# as the target user; direct runuser calls are invalid for non-root users, so
+# reject them and require the shared same-user niri_run_as_user path.
 niri_user_bus_is_available() { return 0; }
 runuser() {
-    [ "$1" = -u ] && [ "$3" = -- ] || return 2
-    shift 3
-    "$@"
+    printf 'unexpected direct runuser invocation\n' >&2
+    return 99
 }
 cat > "$TEST_DIR/bin/systemctl" <<'EOF'
 #!/usr/bin/env bash
