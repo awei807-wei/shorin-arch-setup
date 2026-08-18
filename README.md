@@ -56,12 +56,16 @@ aarch64: `f5a85771f06bb0e8c488136ae0aedaec8d341a7cee995549df391d7d852fe8d1`）�
 使用 `alsa-plugins-pulseaudio`、`gstreamer1-plugins-base`、`openal-soft` 与
 `openal-soft.i686`，分别覆盖 Fedora 的 64 位和 32 位 Wine 游戏运行时。
 Fedora Wine 使用 `wine`、`wine-mono`、`mingw32-wine-gecko` 和 `mingw64-wine-gecko`，不请求已不存在的 `wine-gecko`。
-Clash Verge Rev、Linux QQ、LSFG-VK 和 Mark Shot 在 Fedora x86_64 上优先从固定版本的官方
-HTTPS release 下载，并在安装前校验内置 SHA-256；Linux QQ 额外校验固定文件大小和 RPM
-架构/名称，缓存使用原子替换。微信、Thorium 默认保持 pending：只有 installer/root
-显式提供 `FEDORA_WECHAT_SHA256` 或 `FEDORA_THORIUM_SHA256` 时，才会从
-`FEDORA_RPM_DIR`、`SHORIN_ARTIFACT_DIR`、目标用户 Downloads/`下载` 与 `/tmp` 搜索并严格校验 RPM；同目录
-sidecar 不会被信任。无预期 SHA 会立即报告明确 pending 原因。`tsukimi-bin` 使用统一的
+Clash Verge Rev、Linux QQ、LSFG-VK、Mark Shot、微信和 Thorium 在 Fedora x86_64 上从脚本内
+固定的官方 HTTPS 来源下载，并在安装前校验内置 SHA-256、固定文件大小（微信
+`321286358` 字节，Thorium `228988770` 字节）和 RPM 架构/名称，缓存使用原子替换；不接受
+`FEDORA_WECHAT_SHA256`、`FEDORA_THORIUM_SHA256` 等环境变量覆盖固定校验和。微信固定为
+版本 `4.1.1.8` 的 [`WeChatLinux_x86_64.rpm`](https://dldir1v6.qq.com/weixin/Universal/Linux/WeChatLinux_x86_64.rpm)，
+SHA-256 `4aec761edac4604b0b301f9ac0385b8a9c46452e8a5783485eb3905ecdd22e8c`；Thorium 固定为
+tag `M151.0.7922.72` 的 SSE3 [`thorium-browser_151.0.7922.72_SSE3.rpm`](https://github.com/gz83/thorium/releases/download/M151.0.7922.72/thorium-browser_151.0.7922.72_SSE3.rpm)，
+SHA-256 `6cd793ac245ff7f0e7b76a1dc9b2c694d996b3eefb4a9ee40e39dc5e0ae11f45`。微信 URL 是
+上游可变对象；若官方内容漂移，安装会 fail-closed，必须先更新脚本中的 URL/大小/SHA pin，
+不能自动更新 hash。`tsukimi-bin` 使用统一的
 `walker874/tsukimi` COPR；Vicinae 固定 v0.26.0 官方 AppImage（SHA-256 校验），以目标
 用户尝试交给 Gear Lever，CLI 不可用时保留项目托管 AppImage 与 desktop entry fallback；
 `lsfg-vk-bin` 先收敛 `qt6-qtdeclarative` 和 `qt6-qtbase`。

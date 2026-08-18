@@ -115,21 +115,23 @@ if fedora_application_target_pending lsfg-vk-bin "$HOME_DIR"; then
 fi
 rm -f "$RPM_DIR/lsfg-vk-1.0.x86_64.rpm"
 
-unset FEDORA_WECHAT_SHA256 FEDORA_THORIUM_SHA256
+fedora_rpm_or_command() { return 1; }
 status=0
 fedora_install_application_target wechat-appimage "$TARGET_USER" "$HOME_DIR" ||
     status=$?
 [ "$status" -eq "$RC_SKIPPED" ] ||
-    fail 'WeChat without installer SHA must remain pending'
-[[ "$FEDORA_APPLICATION_PENDING_REASON" == *'FEDORA_WECHAT_SHA256'* ]] ||
-    fail 'WeChat pending reason must require the explicit SHA interface'
+    fail 'WeChat download failure must remain pending'
+[ "$FEDORA_APPLICATION_PENDING_REASON" = \
+    "official-download-failed:asset=$FEDORA_WECHAT_ASSET:url=$FEDORA_WECHAT_URL" ] ||
+    fail 'WeChat pending reason must identify the fixed official URL and asset'
 status=0
 fedora_install_application_target thorium-browser-bin "$TARGET_USER" "$HOME_DIR" ||
     status=$?
 [ "$status" -eq "$RC_SKIPPED" ] ||
-    fail 'Thorium without installer SHA must remain pending'
-[[ "$FEDORA_APPLICATION_PENDING_REASON" == *'FEDORA_THORIUM_SHA256'* ]] ||
-    fail 'Thorium pending reason must require the explicit SHA interface'
+    fail 'Thorium download failure must remain pending'
+[ "$FEDORA_APPLICATION_PENDING_REASON" = \
+    "official-download-failed:asset=$FEDORA_THORIUM_ASSET:url=$FEDORA_THORIUM_URL" ] ||
+    fail 'Thorium pending reason must identify the fixed official URL and asset'
 
 gearlever_dir="$HOME_DIR/.local/share/applications"
 mkdir -p "$HOME_DIR/.local/bin" "$gearlever_dir"

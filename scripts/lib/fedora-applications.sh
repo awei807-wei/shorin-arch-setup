@@ -25,7 +25,6 @@ fedora_application_target_satisfied() {
         linuxqq-appimage)
             fedora_rpm_or_command '(^|[-_.])([Ll]inux)?[Qq][Qq]($|[-_.])' qq ;;
         wechat-appimage)
-            fedora_installer_sha256_valid FEDORA_WECHAT_SHA256 || return 1
             fedora_rpm_or_command '([Ww]e[Cc]hat|[Ww]x|[Cc]om\.[Tt]encent\.[Ww]e[Cc]hat)' wechat ;;
         lsfg-vk-bin)
             package_is_installed qt6-qtdeclarative &&
@@ -44,7 +43,6 @@ fedora_application_target_satisfied() {
         tsukimi-bin)
             fedora_copr_application_target_satisfied tsukimi-bin ;;
         thorium-browser-bin)
-            fedora_installer_sha256_valid FEDORA_THORIUM_SHA256 || return 1
             fedora_rpm_or_command '[Tt]horium([-_]?browser)?' thorium-browser ;;
         mark-shot)
             fedora_rpm_or_command '(^|[-.])mark[-_]?shot' mark-shot ;;
@@ -229,32 +227,6 @@ fedora_install_yazi() {
     return "$status"
 }
 
-fedora_install_verified_rpm_target() {
-    local package=$1 user=$2 home=$3 label=$4 pattern=$5 expected_var=$6
-    local identity_pattern=$7 expected file
-
-    expected=${!expected_var:-}
-    if [ -z "$expected" ]; then
-        FEDORA_APPLICATION_PENDING_REASON="official-rpm-sha256-required:label=$label:env=$expected_var:sidecar=ignored"
-        warn "Pending Fedora artifact: $label requires an installer-provided $expected_var; sidecar checksums are not trusted."
-        return "$RC_SKIPPED"
-    fi
-    [[ "$expected" =~ ^[[:xdigit:]]{64}$ ]] || {
-        error "Invalid installer-provided SHA-256 for $label: $expected_var"
-        return 1
-    }
-    file=$(fedora_rpm_file "$pattern" 2>/dev/null || true)
-    if [ -n "$file" ]; then
-        fedora_install_verified_official_rpm_file \
-            "$package" "$user" "$home" "$label" "$file" "$expected" \
-            "$identity_pattern"
-        return $?
-    fi
-    FEDORA_APPLICATION_PENDING_REASON="official-rpm-missing:label=$label:pattern=$pattern:search=FEDORA_RPM_DIR,SHORIN_ARTIFACT_DIR,target-Downloads,target-下载,/tmp"
-    warn "Pending Fedora artifact: $label RPM was not found (pattern: $pattern); no unverified local install is allowed."
-    return "$RC_SKIPPED"
-}
-
 fedora_install_clash_verge() {
     local package=$1 user=$2 home=$3
 
@@ -325,9 +297,11 @@ fedora_install_application_target() {
         linuxqq-appimage)
             fedora_install_official_linuxqq "$package" "$user" "$home" ;;
         wechat-appimage)
-            fedora_install_verified_rpm_target \
-                "$package" "$user" "$home" 'WeChat Linux' 'WeChatLinux*.rpm' \
-                FEDORA_WECHAT_SHA256 '([Ww]e[Cc]hat|[Ww]x|[Cc]om\.[Tt]encent\.[Ww]e[Cc]hat)' ;;
+            fedora_install_official_rpm_target \
+                "$package" "$user" "$home" 'WeChat Linux' \
+                'WeChatLinux*.rpm' "$FEDORA_WECHAT_URL" \
+                "$FEDORA_WECHAT_ASSET" "$FEDORA_WECHAT_SHA256" \
+                "$FEDORA_WECHAT_SIZE" pinned ;;
         lsfg-vk-bin)
             ensure_packages qt6-qtdeclarative qt6-qtbase
             fedora_install_official_rpm_target \
@@ -344,9 +318,11 @@ fedora_install_application_target() {
         tsukimi-bin)
             fedora_install_tsukimi ;;
         thorium-browser-bin)
-            fedora_install_verified_rpm_target \
-                "$package" "$user" "$home" 'Thorium Browser' 'thorium-browser*.rpm' \
-                FEDORA_THORIUM_SHA256 '[Tt]horium([-_]?browser)?' ;;
+            fedora_install_official_rpm_target \
+                "$package" "$user" "$home" 'Thorium Browser' \
+                'thorium-browser*.rpm' "$FEDORA_THORIUM_URL" \
+                "$FEDORA_THORIUM_ASSET" "$FEDORA_THORIUM_SHA256" \
+                "$FEDORA_THORIUM_SIZE" pinned ;;
         mark-shot)
             fedora_install_official_rpm_target \
                 "$package" "$user" "$home" 'Mark Shot' 'mark-shot*.rpm' \

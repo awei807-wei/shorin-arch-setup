@@ -152,6 +152,7 @@ ensure_flatpak() { printf 'flatpak:%s\n' "$1" >> "$CALLS"; }
 ensure_packages() { printf 'packages:%s\n' "$*" >> "$CALLS"; }
 ensure_package() { printf 'package:%s\n' "$1" >> "$CALLS"; }
 dnf() { printf 'dnf:%s\n' "$*" >> "$CALLS"; return 0; }
+curl() { return 1; }
 fedora_install_local_rpm() { printf 'rpm:%s:%s\n' "$1" "$2" >> "$CALLS"; return 0; }
 fedora_install_fd_rdd() { printf 'fd-rdd:%s\n' "$1" >> "$CALLS"; return 0; }
 fedora_install_vicinae() { printf 'vicinae:%s\n' "$1" >> "$CALLS"; return 0; }
@@ -168,8 +169,6 @@ fedora_application_target_satisfied() {
     esac
 }
 
-export FEDORA_WECHAT_SHA256=0000000000000000000000000000000000000000000000000000000000000000
-export FEDORA_THORIUM_SHA256=0000000000000000000000000000000000000000000000000000000000000000
 for target in heroic-games-launcher-bin upscaler mangojuice-bin; do
     fedora_install_application_target "$target" "$TARGET_USER" "$HOME_DIR"
 done
@@ -178,7 +177,10 @@ fedora_install_application_target linuxqq-appimage "$TARGET_USER" "$HOME_DIR"
 status=0
 fedora_install_application_target wechat-appimage "$TARGET_USER" "$HOME_DIR" || status=$?
 [ "$status" -eq "$RC_SKIPPED" ] ||
-    fail 'WeChat without a local RPM must remain pending even with an explicit SHA'
+    fail 'WeChat official download failure must remain pending'
+[ "$FEDORA_APPLICATION_PENDING_REASON" = \
+    "official-download-failed:asset=$FEDORA_WECHAT_ASSET:url=$FEDORA_WECHAT_URL" ] ||
+    fail 'WeChat pending reason must use the fixed official source'
 fedora_install_application_target lsfg-vk-bin "$TARGET_USER" "$HOME_DIR"
 fedora_install_application_target vicinae-bin "$TARGET_USER" "$HOME_DIR"
 fedora_install_application_target fd-rdd-git "$TARGET_USER" "$HOME_DIR"
@@ -186,7 +188,10 @@ fedora_install_application_target tsukimi-bin "$TARGET_USER" "$HOME_DIR"
 status=0
 fedora_install_application_target thorium-browser-bin "$TARGET_USER" "$HOME_DIR" || status=$?
 [ "$status" -eq "$RC_SKIPPED" ] ||
-    fail 'Thorium without a local RPM must remain pending even with an explicit SHA'
+    fail 'Thorium official download failure must remain pending'
+[ "$FEDORA_APPLICATION_PENDING_REASON" = \
+    "official-download-failed:asset=$FEDORA_THORIUM_ASSET:url=$FEDORA_THORIUM_URL" ] ||
+    fail 'Thorium pending reason must use the fixed official source'
 fedora_install_application_target mark-shot "$TARGET_USER" "$HOME_DIR"
 
 grep -Fqx 'flatpak:com.heroicgameslauncher.hgl' "$CALLS" ||

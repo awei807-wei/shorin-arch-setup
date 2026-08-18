@@ -49,9 +49,81 @@ source "$ROOT_DIR/scripts/lib/core.sh"
     fail 'Linux QQ official URL contract changed'
 [ "$FEDORA_LINUXQQ_SIZE" -eq 187341996 ] ||
     fail 'Linux QQ fixed size contract changed'
+[ "$FEDORA_WECHAT_VERSION" = 4.1.1.8 ] ||
+    fail 'WeChat fixed version contract changed'
+[ "$FEDORA_WECHAT_RPM_RELEASE" -eq 1 ] ||
+    fail 'WeChat RPM release contract changed'
+[ "$FEDORA_WECHAT_ASSET" = WeChatLinux_x86_64.rpm ] ||
+    fail 'WeChat official asset name contract changed'
+[ "$FEDORA_WECHAT_URL" = \
+    https://dldir1v6.qq.com/weixin/Universal/Linux/WeChatLinux_x86_64.rpm ] ||
+    fail 'WeChat official URL contract changed'
+[ "$FEDORA_WECHAT_SIZE" -eq 321286358 ] ||
+    fail 'WeChat fixed size contract changed'
+[ "$FEDORA_WECHAT_SHA256" = \
+    4aec761edac4604b0b301f9ac0385b8a9c46452e8a5783485eb3905ecdd22e8c ] ||
+    fail 'WeChat official checksum contract changed'
+[ "$FEDORA_THORIUM_TAG" = M151.0.7922.72 ] ||
+    fail 'Thorium fixed tag contract changed'
+[ "$FEDORA_THORIUM_VERSION" = 151.0.7922.72 ] ||
+    fail 'Thorium fixed version contract changed'
+[ "$FEDORA_THORIUM_ASSET" = thorium-browser_151.0.7922.72_SSE3.rpm ] ||
+    fail 'Thorium official asset name contract changed'
+[ "$FEDORA_THORIUM_URL" = \
+    https://github.com/gz83/thorium/releases/download/M151.0.7922.72/thorium-browser_151.0.7922.72_SSE3.rpm ] ||
+    fail 'Thorium official URL contract changed'
+[ "$FEDORA_THORIUM_SIZE" -eq 228988770 ] ||
+    fail 'Thorium fixed size contract changed'
+[ "$FEDORA_THORIUM_SHA256" = \
+    6cd793ac245ff7f0e7b76a1dc9b2c694d996b3eefb4a9ee40e39dc5e0ae11f45 ] ||
+    fail 'Thorium official checksum contract changed'
 [ "$FEDORA_FD_RDD_COMMIT" = \
     44b60573129c67f4471fa70f21b4a0b70bc1fec8 ] ||
     fail 'fd-rdd source commit contract changed'
+
+# Re-sourcing the artifact library must replace attacker-controlled inherited
+# values rather than preserving them as a production URL/checksum.
+FEDORA_WECHAT_URL=https://attacker.invalid/wechat.rpm
+FEDORA_WECHAT_SHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+FEDORA_THORIUM_URL=https://attacker.invalid/thorium.rpm
+FEDORA_THORIUM_SHA256=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+export FEDORA_WECHAT_URL FEDORA_WECHAT_SHA256 FEDORA_THORIUM_URL FEDORA_THORIUM_SHA256
+source "$ROOT_DIR/scripts/lib/fedora-official-artifacts.sh"
+[ "$FEDORA_WECHAT_URL" = \
+    https://dldir1v6.qq.com/weixin/Universal/Linux/WeChatLinux_x86_64.rpm ] ||
+    fail 'WeChat URL must not be environment-overridable'
+[ "$FEDORA_WECHAT_SHA256" = \
+    4aec761edac4604b0b301f9ac0385b8a9c46452e8a5783485eb3905ecdd22e8c ] ||
+    fail 'WeChat checksum must not be environment-overridable'
+[ "$FEDORA_THORIUM_URL" = \
+    https://github.com/gz83/thorium/releases/download/M151.0.7922.72/thorium-browser_151.0.7922.72_SSE3.rpm ] ||
+    fail 'Thorium URL must not be environment-overridable'
+[ "$FEDORA_THORIUM_SHA256" = \
+    6cd793ac245ff7f0e7b76a1dc9b2c694d996b3eefb4a9ee40e39dc5e0ae11f45 ] ||
+    fail 'Thorium checksum must not be environment-overridable'
+
+RPM_IDENTITY_METADATA='com.tencent.WeChat x86_64'
+rpm() {
+    [ "${1:-}" = -qp ] && [ "${2:-}" = --qf ] || return 1
+    printf '%s\n' "$RPM_IDENTITY_METADATA"
+}
+fedora_verify_official_rpm_identity \
+    "$TEST_DIR/wechat.rpm" 'WeChat Linux' '^com\.tencent\.WeChat$' ||
+    fail 'WeChat RPM identity must accept the exact official package name and x86_64'
+RPM_IDENTITY_METADATA='com.tencent.WeChat aarch64'
+if fedora_verify_official_rpm_identity \
+    "$TEST_DIR/wechat.rpm" 'WeChat Linux' '^com\.tencent\.WeChat$'; then
+    fail 'WeChat RPM identity must reject non-x86_64 artifacts'
+fi
+RPM_IDENTITY_METADATA='thorium-browser x86_64'
+fedora_verify_official_rpm_identity \
+    "$TEST_DIR/thorium.rpm" 'Thorium Browser' '^thorium-browser$' ||
+    fail 'Thorium RPM identity must accept the exact official package name and x86_64'
+RPM_IDENTITY_METADATA='malicious-browser x86_64'
+if fedora_verify_official_rpm_identity \
+    "$TEST_DIR/thorium.rpm" 'Thorium Browser' '^thorium-browser$'; then
+    fail 'Thorium RPM identity must reject an unexpected package name'
+fi
 
 BAD_PAYLOAD="$TEST_DIR/bad"
 printf 'unverified\n' > "$BAD_PAYLOAD"
@@ -70,6 +142,74 @@ fedora_download_verified_official_asset \
 [ "$status" -eq 1 ] || fail 'official checksum mismatch must fail closed'
 [ ! -e "$FEDORA_OFFICIAL_CACHE_DIR/fixed.rpm" ] ||
     fail 'checksum mismatch must not leave an official cache entry'
+
+# Pinned targets must use the fixed URL/asset/checksum/size tuple and install
+# only after the verified RPM identity branch succeeds.
+(
+    require_writable_mode() { return 0; }
+    fedora_download_verified_official_asset() {
+        [ "$1" = "$FEDORA_WECHAT_URL" ] || return 1
+        [ "$2" = "$FEDORA_WECHAT_ASSET" ] || return 1
+        [ "$3" = "$FEDORA_WECHAT_SHA256" ] || return 1
+        [ "$5" = "$FEDORA_WECHAT_SIZE" ] || return 1
+        FEDORA_OFFICIAL_DOWNLOAD_RESULT="$TEST_DIR/pinned-wechat.rpm"
+        : > "$FEDORA_OFFICIAL_DOWNLOAD_RESULT"
+    }
+    fedora_official_rpm_identity_for_target() {
+        [ "$1" = wechat-appimage ] && [ "$2" = "$TEST_DIR/pinned-wechat.rpm" ]
+    }
+    fedora_application_target_satisfied() { return 0; }
+    dnf() {
+        [ "${1:-}" = install ] || return 1
+        printf '%s\n' "${!#}" > "$TEST_DIR/pinned-dnf-result"
+    }
+    fedora_install_official_rpm_target \
+        wechat-appimage "$TARGET_USER" "$HOME_DIR" 'WeChat Linux' \
+        'WeChatLinux*.rpm' "$FEDORA_WECHAT_URL" "$FEDORA_WECHAT_ASSET" \
+        "$FEDORA_WECHAT_SHA256" "$FEDORA_WECHAT_SIZE" pinned
+    [ "$(< "$TEST_DIR/pinned-dnf-result")" = "$TEST_DIR/pinned-wechat.rpm" ]
+) || fail 'pinned WeChat RPM must download with fixed inputs and install after identity verification'
+
+# Network failure is a pending state, while a downloaded hash drift is a hard
+# failure and must not reach dnf or leave a corrupt cache entry.
+(
+    require_writable_mode() { return 0; }
+    FEDORA_OFFICIAL_CACHE_DIR="$TEST_DIR/network-cache"
+    fedora_rpm_file() { return 1; }
+    curl() { return 1; }
+    status=0
+    fedora_install_official_rpm_target \
+        thorium-browser-bin "$TARGET_USER" "$HOME_DIR" 'Thorium Browser' \
+        'thorium-browser*.rpm' "$FEDORA_THORIUM_URL" "$FEDORA_THORIUM_ASSET" \
+        "$FEDORA_THORIUM_SHA256" "$FEDORA_THORIUM_SIZE" pinned || status=$?
+    [ "$status" -eq "$RC_SKIPPED" ] || exit 1
+    [ "$FEDORA_APPLICATION_PENDING_REASON" = \
+        "official-download-failed:asset=$FEDORA_THORIUM_ASSET:url=$FEDORA_THORIUM_URL" ] || exit 1
+) || fail 'pinned Thorium network failure must remain pending'
+
+HASH_DRIFT_CACHE="$TEST_DIR/hash-drift-cache"
+HASH_DRIFT_CALLS="$TEST_DIR/hash-drift-dnf-calls"
+mkdir -p "$HASH_DRIFT_CACHE"
+(
+    require_writable_mode() { return 0; }
+    fedora_rpm_file() { return 1; }
+    curl() {
+        local output=''
+        while [ "$#" -gt 0 ]; do
+            if [ "$1" = -o ]; then output=$2; shift 2; else shift; fi
+        done
+        cp "$BAD_PAYLOAD" "$output"
+    }
+    dnf() { printf '%s\n' "$*" >> "$HASH_DRIFT_CALLS"; }
+    status=0
+    fedora_install_official_rpm_target \
+        wechat-appimage "$TARGET_USER" "$HOME_DIR" 'WeChat Linux' \
+        'WeChatLinux*.rpm' "$FEDORA_WECHAT_URL" "$FEDORA_WECHAT_ASSET" \
+        "$FEDORA_WECHAT_SHA256" "$FEDORA_WECHAT_SIZE" pinned || status=$?
+    [ "$status" -eq 1 ] || exit 1
+    [ ! -e "$HASH_DRIFT_CACHE/$FEDORA_WECHAT_ASSET" ] || exit 1
+    [ ! -s "$HASH_DRIFT_CALLS" ]
+) || fail 'pinned WeChat hash drift must fail closed without dnf or bad cache'
 
 # 直接由安装器调用下载器时必须保留待处理原因；命令替换会在子 shell 中丢失赋值。
 fedora_ensure_flatpak_target() { return 0; }

@@ -34,6 +34,20 @@ FEDORA_LINUXQQ_URL_PINNED=https://qqdl.gtimg.cn/qqfile/QQNT/9.9.33/release/3f89e
 FEDORA_LINUXQQ_SIZE_PINNED=187341996
 FEDORA_LINUXQQ_SHA256_PINNED=6ce82940f7f94d18d003ed93cb3ab7feaa44a160fbdc45f8f01b4cf08bf34ddf
 
+FEDORA_WECHAT_VERSION_PINNED=4.1.1.8
+FEDORA_WECHAT_RPM_RELEASE_PINNED=1
+FEDORA_WECHAT_ASSET_PINNED=WeChatLinux_x86_64.rpm
+FEDORA_WECHAT_URL_PINNED=https://dldir1v6.qq.com/weixin/Universal/Linux/WeChatLinux_x86_64.rpm
+FEDORA_WECHAT_SIZE_PINNED=321286358
+FEDORA_WECHAT_SHA256_PINNED=4aec761edac4604b0b301f9ac0385b8a9c46452e8a5783485eb3905ecdd22e8c
+
+FEDORA_THORIUM_TAG_PINNED=M151.0.7922.72
+FEDORA_THORIUM_VERSION_PINNED=151.0.7922.72
+FEDORA_THORIUM_ASSET_PINNED=thorium-browser_151.0.7922.72_SSE3.rpm
+FEDORA_THORIUM_URL_PINNED=https://github.com/gz83/thorium/releases/download/M151.0.7922.72/thorium-browser_151.0.7922.72_SSE3.rpm
+FEDORA_THORIUM_SIZE_PINNED=228988770
+FEDORA_THORIUM_SHA256_PINNED=6cd793ac245ff7f0e7b76a1dc9b2c694d996b3eefb4a9ee40e39dc5e0ae11f45
+
 FEDORA_VICINAE_VERSION=$FEDORA_VICINAE_VERSION_PINNED
 FEDORA_VICINAE_ASSET=$FEDORA_VICINAE_ASSET_PINNED
 FEDORA_VICINAE_URL=$FEDORA_VICINAE_URL_PINNED
@@ -56,6 +70,18 @@ FEDORA_LINUXQQ_ASSET=$FEDORA_LINUXQQ_ASSET_PINNED
 FEDORA_LINUXQQ_URL=$FEDORA_LINUXQQ_URL_PINNED
 FEDORA_LINUXQQ_SIZE=$FEDORA_LINUXQQ_SIZE_PINNED
 FEDORA_LINUXQQ_SHA256=$FEDORA_LINUXQQ_SHA256_PINNED
+FEDORA_WECHAT_VERSION=$FEDORA_WECHAT_VERSION_PINNED
+FEDORA_WECHAT_RPM_RELEASE=$FEDORA_WECHAT_RPM_RELEASE_PINNED
+FEDORA_WECHAT_ASSET=$FEDORA_WECHAT_ASSET_PINNED
+FEDORA_WECHAT_URL=$FEDORA_WECHAT_URL_PINNED
+FEDORA_WECHAT_SIZE=$FEDORA_WECHAT_SIZE_PINNED
+FEDORA_WECHAT_SHA256=$FEDORA_WECHAT_SHA256_PINNED
+FEDORA_THORIUM_TAG=$FEDORA_THORIUM_TAG_PINNED
+FEDORA_THORIUM_VERSION=$FEDORA_THORIUM_VERSION_PINNED
+FEDORA_THORIUM_ASSET=$FEDORA_THORIUM_ASSET_PINNED
+FEDORA_THORIUM_URL=$FEDORA_THORIUM_URL_PINNED
+FEDORA_THORIUM_SIZE=$FEDORA_THORIUM_SIZE_PINNED
+FEDORA_THORIUM_SHA256=$FEDORA_THORIUM_SHA256_PINNED
 
 # 安装器直接调用下载器，使当前 shell 设置的待处理原因得以保留。结果路径
 # 通过全局变量暴露，避免命令替换在子 shell 中执行函数并丢失
@@ -152,33 +178,40 @@ fedora_download_verified_official_asset() {
 
 fedora_install_official_rpm_target() {
     local package=$1 user=$2 home=$3 label=$4 pattern=$5 url=$6 asset=$7 expected=$8
+    local expected_size=${9:-} source_mode=${10:-handoff}
     local local_file='' status=0 cache_dir downloaded
 
     require_writable_mode || return
-    local_file=$(fedora_rpm_file "$pattern" 2>/dev/null || true)
-    if [ -n "$local_file" ]; then
-        fedora_install_verified_official_rpm_file \
-            "$package" "$user" "$home" "$label" "$local_file" "$expected"
-        return $?
-    fi
+    if [ "$source_mode" != pinned ]; then
+        local_file=$(fedora_rpm_file "$pattern" 2>/dev/null || true)
+        if [ -n "$local_file" ]; then
+            fedora_install_verified_official_rpm_file \
+                "$package" "$user" "$home" "$label" "$local_file" "$expected"
+            return $?
+        fi
 
-    # Preserve the existing local-artifact handoff contract.  This also lets
-    # downstream packagers provide a verified artifact helper without forcing
-    # a network request; the real helper returns RC_SKIPPED when none exists.
-    fedora_install_local_rpm "$label" "$pattern" || status=$?
-    if [ "$status" -eq 0 ]; then
-        fedora_application_target_satisfied "$package" "$user" "$home"
-        return
+        # Preserve the existing local-artifact handoff contract.  This also
+        # lets downstream packagers provide a verified artifact helper without
+        # forcing a network request; the real helper returns RC_SKIPPED when
+        # none exists.
+        fedora_install_local_rpm "$label" "$pattern" || status=$?
+        if [ "$status" -eq 0 ]; then
+            fedora_application_target_satisfied "$package" "$user" "$home"
+            return
+        fi
+        [ "$status" -eq "$RC_SKIPPED" ] || [ "$status" -eq 1 ] || return "$status"
     fi
-    [ "$status" -eq "$RC_SKIPPED" ] || [ "$status" -eq 1 ] || return "$status"
 
     fedora_official_x86_64_guard "$label" || return
     cache_dir=${FEDORA_OFFICIAL_CACHE_DIR:-$home/.cache/shorin-arch-setup/fedora-applications}
     FEDORA_OFFICIAL_DOWNLOAD_RESULT=''
     fedora_download_verified_official_asset \
-        "$url" "$asset" "$expected" "$cache_dir" >/dev/null || return
+        "$url" "$asset" "$expected" "$cache_dir" "$expected_size" >/dev/null || return
     downloaded=$FEDORA_OFFICIAL_DOWNLOAD_RESULT
-    fedora_official_rpm_identity_for_target "$package" "$downloaded" "$label" || return
+    if ! fedora_official_rpm_identity_for_target "$package" "$downloaded" "$label"; then
+        rm -f -- "$downloaded"
+        return 1
+    fi
     dnf install -y "$downloaded" || {
         error "Failed to install verified Fedora official RPM: $downloaded"
         return 1
@@ -212,6 +245,8 @@ fedora_official_rpm_identity_for_target() {
         clash-verge-rev) pattern='([Cc]lash|[Vv]erge)' ;;
         lsfg-vk-bin) pattern='lsfg[-_]?vk' ;;
         mark-shot) pattern='[Mm]ark[-_]?shot' ;;
+        wechat-appimage) pattern='^com\.tencent\.WeChat$' ;;
+        thorium-browser-bin) pattern='^thorium-browser$' ;;
         *) return 0 ;;
     esac
     fedora_verify_official_rpm_identity "$file" "$label" "$pattern"
