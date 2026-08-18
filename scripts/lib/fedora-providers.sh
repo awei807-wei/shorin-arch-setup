@@ -331,6 +331,14 @@ fedora_yazi_binary_path() {
     printf '%s\n' "${2:-${HOME_DIR:-}}/.local/bin/$1"
 }
 
+fedora_yazi_version_output_satisfied() {
+    local output=$1 expected=${FEDORA_YAZI_VERSION:-} expected_pattern
+
+    [[ "$expected" =~ ^[0-9]+([.][0-9]+){2}$ ]] || return 2
+    expected_pattern=${expected//./\\.}
+    grep -Eq "(^|[^[:digit:].])${expected_pattern}([^[:digit:].]|$)" <<< "$output"
+}
+
 fedora_yazi_target_satisfied() {
     local user=$1 home=$2 binary output status=0 group owner
 
@@ -343,12 +351,12 @@ fedora_yazi_target_satisfied() {
         owner=$(stat -c '%U:%G' "$binary" 2>/dev/null) || return 2
         [ "$owner" = "$user:$group" ] || return 1
         output=$(runuser -u "$user" -- env HOME="$home" \
-            PATH="$home/.local/bin:${PATH:-}" "$binary" --version 2>/dev/null) || {
+            PATH="$home/.local/bin:${PATH:-}" "$binary" --version 2>&1) || {
             status=$?
             [ "$status" -gt 1 ] || status=2
             return "$status"
         }
-        grep -Fq "$FEDORA_YAZI_VERSION" <<< "$output" || return 1
+        fedora_yazi_version_output_satisfied "$output" || return
     done
 }
 

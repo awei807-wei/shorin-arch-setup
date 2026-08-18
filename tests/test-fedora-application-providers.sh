@@ -249,13 +249,19 @@ YAZI_X86_ROOT="$TEST_DIR/yazi-x86_64-unknown-linux-gnu"
 YAZI_AARCH64_ROOT="$TEST_DIR/yazi-aarch64-unknown-linux-gnu"
 mkdir -p "$YAZI_X86_ROOT" "$YAZI_AARCH64_ROOT"
 for binary in yazi ya; do
+    case "$binary" in
+        yazi) title=Yazi ;;
+        ya) title=Ya ;;
+    esac
     cat > "$YAZI_X86_ROOT/$binary" <<EOF
 #!/usr/bin/env bash
-printf '$binary 26.8.15\\n'
+printf '%s\\n' '$title'
+printf '%s\\n' 'Version: 26.8.15 (fixture)'
 EOF
     cat > "$YAZI_AARCH64_ROOT/$binary" <<EOF
 #!/usr/bin/env bash
-printf '$binary 26.8.15\\n'
+printf '%s\\n' '$title'
+printf '%s\\n' 'Version: 26.8.15 (fixture)'
 EOF
     chmod 755 "$YAZI_X86_ROOT/$binary" "$YAZI_AARCH64_ROOT/$binary"
 done
@@ -304,6 +310,14 @@ curl() {
 [ "$(fedora_yazi_release_url)" = \
     'https://github.com/sxyazi/yazi/releases/download/v26.8.15/yazi-x86_64-unknown-linux-gnu.zip' ] ||
     fail 'Yazi x86_64 release URL must be pinned to the official GNU ZIP'
+fedora_yazi_version_output_satisfied $'Yazi\\nVersion: 26.8.15 (fixture)' ||
+    fail 'Yazi version parser must accept the real multi-line output'
+if fedora_yazi_version_output_satisfied $'Yazi\\nVersion: 26.8.16 (fixture)'; then
+    fail 'Yazi version parser must reject an unpinned version'
+fi
+if fedora_yazi_version_output_satisfied $'Yazi\\nVersion: 26.8.150 (fixture)'; then
+    fail 'Yazi version parser must reject a version that only contains the pin'
+fi
 fedora_application_target_satisfied yazi "$TARGET_USER" "$HOME_DIR" &&
     fail 'Yazi must be drift before release installation'
 fedora_install_application_target yazi "$TARGET_USER" "$HOME_DIR" ||
@@ -317,6 +331,21 @@ for binary in yazi ya; do
     "$HOME_DIR/.local/bin/$binary" --version | grep -Fq 26.8.15 ||
         fail "Yazi $binary version verification failed"
 done
+cat > "$HOME_DIR/.local/bin/yazi" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' 'Yazi'
+printf '%s\n' 'Version: 26.8.16 (fixture)'
+EOF
+chmod 755 "$HOME_DIR/.local/bin/yazi"
+if fedora_application_target_satisfied yazi "$TARGET_USER" "$HOME_DIR"; then
+    fail 'Yazi application verification must reject an unpinned binary version'
+fi
+cat > "$HOME_DIR/.local/bin/yazi" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' 'Yazi'
+printf '%s\n' 'Version: 26.8.15 (fixture)'
+EOF
+chmod 755 "$HOME_DIR/.local/bin/yazi"
 [ "$(grep -c '^package:curl$' "$PROVIDER_CALLS" || true)" -gt 0 ] ||
     fail 'Yazi release provider must converge curl through ensure_packages'
 [ "$(grep -c '^package:unzip$' "$PROVIDER_CALLS" || true)" -gt 0 ] ||
