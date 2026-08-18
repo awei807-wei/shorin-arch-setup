@@ -13,7 +13,7 @@ function is_cava_script() {
     # assignment.  Already guarded variants and other Cava versions are left
     # alone so repeated compatibility passes are byte-stable.
     if (!is_cava_script() ||
-        line !~ /^[[:space:]]*CAVA_CONFIG[[:space:]]*=[[:space:]]*\$\(mktemp[[:space:]]+\/tmp\/cava-qs-XXXXXX[.]conf\)[[:space:]]*$/) {
+        line !~ /^[[:space:]]*CAVA_CONFIG[[:space:]]*=[[:space:]]*\$\(mktemp[[:space:]]+\/tmp\/cava-qs-XXXXXX[.]conf\)[[:space:]]*(#.*)?$/) {
         print line
         next
     }

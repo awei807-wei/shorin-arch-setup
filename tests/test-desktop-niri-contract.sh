@@ -576,6 +576,7 @@ test_fedora_quickshell_cava_bridge_is_hardened_in_staging() (
     local cava_source="$fedora_checkout/dotfiles/.config/quickshell/scripts/cava.sh"
     local cava_live="$fedora_home/.config/quickshell/scripts/cava.sh"
     local before_source transformed
+    local awk_fixture_dir awk_fixture awk_transformed awk_idempotent
     local fake_bin="$TEST_DIR/cava-fake-bin"
     local fake_tmp="$TEST_DIR/cava-tmp"
     local stderr_file="$TEST_DIR/cava-stderr"
@@ -596,6 +597,30 @@ cava -p "$CAVA_CONFIG"
 EOF
     chmod 755 "$cava_source"
     before_source=$(sha256sum "$cava_source" | awk '{print $1}')
+
+    awk_fixture_dir="$TEST_DIR/cava-awk-fixture/scripts"
+    awk_fixture="$awk_fixture_dir/cava.sh"
+    awk_transformed="$TEST_DIR/cava-awk-transformed/scripts/cava.sh"
+    awk_idempotent="$TEST_DIR/cava-awk-idempotent/scripts/cava.sh"
+    mkdir -p "$awk_fixture_dir" "$(dirname "$awk_transformed")" \
+        "$(dirname "$awk_idempotent")"
+    cat > "$awk_fixture" <<'EOF'
+CAVA_CONFIG=$(mktemp /tmp/cava-qs-XXXXXX.conf)   # 临时 Cava 配置
+CAVA_CONFIG=$(mktemp /tmp/cava-qs-XXXXXX.conf)
+CAVA_CONFIG=$(mktemp /tmp/cava-qs-XXXXXX.conf.bak) # 相似路径不应转换
+EOF
+    awk -f "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-quickshell-cava-compatibility.awk" \
+        "$awk_fixture" > "$awk_transformed"
+    [ "$(grep -c '^if ! CAVA_CONFIG=' "$awk_transformed")" -eq 2 ] ||
+        fail 'Cava AWK must convert exact assignments with and without Chinese comments'
+    grep -Fqx \
+        'CAVA_CONFIG=$(mktemp /tmp/cava-qs-XXXXXX.conf.bak) # 相似路径不应转换' \
+        "$awk_transformed" ||
+        fail 'Cava AWK must leave similar non-target assignments unchanged'
+    awk -f "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-quickshell-cava-compatibility.awk" \
+        "$awk_transformed" > "$awk_idempotent"
+    cmp -s "$awk_transformed" "$awk_idempotent" ||
+        fail 'Cava AWK must be byte-idempotent on an already converted script'
 
     niri_quickshell_stage_and_deploy "$fedora_checkout" "$TARGET_USER" ||
         fail 'Fedora Cava bridge hardening must succeed in QuickShell staging'
