@@ -26,6 +26,8 @@ cat > "$BIN_DIR/cargo" <<'EOF'
 exit 0
 EOF
 chmod 755 "$BIN_DIR/cargo"
+mkdir -p "$HOME_DIR/.cargo/bin"
+cp "$BIN_DIR/cargo" "$HOME_DIR/.cargo/bin/cargo"
 
 cat > "$BIN_DIR/git" <<'EOF'
 #!/usr/bin/env bash
@@ -38,12 +40,27 @@ if [ "${1:-}" = clone ]; then
     [ "$mode" != clone-fail ] || exit 1
     destination=${3:?}
     mkdir -p "$destination/.git" "$destination/scripts"
+    printf 'name = "fd-rdd-fixture"\n' > "$destination/Cargo.toml"
+    printf 'fixture\n' > "$destination/.fd-rdd-fixture-marker"
     cat > "$destination/scripts/install.sh" <<'EOF_INSTALLER'
 #!/usr/bin/env bash
 set -Eeuo pipefail
+[ "$(pwd)" = "$(dirname "$(dirname "$0")")" ]
+[ -f Cargo.toml ]
+[ -f .fd-rdd-fixture-marker ]
+case ":$PATH:" in
+    *":$HOME/.cargo/bin:"*) ;;
+    *) printf 'missing user cargo path: %s\n' "$PATH" >&2; exit 1 ;;
+esac
+case ":$PATH:" in
+    *":/usr/bin:"*) ;;
+    *) printf 'missing /usr/bin: %s\n' "$PATH" >&2; exit 1 ;;
+esac
+command -v cargo >/dev/null 2>&1
 mkdir -p "$HOME/.vcp/bin"
 printf '#!/usr/bin/env bash\n' > "$HOME/.vcp/bin/fd-rdd"
 chmod 755 "$HOME/.vcp/bin/fd-rdd"
+printf '%s\n' "$PATH" > "$HOME/.vcp/fd-rdd-installer.path"
 EOF_INSTALLER
     chmod 755 "$destination/scripts/install.sh"
     exit 0
@@ -69,29 +86,37 @@ fi
 exit 1
 EOF
 chmod 755 "$BIN_DIR/git"
+cp "$BIN_DIR/git" "$HOME_DIR/.cargo/bin/git"
 export FEDORA_TEST_GIT_LOG="$TEST_DIR/git.log"
 
 source "$ROOT_DIR/scripts/lib/core.sh"
 require_writable_mode() { return 0; }
 runuser() {
+    local -a env_args=()
     [ "${1:-}" = -u ] && shift 2
     [ "${1:-}" = -- ] && shift
     if [ "${1:-}" = env ]; then
         shift
         while [ "$#" -gt 0 ] && [[ "$1" == *=* ]]; do
-            export "$1"
+            env_args+=("$1")
             shift
         done
+        env "${env_args[@]}" "$@"
+        return
     fi
     "$@"
 }
 
 source_dir=$(fedora_fd_rdd_source_dir "$HOME_DIR")
+cd "$TEST_DIR"
 export FEDORA_TEST_GIT_MODE=clone-fail
 status=0
 fedora_install_fd_rdd "$TARGET_USER" "$HOME_DIR" || status=$?
 [ "$status" -eq "$RC_SKIPPED" ] ||
     fail 'fd-rdd clone failure must be reported as pending'
+[ "$FEDORA_APPLICATION_PENDING_REASON" = \
+    "official-source-clone-failed:repo=$FEDORA_FD_RDD_REPO_URL:commit=$FEDORA_FD_RDD_COMMIT" ] ||
+    fail 'fd-rdd clone failure must retain its pending reason'
 [ ! -e "$source_dir" ] || fail 'failed fd-rdd clone must not publish a cache'
 if find "$HOME_DIR/.local/src" -maxdepth 1 -name '.vcp-fd-rdd.*' -print -quit |
     grep -q .; then
@@ -103,6 +128,11 @@ fedora_install_fd_rdd "$TARGET_USER" "$HOME_DIR" ||
     fail 'fd-rdd retry must converge after a transient clone failure'
 [ -x "$source_dir/scripts/install.sh" ] ||
     fail 'successful fd-rdd retry must publish the verified source cache'
+[ -x "$HOME_DIR/.vcp/bin/fd-rdd" ] ||
+    fail 'successful fd-rdd retry must run the installer from the source checkout'
+[ "$(< "$HOME_DIR/.vcp/fd-rdd-installer.path")" = \
+    "$HOME_DIR/.cargo/bin:/usr/local/bin:/usr/bin:/bin" ] ||
+    fail 'fd-rdd installer must receive the explicit target-user PATH'
 
 printf 'old-cache\n' > "$source_dir/old-marker"
 export FEDORA_TEST_GIT_MODE=checkout-fail
@@ -110,6 +140,9 @@ status=0
 fedora_install_fd_rdd "$TARGET_USER" "$HOME_DIR" || status=$?
 [ "$status" -eq "$RC_SKIPPED" ] ||
     fail 'fd-rdd checkout failure must be reported as pending'
+[ "$FEDORA_APPLICATION_PENDING_REASON" = \
+    "official-source-commit-unavailable:$FEDORA_FD_RDD_COMMIT" ] ||
+    fail 'fd-rdd checkout failure must retain its pending reason'
 [ "$(< "$source_dir/old-marker")" = old-cache ] ||
     fail 'fd-rdd checkout failure must preserve the previous cache'
 if find "$HOME_DIR/.local/src" -maxdepth 1 -name '.vcp-fd-rdd.*' -print -quit |
@@ -125,6 +158,7 @@ cat > "$LOCAL_INSTALLER" <<'EOF_LOCAL_INSTALLER'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 printf 'install\n' >> "${FEDORA_TEST_LOCAL_INSTALL_CALLS:?}"
+printf '%s\n' "$PATH" > "${FEDORA_TEST_LOCAL_INSTALL_PATH:?}"
 mkdir -p "$HOME/.vcp/bin"
 printf '#!/usr/bin/env bash\n' > "$HOME/.vcp/bin/fd-rdd"
 chmod 755 "$HOME/.vcp/bin/fd-rdd"
@@ -132,11 +166,15 @@ EOF_LOCAL_INSTALLER
 chmod 755 "$LOCAL_INSTALLER"
 export FEDORA_FD_RDD_INSTALL_SCRIPT="$LOCAL_INSTALLER"
 export FEDORA_TEST_LOCAL_INSTALL_CALLS="$LOCAL_INSTALL_CALLS"
+export FEDORA_TEST_LOCAL_INSTALL_PATH="$TEST_DIR/fd-rdd-install.path"
 rm -rf "$HOME_DIR/.vcp" "$HOME_DIR/.local/bin/fd-rdd"
 fedora_install_fd_rdd "$TARGET_USER" "$HOME_DIR" ||
     fail 'fd-rdd fake installer must return success'
 [ -x "$HOME_DIR/.vcp/bin/fd-rdd" ] ||
     fail 'fd-rdd fake installer must create the official ~/.vcp/bin path'
+[ "$(< "$FEDORA_TEST_LOCAL_INSTALL_PATH")" = \
+    "$HOME_DIR/.cargo/bin:/usr/local/bin:/usr/bin:/bin" ] ||
+    fail 'local fd-rdd installer must receive the explicit target-user PATH'
 fedora_install_application_target fd-rdd-git "$TARGET_USER" "$HOME_DIR" ||
     fail 'fd-rdd target must remain successful on an idempotent rerun'
 [ "$(wc -l < "$LOCAL_INSTALL_CALLS")" -eq 1 ] ||

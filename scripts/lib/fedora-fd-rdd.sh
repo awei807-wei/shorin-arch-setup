@@ -22,10 +22,29 @@ fedora_fd_rdd_binary_satisfied() {
         command -v fd-rdd >/dev/null 2>&1
 }
 
+fedora_fd_rdd_target_path() {
+    local home=$1
+
+    # 官方安装器以目标用户身份运行，不能依赖交互式 shell 继承 PATH。
+    # 固定工具链目录，避免把 root 或测试仓库的 PATH 带入安装过程。
+    printf '%s\n' "$home/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
+}
+
 fedora_fd_rdd_as_user() {
     local user=$1 home=$2
     shift 2
-    runuser -u "$user" -- env HOME="$home" "$@"
+    runuser -u "$user" -- env HOME="$home" \
+        PATH="$(fedora_fd_rdd_target_path "$home")" "$@"
+}
+
+fedora_fd_rdd_run_official_installer() {
+    local user=$1 home=$2 source_dir=$3 script=$4
+
+    # install.sh 依赖仓库工作目录；在受控的目标用户子 shell 中先进入
+    # 已验证的 checkout，再执行脚本，不信任脚本自行切换目录。
+    fedora_fd_rdd_as_user "$user" "$home" bash -c \
+        'cd -- "$1" && exec bash "$2"' \
+        fd-rdd-install "$source_dir" "$script"
 }
 
 fedora_fd_rdd_cleanup() {
@@ -38,8 +57,7 @@ fedora_fd_rdd_cleanup() {
 fedora_fd_rdd_cargo_available() {
     local user=$1 home=$2
 
-    runuser -u "$user" -- env HOME="$home" \
-        PATH="${PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}" \
+    fedora_fd_rdd_as_user "$user" "$home" \
         bash -c 'command -v cargo >/dev/null 2>&1'
 }
 
@@ -56,7 +74,7 @@ fedora_install_fd_rdd() {
             error 'Local fd-rdd installer did not contain a shebang.'
             return 1
         }
-        if ! runuser -u "$user" -- env HOME="$home" bash "$script"; then
+        if ! fedora_fd_rdd_as_user "$user" "$home" bash "$script"; then
             error 'The official fd-rdd install.sh failed for the target user.'
             return 1
         fi
@@ -157,8 +175,8 @@ fedora_install_fd_rdd() {
         fi
         previous_dir='' # The old cache is removed only after the new one is live.
     fi
-    if ! fedora_fd_rdd_as_user "$user" "$home" bash \
-        "$source_dir/scripts/install.sh"; then
+    if ! fedora_fd_rdd_run_official_installer "$user" "$home" \
+        "$source_dir" "$source_dir/scripts/install.sh"; then
         error 'Pinned fd-rdd scripts/install.sh failed for the target user.'
         return 1
     fi
