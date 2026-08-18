@@ -65,7 +65,9 @@ SHA-256 `4aec761edac4604b0b301f9ac0385b8a9c46452e8a5783485eb3905ecdd22e8c`；Tho
 tag `M151.0.7922.72` 的 SSE3 [`thorium-browser_151.0.7922.72_SSE3.rpm`](https://github.com/gz83/thorium/releases/download/M151.0.7922.72/thorium-browser_151.0.7922.72_SSE3.rpm)，
 SHA-256 `6cd793ac245ff7f0e7b76a1dc9b2c694d996b3eefb4a9ee40e39dc5e0ae11f45`。微信 URL 是
 上游可变对象；若官方内容漂移，安装会 fail-closed，必须先更新脚本中的 URL/大小/SHA pin，
-不能自动更新 hash。`tsukimi-bin` 使用统一的
+不能自动更新 hash。
+默认官方制品缓存为目标用户的 `~/.cache/shorin-arch-setup/fedora-applications`，由安装器逐级安全创建并归目标用户主组所有。`FEDORA_OFFICIAL_CACHE_DIR` 仅用于显式指定外部缓存：已有目录会拒绝符号链接和非目录，但保留原有 mode/owner，不会用 `install -d` 改写 `/tmp`、`/var/tmp` 或 home 目录的权限；缓存文件仍会在写入前完成 HTTPS、SHA-256、固定大小和 RPM 身份校验。
+`tsukimi-bin` 使用统一的
 `walker874/tsukimi` COPR；Vicinae 固定 v0.26.0 官方 AppImage（SHA-256 校验），以目标
 用户尝试交给 Gear Lever，CLI 不可用时保留项目托管 AppImage 与 desktop entry fallback；
 `lsfg-vk-bin` 先收敛 `qt6-qtdeclarative` 和 `qt6-qtbase`。
@@ -318,6 +320,7 @@ scripts/
     packages.sh                  # pacman、AUR 与系统级 Flatpak
     platform.sh                  # Arch/Fedora 检测与 Fedora 包名翻译
     fedora.sh                    # Fedora Flatpak、COPR、RPM/AppImage/provider 目标
+    fedora-official-cache.sh     # 官方制品缓存目录安全准备与 managed owner 合同
     fedora-flatpak.sh            # Fedora system/user scope Flatpak 合同
     fedora-providers.sh          # Fedora provider 合同与目标路由
     fedora-official-artifacts.sh # 固定版本官方 AppImage/RPM 下载、缓存与校验

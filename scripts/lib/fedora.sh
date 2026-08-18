@@ -138,7 +138,7 @@ fedora_install_vicinae() {
         FEDORA_OFFICIAL_DOWNLOAD_RESULT=''
         if fedora_download_verified_official_asset \
             "$FEDORA_VICINAE_URL" "$FEDORA_VICINAE_ASSET" \
-            "$FEDORA_VICINAE_SHA256" "$cache_dir" >/dev/null; then
+            "$FEDORA_VICINAE_SHA256" "$cache_dir" '' "$user" "$home" >/dev/null; then
             file=$FEDORA_OFFICIAL_DOWNLOAD_RESULT
         else
             download_status=$?

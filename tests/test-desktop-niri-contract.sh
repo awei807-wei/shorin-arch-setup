@@ -506,6 +506,95 @@ EOF
 )
 
 test_fedora_quickshell_conversion_is_staged
+
+test_fedora_quickshell_cava_bridge_is_hardened_in_staging() (
+    local fedora_home="$TEST_DIR/fedora-cava-home"
+    local fedora_checkout="$TEST_DIR/fedora-cava-checkout"
+    local cava_source="$fedora_checkout/dotfiles/.config/quickshell/scripts/cava.sh"
+    local cava_live="$fedora_home/.config/quickshell/scripts/cava.sh"
+    local before_source transformed
+    local fake_bin="$TEST_DIR/cava-fake-bin"
+    local fake_tmp="$TEST_DIR/cava-tmp"
+    local stderr_file="$TEST_DIR/cava-stderr"
+    local calls_file="$TEST_DIR/cava-calls"
+    local status=0
+
+    export SHORIN_DISTRO=fedora HOME_DIR="$fedora_home"
+    unset NIRI_QUICKSHELL_DIR NIRI_DESKTOP_STATE_DIR \
+        NIRI_QUICKSHELL_BACKUP_DIR NIRI_QUICKSHELL_SOURCE_STATE_FILE
+    desktop_niri_contract_init
+    cp -a "$DOTFILES_CHECKOUT" "$fedora_checkout"
+    cat > "$cava_source" <<'EOF'
+#!/usr/bin/env bash
+CAVA_CONFIG=$(mktemp /tmp/cava-qs-XXXXXX.conf)
+trap 'rm -f "$CAVA_CONFIG"' EXIT
+printf '[general]\n' > "$CAVA_CONFIG"
+cava -p "$CAVA_CONFIG"
+EOF
+    chmod 755 "$cava_source"
+    before_source=$(sha256sum "$cava_source" | awk '{print $1}')
+
+    niri_quickshell_stage_and_deploy "$fedora_checkout" "$TARGET_USER" ||
+        fail 'Fedora Cava bridge hardening must succeed in QuickShell staging'
+    [ "$(sha256sum "$cava_source" | awk '{print $1}')" = "$before_source" ] ||
+        fail 'Cava compatibility must not modify the external checkout source'
+    grep -Fq 'mktemp "${TMPDIR:-/tmp}/cava-qs-XXXXXX.conf"' "$cava_live" ||
+        fail 'legacy Cava bridge must use TMPDIR with a /tmp fallback'
+    grep -Fq 'ERROR: mktemp failed: unable to create temporary Cava config' \
+        "$cava_live" || fail 'Cava bridge must report mktemp failures clearly'
+    grep -Fqx 'trap '\''rm -f "$CAVA_CONFIG"'\'' EXIT' "$cava_live" ||
+        fail 'Cava bridge hardening must preserve its cleanup trap'
+
+    transformed=$(sha256sum "$cava_live" | awk '{print $1}')
+    niri_quickshell_stage_and_deploy "$fedora_checkout" "$TARGET_USER" ||
+        fail 'a second Fedora Cava compatibility run must succeed'
+    [ "$(sha256sum "$cava_live" | awk '{print $1}')" = "$transformed" ] ||
+        fail 'a second Cava compatibility run must be byte-idempotent'
+
+    mkdir -p "$fake_bin" "$fake_tmp"
+    cat > "$fake_bin/mktemp" <<'EOF'
+#!/usr/bin/env bash
+printf 'simulated mktemp failure\n' >&2
+exit 1
+EOF
+    cat > "$fake_bin/cava" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$calls_file"
+exit 0
+EOF
+    chmod 755 "$fake_bin/mktemp" "$fake_bin/cava"
+    : > "$calls_file"
+    if PATH="$fake_bin:/usr/bin:/bin" TMPDIR="$fake_tmp" \
+        "$cava_live" >/dev/null 2>"$stderr_file"; then
+        status=0
+    else
+        status=$?
+    fi
+    [ "$status" -ne 0 ] || fail 'Cava bridge must fail when mktemp fails'
+    grep -Fq 'ERROR: mktemp failed: unable to create temporary Cava config' \
+        "$stderr_file" || fail 'Cava mktemp failure must be visible on stderr'
+    [ ! -s "$calls_file" ] ||
+        fail 'Cava must not be called after temporary config creation fails'
+
+    cat > "$fake_bin/mktemp" <<'EOF'
+#!/usr/bin/env bash
+/usr/bin/mktemp "$@"
+EOF
+    : > "$calls_file"
+    PATH="$fake_bin:/usr/bin:/bin" TMPDIR="$fake_tmp" \
+        "$cava_live" >/dev/null 2>"$stderr_file" ||
+        fail 'Cava bridge must call cava successfully on the normal path'
+    grep -Eq -- '^-p[[:space:]]+' "$calls_file" ||
+        fail 'normal Cava bridge execution must pass the generated config path'
+    call_path=$(awk '{print $2}' "$calls_file")
+    case "$call_path" in
+        "$fake_tmp"/cava-qs-*.conf) ;;
+        *) fail 'Cava bridge must create its config under TMPDIR' ;;
+    esac
+    [ ! -e "$call_path" ] || fail 'Cava bridge trap must clean the temporary config'
+)
+
+test_fedora_quickshell_cava_bridge_is_hardened_in_staging
 export SHORIN_DISTRO=arch
 desktop_niri_contract_init
 

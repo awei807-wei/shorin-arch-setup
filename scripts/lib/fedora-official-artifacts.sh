@@ -88,6 +88,9 @@ FEDORA_THORIUM_SHA256=$FEDORA_THORIUM_SHA256_PINNED
 # FEDORA_APPLICATION_PENDING_REASON。
 FEDORA_OFFICIAL_DOWNLOAD_RESULT=''
 
+FEDORA_OFFICIAL_CACHE_LIB_DIR=${SHORIN_LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}
+source "$FEDORA_OFFICIAL_CACHE_LIB_DIR/fedora-official-cache.sh"
+
 fedora_official_x86_64_guard() {
     local label=$1 machine=${FEDORA_OFFICIAL_MACHINE:-$(uname -m)}
 
@@ -99,10 +102,10 @@ fedora_official_x86_64_guard() {
 }
 
 fedora_official_cache_path() {
-    local home=$1 asset=$2 cache_dir
+    local home=$1 asset=$2 target_user=${3:-${TARGET_USER:-}} cache_dir
 
-    cache_dir=${FEDORA_OFFICIAL_CACHE_DIR:-$home/.cache/shorin-arch-setup/fedora-applications}
-    install -d -m 755 "$cache_dir"
+    cache_dir=${FEDORA_OFFICIAL_CACHE_DIR:-$home/$FEDORA_OFFICIAL_DEFAULT_CACHE_RELATIVE}
+    fedora_prepare_official_cache_dir "$cache_dir" "$target_user" "$home" || return
     printf '%s\n' "$cache_dir/$asset"
 }
 
@@ -122,6 +125,7 @@ fedora_verify_official_asset_file() {
 
 fedora_download_verified_official_asset() {
     local url=$1 asset=$2 expected=$3 cache_dir=$4 expected_size=${5:-}
+    local target_user=${6:-${TARGET_USER:-}} home=${7:-${HOME_DIR:-}}
     local destination temporary
 
     FEDORA_OFFICIAL_DOWNLOAD_RESULT=''
@@ -139,10 +143,11 @@ fedora_download_verified_official_asset() {
         error "sha256sum is required to verify Fedora official asset: $asset"
         return 1
     }
-    install -d -m 755 "$cache_dir"
+    fedora_prepare_official_cache_dir "$cache_dir" "$target_user" "$home" || return 1
     destination="$cache_dir/$asset"
     if fedora_verify_official_asset_file "$destination" "$expected" "$asset" &&
         { [ -z "$expected_size" ] || [ "$(stat -c '%s' "$destination")" = "$expected_size" ]; }; then
+        fedora_official_repair_managed_artifact_metadata "$destination" || return 1
         FEDORA_OFFICIAL_DOWNLOAD_RESULT=$destination
         printf '%s\n' "$destination"
         return 0
@@ -166,7 +171,15 @@ fedora_download_verified_official_asset() {
         error "$asset failed the fixed size check (expected $expected_size bytes)."
         return 1
     fi
-    chmod 644 "$temporary"
+    chmod 644 -- "$temporary" || {
+        rm -f -- "$temporary"
+        error "Unable to set cached Fedora official artifact mode: $temporary"
+        return 1
+    }
+    fedora_official_repair_managed_artifact_metadata "$temporary" || {
+        rm -f -- "$temporary"
+        return 1
+    }
     if ! mv -f -- "$temporary" "$destination"; then
         rm -f -- "$temporary"
         error "Unable to atomically cache Fedora official asset: $destination"
@@ -206,7 +219,8 @@ fedora_install_official_rpm_target() {
     cache_dir=${FEDORA_OFFICIAL_CACHE_DIR:-$home/.cache/shorin-arch-setup/fedora-applications}
     FEDORA_OFFICIAL_DOWNLOAD_RESULT=''
     fedora_download_verified_official_asset \
-        "$url" "$asset" "$expected" "$cache_dir" "$expected_size" >/dev/null || return
+        "$url" "$asset" "$expected" "$cache_dir" "$expected_size" \
+        "$user" "$home" >/dev/null || return
     downloaded=$FEDORA_OFFICIAL_DOWNLOAD_RESULT
     if ! fedora_official_rpm_identity_for_target "$package" "$downloaded" "$label"; then
         rm -f -- "$downloaded"
@@ -298,7 +312,8 @@ fedora_install_official_linuxqq() {
     FEDORA_OFFICIAL_DOWNLOAD_RESULT=''
     fedora_download_verified_official_asset \
         "$FEDORA_LINUXQQ_URL" "$FEDORA_LINUXQQ_ASSET" \
-        "$FEDORA_LINUXQQ_SHA256" "$cache_dir" "$FEDORA_LINUXQQ_SIZE" >/dev/null || return
+        "$FEDORA_LINUXQQ_SHA256" "$cache_dir" "$FEDORA_LINUXQQ_SIZE" \
+        "$user" "$home" >/dev/null || return
     downloaded=$FEDORA_OFFICIAL_DOWNLOAD_RESULT
     fedora_verify_official_rpm_identity "$downloaded" 'Linux QQ' \
         '([Qq][Qq]|[Ll]inux[Qq][Qq])' || return

@@ -11,6 +11,42 @@ niri_quickshell_remove_tree() {
     find "$root" -depth -delete
 }
 
+niri_transform_quickshell_cava_file_in_place() {
+    local file=$1 temporary mode
+
+    platform_is_fedora || return 0
+    [ -f "$file" ] && [ ! -L "$file" ] || return 1
+    case "$file" in
+        */scripts/cava.sh) ;;
+        *) return 0 ;;
+    esac
+    temporary=$(mktemp)
+    if ! awk -f "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-quickshell-cava-compatibility.awk" \
+        "$file" > "$temporary"; then
+        rm -f "$temporary"
+        return 1
+    fi
+    if cmp -s "$temporary" "$file"; then
+        rm -f "$temporary"
+        return 0
+    fi
+    mode=$(stat -c '%a' "$file")
+    if ! install -m "$mode" "$temporary" "$file"; then
+        rm -f "$temporary"
+        return 1
+    fi
+    rm -f "$temporary"
+}
+
+niri_transform_quickshell_cava_tree() {
+    local root=$1 file
+
+    [ -d "$root" ] || return 1
+    while IFS= read -r -d '' file; do
+        niri_transform_quickshell_cava_file_in_place "$file" || return
+    done < <(find "$root" -type f -print0)
+}
+
 niri_quickshell_stage_source() {
     local source=$1 parent stage
 
@@ -20,6 +56,12 @@ niri_quickshell_stage_source() {
     install -d -o "$TARGET_USER" -g "$(id -gn "$TARGET_USER")" "$parent"
     stage=$(mktemp -d "$parent/.quickshell-stage.XXXXXX")
     if ! cp -a "$source/." "$stage/"; then
+        niri_quickshell_remove_tree "$stage"
+        return 1
+    fi
+    # Fedora receives the Cava bridge hardening in staging.  Keep the source
+    # checkout untouched and preserve Arch's byte-for-byte QuickShell payload.
+    if platform_is_fedora && ! niri_transform_quickshell_cava_tree "$stage"; then
         niri_quickshell_remove_tree "$stage"
         return 1
     fi

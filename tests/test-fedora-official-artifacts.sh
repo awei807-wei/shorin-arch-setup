@@ -219,6 +219,79 @@ mkdir -p "$HASH_DRIFT_CACHE"
     [ ! -s "$HASH_DRIFT_CALLS" ]
 ) || fail 'pinned WeChat hash drift must fail closed without dnf or bad cache'
 
+# An explicit cache directory is external state.  In particular, reusing a
+# mode-1777 directory such as /tmp must not be turned into a private 0755
+# directory by cache preparation or by a verified download.
+GOOD_PAYLOAD="$TEST_DIR/good-payload"
+printf 'verified Fedora artifact\n' > "$GOOD_PAYLOAD"
+GOOD_SHA256=$(sha256sum "$GOOD_PAYLOAD" | awk '{print $1}')
+curl() {
+    local output=''
+    while [ "$#" -gt 0 ]; do
+        if [ "$1" = -o ]; then output=$2; shift 2; else shift; fi
+    done
+    cp "$GOOD_PAYLOAD" "$output"
+}
+EXTERNAL_CACHE="$TEST_DIR/external-cache"
+mkdir -p "$EXTERNAL_CACHE"
+chmod 1777 "$EXTERNAL_CACHE"
+EXTERNAL_BEFORE=$(stat -c '%a:%u:%g' "$EXTERNAL_CACHE")
+export FEDORA_OFFICIAL_CACHE_DIR="$EXTERNAL_CACHE"
+external_path=$(fedora_official_cache_path "$HOME_DIR" fixed.rpm "$TARGET_USER")
+[ "$external_path" = "$EXTERNAL_CACHE/fixed.rpm" ] ||
+    fail 'external cache path helper returned an unexpected artifact path'
+fedora_download_verified_official_asset \
+    https://example.invalid/fixed.rpm fixed.rpm "$GOOD_SHA256" \
+    "$EXTERNAL_CACHE" '' "$TARGET_USER" "$HOME_DIR" >/dev/null ||
+    fail 'verified download into an external cache must succeed'
+EXTERNAL_AFTER=$(stat -c '%a:%u:%g' "$EXTERNAL_CACHE")
+[ "$EXTERNAL_BEFORE" = "$EXTERNAL_AFTER" ] ||
+    fail 'external cache directory mode/owner must remain unchanged'
+
+SYMLINK_CACHE_TARGET="$TEST_DIR/symlink-target"
+SYMLINK_CACHE="$TEST_DIR/symlink-cache"
+mkdir -p "$SYMLINK_CACHE_TARGET"
+ln -s "$SYMLINK_CACHE_TARGET" "$SYMLINK_CACHE"
+export FEDORA_OFFICIAL_CACHE_DIR="$SYMLINK_CACHE"
+if fedora_official_cache_path "$HOME_DIR" symlink.rpm "$TARGET_USER" >/dev/null; then
+    fail 'official cache helper must reject a symlink cache directory'
+fi
+NON_DIRECTORY_CACHE="$TEST_DIR/non-directory-cache"
+printf 'not a directory\n' > "$NON_DIRECTORY_CACHE"
+export FEDORA_OFFICIAL_CACHE_DIR="$NON_DIRECTORY_CACHE"
+if fedora_official_cache_path "$HOME_DIR" non-directory.rpm "$TARGET_USER" >/dev/null; then
+    fail 'official cache helper must reject a non-directory cache path'
+fi
+
+# The implicit cache is project-managed: create it component by component and
+# keep both the leaf and verified artifact owned by the target user's primary
+# group.  This uses the real test user; root-run deployments exercise the same
+# contract with the selected desktop user.
+unset FEDORA_OFFICIAL_CACHE_DIR
+MANAGED_HOME="$TEST_DIR/managed-home"
+mkdir -p "$MANAGED_HOME"
+managed_path=$(fedora_official_cache_path "$MANAGED_HOME" managed.rpm "$TARGET_USER")
+MANAGED_CACHE=$(dirname "$managed_path")
+MANAGED_OWNER=$(stat -c '%u:%g' "$MANAGED_CACHE")
+[ "$MANAGED_OWNER" = "$(id -u "$TARGET_USER"):$(id -g "$TARGET_USER")" ] ||
+    fail 'managed Fedora cache directory must belong to the target user primary group'
+[ "$(stat -c '%a' "$MANAGED_CACHE")" = 755 ] ||
+    fail 'managed Fedora cache directory must use mode 755'
+chmod 700 "$MANAGED_CACHE"
+fedora_official_cache_path "$MANAGED_HOME" repaired-mode.rpm "$TARGET_USER" >/dev/null ||
+    fail 'managed Fedora cache helper must repair its exact leaf directory mode'
+[ "$(stat -c '%a' "$MANAGED_CACHE")" = 755 ] ||
+    fail 'managed Fedora cache helper must restore mode 755 on its exact leaf directory'
+fedora_download_verified_official_asset \
+    https://example.invalid/managed.rpm managed.rpm "$GOOD_SHA256" \
+    "$MANAGED_CACHE" '' "$TARGET_USER" "$MANAGED_HOME" >/dev/null ||
+    fail 'verified download into the managed cache must succeed'
+[ "$(stat -c '%u:%g' "$managed_path")" = \
+    "$(id -u "$TARGET_USER"):$(id -g "$TARGET_USER")" ] ||
+    fail 'managed Fedora artifact must belong to the target user primary group'
+[ "$(stat -c '%a' "$managed_path")" = 644 ] ||
+    fail 'managed Fedora artifact must use mode 644'
+
 # 直接由安装器调用下载器时必须保留待处理原因；命令替换会在子 shell 中丢失赋值。
 fedora_ensure_flatpak_target() { return 0; }
 fedora_rpm_file() { return 1; }
