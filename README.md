@@ -285,7 +285,7 @@ Fedora 的壁纸会话由 Niri 启动一次 `fedora-wallpaper-session.sh`，使�
 
 Fedora + Niri 会通过目标用户的 `~/.config/autostart/org.kde.xwaylandvideobridge.desktop` 写入 `Hidden=true`，禁用 X11 兼容桥的默认自动启动；这是仅针对 X11 兼容层的设置，不影响 Wayland 原生 portal。Arch 路径不写入或管理该文件。
 
-Fedora 的 Niri 配置收敛保留现有用户文件，不会用上游树盲目覆盖 `config.kdl` 或 `binds.kdl`。事务内会备份并迁移旧的 `~/.config/quickshell/scripts/lockscreen-wait.sh` 到 `lockscreen.sh`，并替换 polkit-gnome 路径；来源 checkout 必须提供普通、可执行的 `dotfiles/.config/quickshell/scripts/lockscreen.sh`，目标文件必须归目标用户所有。缺少来源的 `fd-rdd`、`vicinae`、`waypaper`、`niriswitcher`、`niriswitcherctl`、`waybar` 和 `hyprpicker` 只改为 `command -v` shell guard，后续安装对应程序后即可自动启用，当前不会伪造命令或宣称功能已安装。Fedora Niri 还会持久 mask `drkonqi-coredump-launcher.socket`，关闭 KDE DrKonqi 弹窗但保留 `systemd-coredump` 与 `coredumpctl`。迁移后的配置必须通过 `niri validate`，失败会恢复原文件。
+Fedora 的 Niri 配置收敛保留现有用户文件，不会用上游树盲目覆盖 `config.kdl` 或 `binds.kdl`。事务内会备份并迁移旧的 `~/.config/quickshell/scripts/lockscreen-wait.sh` 到 `lockscreen.sh`，并替换 polkit-gnome 路径；来源 checkout 必须提供普通、可执行的 `dotfiles/.config/quickshell/scripts/lockscreen.sh`，目标文件必须归目标用户所有。缺少来源的 `fd-rdd`、`vicinae`、`waypaper`、`niriswitcher`、`niriswitcherctl`、`waybar` 和 `hyprpicker` 只改为 `command -v` shell guard，后续安装对应程序后即可自动启用，当前不会伪造命令或宣称功能已安装。Fedora Niri 会持久 mask `mako.service`，让 Quickshell 独占 Freedesktop 通知总线并显示应用未读数字；同时持久 mask `drkonqi-coredump-launcher.socket`，关闭 KDE DrKonqi 弹窗但保留 `systemd-coredump` 与 `coredumpctl`。迁移后的配置必须通过 `niri validate`，失败会恢复原文件。
 
 ## 模块契约
 

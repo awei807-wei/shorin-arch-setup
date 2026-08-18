@@ -19,6 +19,7 @@ source "$SHORIN_ROOT/scripts/modules/desktop-niri/desktop-contract.sh"
 source "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-session-contract.sh"
 source "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-lsfg-contract.sh"
 source "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-drkonqi-contract.sh"
+source "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-mako-contract.sh"
 source "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-runtime-contract.sh"
 
 # Required desktop targets are independent of the user's optional package

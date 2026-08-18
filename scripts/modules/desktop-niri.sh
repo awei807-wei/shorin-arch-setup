@@ -133,6 +133,8 @@ desktop_niri_inspect() {
             niri_fedora_xwayland_videobridge_autostart_satisfied
         desktop_niri_expect "$phase" config:fedora-drkonqi \
             niri_fedora_drkonqi_satisfied "$TARGET_USER"
+        desktop_niri_expect "$phase" config:fedora-mako-notification-conflict \
+            niri_fedora_mako_satisfied "$TARGET_USER"
     fi
     desktop_niri_expect "$phase" config:niri-quickshell-startup \
         niri_quickshell_startup_satisfied \

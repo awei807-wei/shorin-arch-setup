@@ -72,6 +72,18 @@ if [ "${1:-}" = --user ] && [ "${2:-}" = is-active ] &&
     [ "${4:-}" = drkonqi-coredump-launcher.socket ]; then
     exit 3
 fi
+if [ "${1:-}" = --user ] && [ "${2:-}" = stop ] &&
+    [ "${3:-}" = mako.service ]; then
+    exit 0
+fi
+if [ "${1:-}" = --user ] && [ "${2:-}" = reset-failed ] &&
+    [ "${3:-}" = mako.service ]; then
+    exit 0
+fi
+if [ "${1:-}" = --user ] && [ "${2:-}" = is-active ] &&
+    [ "${3:-}" = --quiet ] && [ "${4:-}" = mako.service ]; then
+    exit 3
+fi
 if [ "${1:-}" = --user ] && [ "${2:-}" = set-environment ] &&
     [ "${3:-}" = DISABLE_LSFG=1 ]; then
     exit 0
