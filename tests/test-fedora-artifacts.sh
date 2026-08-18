@@ -154,6 +154,9 @@ fedora_application_target_satisfied vicinae-bin "$TARGET_USER" "$HOME_DIR" ||
 module_main() { :; }
 APPLICATION_MANIFEST="$TEST_DIR/applications.list"
 printf 'AUR:lsfg-vk-bin\n' > "$APPLICATION_MANIFEST"
+source "$ROOT_DIR/scripts/modules/applications/targets.sh"
+write_application_manifest_metadata "$APPLICATION_MANIFEST" \
+    "$ROOT_DIR/common-applist.txt" migrated
 source "$ROOT_DIR/scripts/modules/applications.sh"
 MODULE_RESULT=$RC_OK
 MODULE_REASONS=()

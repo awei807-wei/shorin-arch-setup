@@ -47,6 +47,15 @@ applications_inspect() {
                 module_verify_failed application-source-revision-drift-adopt-required
             fi
             ;;
+        12)
+            warn 'Application manifest has no metadata or exact legacy marker; refusing implicit adoption.'
+            warn 'To adopt it once, run: sudo env SHORIN_ADOPT_LEGACY_APPLICATIONS=1 bash install.sh repair --distro fedora --user <user> base applications'
+            if [ "$phase" = check ]; then
+                module_drift application-manifest-legacy-unmarked
+            else
+                module_verify_failed application-manifest-legacy-unmarked
+            fi
+            ;;
         *)
             if [ "$phase" = check ]; then
                 module_inspection_failed application-manifest-metadata-invalid
@@ -133,6 +142,21 @@ applications_apply() {
         ! application_manifest_metadata_present "$APPLICATION_MANIFEST"; then
         log "Adopting additions from the current application source list without removing user entries..."
         migrate_marked_legacy_application_manifest \
+            "$APPLICATION_SOURCE_LIST" "$APPLICATION_MANIFEST" ||
+            migrate_status=$?
+        [ "$migrate_status" -eq 0 ] || return "$migrate_status"
+    elif [ "${SHORIN_MODE:-install}" = repair ] &&
+        application_manifest_has_entries "$APPLICATION_MANIFEST" &&
+        ! application_manifest_metadata_present "$APPLICATION_MANIFEST" &&
+        ! application_manifest_has_legacy_marker "$APPLICATION_MANIFEST"; then
+        if [ "${SHORIN_ADOPT_LEGACY_APPLICATIONS:-}" != 1 ]; then
+            warn 'Application manifest has no metadata or exact legacy marker; refusing implicit adoption.'
+            warn 'To adopt it once, run: sudo env SHORIN_ADOPT_LEGACY_APPLICATIONS=1 bash install.sh repair --distro fedora --user <user> base applications'
+            module_skip application-manifest-legacy-unmarked
+            return 0
+        fi
+        log 'Adopting additions from the unmarked legacy application manifest without removing user entries...'
+        migrate_unmarked_legacy_application_manifest \
             "$APPLICATION_SOURCE_LIST" "$APPLICATION_MANIFEST" ||
             migrate_status=$?
         [ "$migrate_status" -eq 0 ] || return "$migrate_status"

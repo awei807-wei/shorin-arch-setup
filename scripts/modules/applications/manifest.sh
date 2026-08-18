@@ -93,6 +93,9 @@ application_manifest_metadata_status() {
     metadata=$(application_manifest_metadata_path "$manifest")
     [ -s "$metadata" ] || {
         application_manifest_has_legacy_marker "$manifest" && return 10
+        if [ -s "$manifest" ] && application_manifest_has_entries "$manifest"; then
+            return 12
+        fi
         return 0
     }
     schema=$(application_manifest_metadata_value schema "$manifest" || true)
@@ -136,6 +139,13 @@ application_manifest_entries() {
     application_entries_from_file "$APPLICATION_MANIFEST"
 }
 
+application_manifest_has_entries() {
+    local manifest=${1:-$APPLICATION_MANIFEST} entries
+
+    entries=$(application_entries_from_file "$manifest") || return 1
+    [ -n "$entries" ]
+}
+
 collect_legacy_application_targets() {
     local source_file=$1 entry
 
@@ -150,14 +160,29 @@ collect_legacy_application_targets() {
 }
 
 migrate_marked_legacy_application_manifest() {
-    local source_file=$1 destination=${2:-$APPLICATION_MANIFEST}
+    migrate_legacy_application_manifest_entries "$1" "${2:-$APPLICATION_MANIFEST}" marked
+}
+
+migrate_unmarked_legacy_application_manifest() {
+    [ "${SHORIN_ADOPT_LEGACY_APPLICATIONS:-}" = 1 ] || return "$RC_SKIPPED"
+    application_manifest_has_entries "${2:-$APPLICATION_MANIFEST}" ||
+        return "$RC_SKIPPED"
+    migrate_legacy_application_manifest_entries "$1" "${2:-$APPLICATION_MANIFEST}" unmarked
+}
+
+migrate_legacy_application_manifest_entries() {
+    local source_file=$1 destination=${2:-$APPLICATION_MANIFEST} kind=${3:-marked}
     local metadata staged_manifest source_entry existing_entries
     local destination_dir backup_path rollback_status
     local -A existing=()
 
     require_writable_mode || return
     [ -f "$destination" ] && [ -r "$destination" ] || return 1
-    application_manifest_has_legacy_marker "$destination" || return "$RC_SKIPPED"
+    case "$kind" in
+        marked) application_manifest_has_legacy_marker "$destination" || return "$RC_SKIPPED" ;;
+        unmarked) application_manifest_has_legacy_marker "$destination" && return "$RC_SKIPPED" ;;
+        *) error "Unknown application manifest migration kind: $kind"; return 1 ;;
+    esac
     metadata=$(application_manifest_metadata_path "$destination")
     application_manifest_metadata_present "$destination" && return "$RC_SKIPPED"
     [ -f "$source_file" ] && [ -r "$source_file" ] ||
@@ -199,6 +224,10 @@ migrate_marked_legacy_application_manifest() {
 
     if ! install_if_changed "$staged_manifest" "$destination" 644; then
         rm -f -- "$staged_manifest"
+        if ! cp -a -- "$backup_path" "$destination"; then
+            rollback_status=$?
+            error "Legacy application manifest rollback failed: backup=$backup_path destination=$destination status=$rollback_status"
+        fi
         return 1
     fi
     rm -f -- "$staged_manifest"
@@ -236,6 +265,17 @@ migrate_legacy_application_manifest() {
         migrate_marked_legacy_application_manifest "$source_file" "$destination"
         return
     fi
+    if [ -s "$destination" ] && ! application_manifest_metadata_present "$destination"; then
+        if [ "${SHORIN_ADOPT_LEGACY_APPLICATIONS:-}" = 1 ] &&
+            ! application_manifest_has_legacy_marker "$destination"; then
+            migrate_unmarked_legacy_application_manifest "$source_file" "$destination"
+            return
+        fi
+        warn 'Legacy application manifest has no metadata or exact migration marker; refusing implicit adoption.'
+        return "$RC_SKIPPED"
+    fi
+    [ -s "$destination" ] && application_manifest_metadata_present "$destination" &&
+        return 0
     if ! detected=$(collect_legacy_application_targets "$source_file" |
         awk '!seen[$0]++'); then
         return 1

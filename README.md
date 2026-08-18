@@ -211,6 +211,12 @@ sudo bash install.sh install \
 
 迁移是保守的，不会因为清单缺失就默认安装 `common-applist.txt` 中的全部应用。无法从当前状态证明曾被选择、且目前已经完全移除的应用不会自动加入清单。没有检测到任何旧目标时不会声明空清单。若用户之后修改 manifest，校验会报告 `drift/adopt-required`，repair 不会自动恢复被删除的条目；需要显式重新选择或 adopt。
 
+对于非空但既没有 schema=2 metadata、也没有精确旧版迁移标记的旧 `applications.list`，`check`/`verify` 会报告 `application-manifest-legacy-unmarked`，`repair` 不会隐式改写。确认要一次性追加当前 `common-applist.txt` 缺失条目时，必须显式授权并保留原条目、注释和顺序：
+
+```bash
+sudo env SHORIN_ADOPT_LEGACY_APPLICATIONS=1 bash install.sh repair --distro fedora --user <user> base applications
+```
+
 生成位置默认是：
 
 ```text

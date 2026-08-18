@@ -186,6 +186,7 @@ ROLLBACK_STATUS=0
 migrate_marked_legacy_application_manifest "$ROLLBACK_SOURCE" \
     "$ROLLBACK_MANIFEST" 2>/dev/null || ROLLBACK_STATUS=$?
 unset -f write_application_manifest_metadata
+source "$ROOT_DIR/scripts/modules/applications/manifest.sh"
 [ "$ROLLBACK_STATUS" -eq 1 ] ||
     fail 'metadata failure must fail the marked manifest migration'
 cmp -s "$ROLLBACK_ORIGINAL" "$ROLLBACK_MANIFEST" ||
@@ -196,6 +197,112 @@ ROLLBACK_BACKUP=$(find "$(dirname "$ROLLBACK_MANIFEST")" -maxdepth 1 -type f \
     -name "$(basename "$ROLLBACK_MANIFEST").bak.*" -print -quit)
 [ -n "$ROLLBACK_BACKUP" ] ||
     fail 'metadata failure must leave a unique transaction backup for audit'
+
+UNMARKED_SOURCE="$TEST_DIR/unmarked-source.txt"
+UNMARKED_MANIFEST="$TEST_DIR/unmarked-profile/applications.list"
+cat > "$UNMARKED_SOURCE" <<'EOF'
+# source comment must not enter the manifest
+neovim
+wine # append this target after existing entries
+flatpak:it.mijorus.gearlever
+EOF
+mkdir -p "$(dirname "$UNMARKED_MANIFEST")"
+cat > "$UNMARKED_MANIFEST" <<'EOF'
+# user-owned heading
+custom-user-target
+neovim
+# preserve this comment and order
+EOF
+UNMARKED_ORIGINAL="$TEST_DIR/unmarked-original"
+cp "$UNMARKED_MANIFEST" "$UNMARKED_ORIGINAL"
+UNMARKED_STATUS=0
+application_manifest_metadata_status check "$UNMARKED_MANIFEST" ||
+    UNMARKED_STATUS=$?
+[ "$UNMARKED_STATUS" -eq 12 ] ||
+    fail 'an unmarked non-empty manifest must require explicit adoption'
+unset SHORIN_ADOPT_LEGACY_APPLICATIONS
+run_applications_phase "$UNMARKED_MANIFEST" check repair "$UNMARKED_SOURCE"
+[ "$PHASE_STATUS" -eq 10 ] ||
+    fail 'an unmarked manifest must report drift during repair check'
+grep -Fq application-manifest-legacy-unmarked <<< "$PHASE_OUTPUT" ||
+    fail 'unmarked manifest drift must include its precise reason'
+grep -Fq 'sudo env SHORIN_ADOPT_LEGACY_APPLICATIONS=1 bash install.sh repair --distro fedora --user <user> base applications' <<< "$PHASE_OUTPUT" ||
+    fail 'unmarked manifest drift must print the explicit adoption command'
+cmp -s "$UNMARKED_ORIGINAL" "$UNMARKED_MANIFEST" ||
+    fail 'repair check must not change an unmarked manifest'
+[ ! -e "$UNMARKED_MANIFEST.meta" ] ||
+    fail 'repair check must not create metadata for an unmarked manifest'
+run_applications_phase "$UNMARKED_MANIFEST" verify repair "$UNMARKED_SOURCE"
+[ "$PHASE_STATUS" -eq 1 ] ||
+    fail 'verify must fail an unmarked manifest'
+grep -Fq application-manifest-legacy-unmarked <<< "$PHASE_OUTPUT" ||
+    fail 'verify must include the unmarked manifest reason'
+run_applications_phase "$UNMARKED_MANIFEST" apply repair "$UNMARKED_SOURCE"
+[ "$PHASE_STATUS" -eq 20 ] ||
+    fail 'repair apply must skip an unmarked manifest without authorization'
+cmp -s "$UNMARKED_ORIGINAL" "$UNMARKED_MANIFEST" ||
+    fail 'repair apply must not change an unmarked manifest without authorization'
+[ ! -e "$UNMARKED_MANIFEST.meta" ] ||
+    fail 'repair apply must not create metadata without authorization'
+
+export SHORIN_ADOPT_LEGACY_APPLICATIONS=1
+migrate_unmarked_legacy_application_manifest "$UNMARKED_SOURCE" "$UNMARKED_MANIFEST"
+cat > "$TEST_DIR/unmarked-expected" <<'EOF'
+# user-owned heading
+custom-user-target
+neovim
+# preserve this comment and order
+wine
+flatpak:it.mijorus.gearlever
+EOF
+cmp -s "$TEST_DIR/unmarked-expected" "$UNMARKED_MANIFEST" ||
+    fail 'explicit adoption must append missing source entries without reordering user content'
+grep -Fqx 'schema=2' "$UNMARKED_MANIFEST.meta" ||
+    fail 'explicit adoption must write schema=2 metadata'
+grep -Fqx 'mode=migrated' "$UNMARKED_MANIFEST.meta" ||
+    fail 'explicit adoption must record migrated mode'
+UNMARKED_FIRST="$TEST_DIR/unmarked-first"
+cp "$UNMARKED_MANIFEST" "$UNMARKED_FIRST"
+UNMARKED_REPEAT_STATUS=0
+migrate_unmarked_legacy_application_manifest "$UNMARKED_SOURCE" "$UNMARKED_MANIFEST" ||
+    UNMARKED_REPEAT_STATUS=$?
+[ "$UNMARKED_REPEAT_STATUS" -eq "$RC_SKIPPED" ] ||
+    fail 'second explicit adoption must be skipped after metadata is present'
+cmp -s "$UNMARKED_FIRST" "$UNMARKED_MANIFEST" ||
+    fail 'second explicit adoption must be content-idempotent'
+UNMARKED_BACKUP=$(find "$(dirname "$UNMARKED_MANIFEST")" -maxdepth 1 -type f \
+    -name "$(basename "$UNMARKED_MANIFEST").bak.*" -print -quit)
+[ -n "$UNMARKED_BACKUP" ] && [ -s "$UNMARKED_BACKUP" ] ||
+    fail 'explicit adoption must create a unique backup before switching'
+
+UNMARKED_ROLLBACK_SOURCE="$TEST_DIR/unmarked-rollback-source.txt"
+UNMARKED_ROLLBACK_MANIFEST="$TEST_DIR/unmarked-rollback-profile/applications.list"
+mkdir -p "$(dirname "$UNMARKED_ROLLBACK_MANIFEST")"
+printf 'neovim\nwine\n' > "$UNMARKED_ROLLBACK_SOURCE"
+cat > "$UNMARKED_ROLLBACK_MANIFEST" <<'EOF'
+# preserve this unmarked manifest
+custom-before-rollback
+neovim
+EOF
+UNMARKED_ROLLBACK_ORIGINAL="$TEST_DIR/unmarked-rollback-original"
+cp "$UNMARKED_ROLLBACK_MANIFEST" "$UNMARKED_ROLLBACK_ORIGINAL"
+write_application_manifest_metadata() { return 1; }
+UNMARKED_ROLLBACK_STATUS=0
+migrate_unmarked_legacy_application_manifest "$UNMARKED_ROLLBACK_SOURCE" \
+    "$UNMARKED_ROLLBACK_MANIFEST" 2>/dev/null ||
+    UNMARKED_ROLLBACK_STATUS=$?
+unset -f write_application_manifest_metadata
+[ "$UNMARKED_ROLLBACK_STATUS" -eq 1 ] ||
+    fail 'unmarked adoption metadata failure must fail the migration'
+cmp -s "$UNMARKED_ROLLBACK_ORIGINAL" "$UNMARKED_ROLLBACK_MANIFEST" ||
+    fail 'unmarked adoption metadata failure must restore the original manifest'
+[ ! -e "$UNMARKED_ROLLBACK_MANIFEST.meta" ] ||
+    fail 'unmarked adoption rollback must remove partial metadata'
+UNMARKED_ROLLBACK_BACKUP=$(find "$(dirname "$UNMARKED_ROLLBACK_MANIFEST")" -maxdepth 1 \
+    -type f -name "$(basename "$UNMARKED_ROLLBACK_MANIFEST").bak.*" -print -quit)
+[ -n "$UNMARKED_ROLLBACK_BACKUP" ] ||
+    fail 'unmarked adoption rollback must preserve a unique transaction backup'
+unset SHORIN_ADOPT_LEGACY_APPLICATIONS
 
 MISSING_MANIFEST="$TEST_DIR/missing-profile/applications.list"
 run_applications_phase "$MISSING_MANIFEST" check repair
