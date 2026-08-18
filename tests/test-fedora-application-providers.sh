@@ -256,12 +256,12 @@ for binary in yazi ya; do
     cat > "$YAZI_X86_ROOT/$binary" <<EOF
 #!/usr/bin/env bash
 printf '%s\\n' '$title'
-printf '%s\\n' 'Version: 26.8.15 (fixture)'
+printf '%s\n' '    Version: 26.8.15 (fixture)'
 EOF
     cat > "$YAZI_AARCH64_ROOT/$binary" <<EOF
 #!/usr/bin/env bash
 printf '%s\\n' '$title'
-printf '%s\\n' 'Version: 26.8.15 (fixture)'
+printf '%s\n' '    Version: 26.8.15 (fixture)'
 EOF
     chmod 755 "$YAZI_X86_ROOT/$binary" "$YAZI_AARCH64_ROOT/$binary"
 done
@@ -310,17 +310,19 @@ curl() {
 [ "$(fedora_yazi_release_url)" = \
     'https://github.com/sxyazi/yazi/releases/download/v26.8.15/yazi-x86_64-unknown-linux-gnu.zip' ] ||
     fail 'Yazi x86_64 release URL must be pinned to the official GNU ZIP'
-fedora_yazi_version_output_satisfied $'Yazi\nVersion: 26.8.15 (fixture)' ||
+fedora_yazi_version_output_satisfied $'Yazi\n    Version: 26.8.15 (fixture)' ||
     fail 'Yazi version parser must accept the real multi-line output'
-if fedora_yazi_version_output_satisfied $'Yazi\nVersion: 26.8.16 (fixture)'; then
+if fedora_yazi_version_output_satisfied $'Yazi\n    Version: 26.8.16 (fixture)'; then
     fail 'Yazi version parser must reject an unpinned version'
 fi
-if fedora_yazi_version_output_satisfied $'Yazi\nVersion: 26.8.150 (fixture)'; then
+if fedora_yazi_version_output_satisfied $'Yazi\n    Version: 26.8.150 (fixture)'; then
     fail 'Yazi version parser must reject a version that only contains the pin'
 fi
 if fedora_yazi_version_output_satisfied $'Yazi 26.8.15'; then
     fail 'Yazi version parser must require the real Version line'
 fi
+fedora_yazi_version_output_satisfied $'Yazi\nVersion: 26.8.15 (fixture)' ||
+    fail 'Yazi version parser must accept an unindented Version line'
 fedora_application_target_satisfied yazi "$TARGET_USER" "$HOME_DIR" &&
     fail 'Yazi must be drift before release installation'
 fedora_install_application_target yazi "$TARGET_USER" "$HOME_DIR" ||
@@ -337,7 +339,7 @@ done
 cat > "$HOME_DIR/.local/bin/yazi" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' 'Yazi'
-printf '%s\n' 'Version: 26.8.16 (fixture)'
+printf '%s\n' '    Version: 26.8.16 (fixture)'
 EOF
 chmod 755 "$HOME_DIR/.local/bin/yazi"
 if fedora_application_target_satisfied yazi "$TARGET_USER" "$HOME_DIR"; then
@@ -346,7 +348,7 @@ fi
 cat > "$HOME_DIR/.local/bin/yazi" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' 'Yazi'
-printf '%s\n' 'Version: 26.8.15 (fixture)'
+printf '%s\n' '    Version: 26.8.15 (fixture)'
 EOF
 chmod 755 "$HOME_DIR/.local/bin/yazi"
 [ -x "$HOME_DIR/.local/bin/yazi" ] ||
@@ -358,7 +360,7 @@ fi
 cat > "$HOME_DIR/.local/bin/ya" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' 'Ya'
-printf '%s\n' 'Version: 26.8.15 (fixture)'
+printf '%s\n' '    Version: 26.8.15 (fixture)'
 EOF
 chmod 755 "$HOME_DIR/.local/bin/ya"
 [ "$(grep -c '^package:curl$' "$PROVIDER_CALLS" || true)" -gt 0 ] ||
