@@ -124,6 +124,7 @@ fedora_install_vicinae() {
     destination=$(fedora_user_bin vicinae.AppImage "$home")
     desktop="$home/.local/share/applications/vicinae.desktop"
     if [ -x "$destination" ] && fedora_vicinae_desktop_satisfied "$home"; then
+        fedora_vicinae_niri_command_contract_apply "$user" "$home" || return
         return 0
     fi
     if [ -n "${FEDORA_VICINAE_APPIMAGE:-}" ] &&
@@ -176,6 +177,7 @@ fedora_install_vicinae() {
         it.mijorus.gearlever --integrate "$destination" --yes \
         >/dev/null 2>&1; then
         if fedora_vicinae_desktop_satisfied "$home"; then
+            fedora_vicinae_niri_command_contract_apply "$user" "$home" || return
             return 0
         fi
     else
@@ -195,7 +197,11 @@ EOF
     install_if_changed "$temporary" "$desktop" 644
     rm -f "$temporary"
     chown "$user:$group" "$desktop"
-    [ -x "$destination" ] && fedora_vicinae_desktop_satisfied "$home"
+    if [ -x "$destination" ] && fedora_vicinae_desktop_satisfied "$home"; then
+        fedora_vicinae_niri_command_contract_apply "$user" "$home" || return
+        return 0
+    fi
+    return 1
 }
 
 
@@ -210,3 +216,4 @@ source "$SHORIN_LIB_DIR/fedora-font-installer.sh"
 source "$SHORIN_LIB_DIR/fedora-provider-transaction.sh"
 source "$SHORIN_LIB_DIR/fedora-fd-rdd.sh"
 source "$SHORIN_LIB_DIR/fedora-applications.sh"
+source "$SHORIN_LIB_DIR/fedora-vicinae-contract.sh"

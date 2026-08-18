@@ -27,6 +27,8 @@ niri_session_contract_init() {
     NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE=${NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE:-$HOME_DIR/.config/autostart/org.kde.xwaylandvideobridge.desktop}
     NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT=${NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT:-app-org.kde.xwaylandvideobridge@autostart.service}
     NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE=${NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE:-$HOME_DIR/.config/systemd/user/$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT}
+    NIRI_FEDORA_DRKONQI_UNIT=${NIRI_FEDORA_DRKONQI_UNIT:-drkonqi-coredump-launcher.socket}
+    NIRI_FEDORA_DRKONQI_MASK_FILE=${NIRI_FEDORA_DRKONQI_MASK_FILE:-$HOME_DIR/.config/systemd/user/$NIRI_FEDORA_DRKONQI_UNIT}
     NIRI_FEDORA_POLKIT_AGENT_PATH=${NIRI_FEDORA_POLKIT_AGENT_PATH:-/usr/libexec/kf6/polkit-kde-authentication-agent-1}
 }
 
@@ -195,7 +197,7 @@ niri_fedora_xwayland_videobridge_mask_satisfied() {
         "$user" ]
 }
 
-niri_fedora_xwayland_videobridge_user_systemctl() {
+niri_fedora_user_systemctl() {
     local user=$1 uid runtime_dir
     shift
 
@@ -207,6 +209,10 @@ niri_fedora_xwayland_videobridge_user_systemctl() {
         XDG_RUNTIME_DIR="$runtime_dir" \
         DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime_dir/bus" \
         systemctl --user "$@"
+}
+
+niri_fedora_xwayland_videobridge_user_systemctl() {
+    niri_fedora_user_systemctl "$@"
 }
 
 niri_fedora_xwayland_videobridge_reset_failed() {

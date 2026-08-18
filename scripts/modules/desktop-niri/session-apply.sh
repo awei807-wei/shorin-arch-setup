@@ -149,6 +149,8 @@ ensure_niri_session_config() {
             "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE" || status=1
         niri_desktop_txn_snapshot \
             "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE" || status=1
+        niri_desktop_txn_snapshot \
+            "$NIRI_FEDORA_DRKONQI_MASK_FILE" || status=1
     fi
     if [ "$status" -ne 0 ]; then
         error 'Unable to snapshot all Niri session targets; session apply was not attempted.'
@@ -183,6 +185,17 @@ ensure_niri_session_config() {
         niri_desktop_txn_finish 1
         niri_fedora_xwayland_videobridge_reload_user_manager "$user" ||
             error 'Unable to reload the target user manager after Xwayland Video Bridge rollback.'
+        ensure_niri_shorin_state_ownership "$user" ||
+            error 'Unable to restore Shorin state ownership after session rollback.'
+        return 1
+    fi
+    if platform_is_fedora &&
+        ! niri_session_step 'DrKonqi coredump launcher mask' \
+            ensure_niri_fedora_drkonqi "$user"; then
+        error 'DrKonqi coredump launcher mask failed; restoring the session transaction.'
+        niri_desktop_txn_finish 1
+        niri_fedora_drkonqi_reload_user_manager "$user" ||
+            error 'Unable to reload the target user manager after DrKonqi rollback.'
         ensure_niri_shorin_state_ownership "$user" ||
             error 'Unable to restore Shorin state ownership after session rollback.'
         return 1

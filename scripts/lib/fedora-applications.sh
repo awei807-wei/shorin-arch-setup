@@ -37,7 +37,8 @@ fedora_application_target_satisfied() {
             fedora_flatpak_present it.mijorus.gearlever "$user" "$home" || gearlever=0
             appimage=$(fedora_user_bin vicinae.AppImage "$home")
             [ "$gearlever" -eq 1 ] && [ -x "$appimage" ] &&
-                fedora_vicinae_desktop_satisfied "$home" ;;
+                fedora_vicinae_desktop_satisfied "$home" &&
+                fedora_vicinae_niri_command_contract_satisfied "$home" ;;
         fd-rdd-git)
             fedora_fd_rdd_binary_satisfied "$home" "$user" ;;
         tsukimi-bin)

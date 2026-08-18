@@ -131,6 +131,8 @@ desktop_niri_inspect() {
     if platform_is_fedora; then
         desktop_niri_expect "$phase" config:fedora-xwaylandvideobridge-autostart \
             niri_fedora_xwayland_videobridge_autostart_satisfied
+        desktop_niri_expect "$phase" config:fedora-drkonqi \
+            niri_fedora_drkonqi_satisfied "$TARGET_USER"
     fi
     desktop_niri_expect "$phase" config:niri-quickshell-startup \
         niri_quickshell_startup_satisfied \

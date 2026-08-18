@@ -119,7 +119,8 @@ JetBrains Mono。Arch 继续使用原有 pacman/AUR 目标。Kitty、QuickShell 
 
 Vicinae 的自动收敛路径是目标用户 `~/.local/bin/vicinae.AppImage` 加托管的
 `~/.local/share/applications/vicinae.desktop`，并要求 Gear Lever Flatpak 已安装；
-只有这三个状态同时满足时才报告已集成。也可以通过 `FEDORA_VICINAE_APPIMAGE`
+只有这三个状态同时满足时才报告已集成；Fedora Niri 中的 Vicinae server/toggle
+命令也会幂等转换为 `vicinae.AppImage`。也可以通过 `FEDORA_VICINAE_APPIMAGE`
 指定本地官方 AppImage；`fd-rdd` 可通过 `FEDORA_FD_RDD_INSTALL_SCRIPT` 交接本地官方
 `install.sh`，避免在网络受限时把失效网络 URL 或下载失败误报为成功。
 
@@ -284,7 +285,7 @@ Fedora 的壁纸会话由 Niri 启动一次 `fedora-wallpaper-session.sh`，使�
 
 Fedora + Niri 会通过目标用户的 `~/.config/autostart/org.kde.xwaylandvideobridge.desktop` 写入 `Hidden=true`，禁用 X11 兼容桥的默认自动启动；这是仅针对 X11 兼容层的设置，不影响 Wayland 原生 portal。Arch 路径不写入或管理该文件。
 
-Fedora 的 Niri 配置收敛保留现有用户文件，不会用上游树盲目覆盖 `config.kdl` 或 `binds.kdl`。事务内会备份并迁移旧的 `~/.config/quickshell/scripts/lockscreen-wait.sh` 到 `lockscreen.sh`，并替换 polkit-gnome 路径；来源 checkout 必须提供普通、可执行的 `dotfiles/.config/quickshell/scripts/lockscreen.sh`，目标文件必须归目标用户所有。缺少来源的 `fd-rdd`、`vicinae`、`waypaper`、`niriswitcher`、`niriswitcherctl`、`waybar` 和 `hyprpicker` 只改为 `command -v` shell guard，后续安装对应程序后即可自动启用，当前不会伪造命令或宣称功能已安装。迁移后的配置必须通过 `niri validate`，失败会恢复原文件。
+Fedora 的 Niri 配置收敛保留现有用户文件，不会用上游树盲目覆盖 `config.kdl` 或 `binds.kdl`。事务内会备份并迁移旧的 `~/.config/quickshell/scripts/lockscreen-wait.sh` 到 `lockscreen.sh`，并替换 polkit-gnome 路径；来源 checkout 必须提供普通、可执行的 `dotfiles/.config/quickshell/scripts/lockscreen.sh`，目标文件必须归目标用户所有。缺少来源的 `fd-rdd`、`vicinae`、`waypaper`、`niriswitcher`、`niriswitcherctl`、`waybar` 和 `hyprpicker` 只改为 `command -v` shell guard，后续安装对应程序后即可自动启用，当前不会伪造命令或宣称功能已安装。Fedora Niri 还会持久 mask `drkonqi-coredump-launcher.socket`，关闭 KDE DrKonqi 弹窗但保留 `systemd-coredump` 与 `coredumpctl`。迁移后的配置必须通过 `niri validate`，失败会恢复原文件。
 
 ## 模块契约
 
