@@ -76,7 +76,7 @@ ensure_niri_managed_config_files() {
 
     [ "$status" -ne 0 ] ||
         niri_session_step 'Fedora session compatibility' \
-            ensure_niri_fedora_session_compatibility "$user" || status=$?
+            ensure_niri_fedora_session_compatibility_files "$user" || status=$?
     [ "$status" -ne 0 ] ||
         niri_session_step 'QuickShell startup' \
             ensure_niri_quickshell_startup "$NIRI_CONFIG_FILE" "$user" || status=$?
@@ -88,6 +88,9 @@ ensure_niri_managed_config_files() {
             "$NIRI_CONFIG_FILE" "$user" || status=$?
     [ "$status" -ne 0 ] ||
         niri_session_step 'PATH convergence' ensure_niri_path "$user" || status=$?
+    [ "$status" -ne 0 ] ||
+        niri_session_step 'Fedora LSFG session environment' \
+            ensure_niri_fedora_lsfg_session "$user" || status=$?
     [ "$status" -ne 0 ] ||
         niri_session_step 'wallpaper backend' \
             ensure_niri_wallpaper_backend "$user" || status=$?
@@ -139,7 +142,13 @@ ensure_niri_session_config() {
     niri_desktop_txn_snapshot "$NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE" || status=1
     if platform_is_fedora; then
         niri_desktop_txn_snapshot \
+            "$(niri_fedora_lsfg_environment_file_path)" || status=1
+        niri_desktop_txn_snapshot \
+            "$(niri_fedora_lsfg_wrapper_path)" || status=1
+        niri_desktop_txn_snapshot \
             "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE" || status=1
+        niri_desktop_txn_snapshot \
+            "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE" || status=1
     fi
     if [ "$status" -ne 0 ]; then
         error 'Unable to snapshot all Niri session targets; session apply was not attempted.'
@@ -163,6 +172,17 @@ ensure_niri_session_config() {
             "$user"; then
         error 'Niri session post-processing failed; restoring the session transaction.'
         niri_desktop_txn_finish 1
+        ensure_niri_shorin_state_ownership "$user" ||
+            error 'Unable to restore Shorin state ownership after session rollback.'
+        return 1
+    fi
+    if platform_is_fedora &&
+        ! niri_session_step 'Xwayland Video Bridge shutdown' \
+            ensure_niri_fedora_xwayland_videobridge_autostart "$user"; then
+        error 'Xwayland Video Bridge shutdown failed; restoring the session transaction.'
+        niri_desktop_txn_finish 1
+        niri_fedora_xwayland_videobridge_reload_user_manager "$user" ||
+            error 'Unable to reload the target user manager after Xwayland Video Bridge rollback.'
         ensure_niri_shorin_state_ownership "$user" ||
             error 'Unable to restore Shorin state ownership after session rollback.'
         return 1

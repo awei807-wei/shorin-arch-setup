@@ -20,6 +20,9 @@ if test -d "$HOME/.vcp/bin"
     end
 end
 EOF
+    if platform_is_fedora; then
+        printf '%s\n' 'set -gx DISABLE_LSFG 1'
+    fi
 }
 
 niri_normalize_fish_contract() {

@@ -438,6 +438,7 @@ NIRI_QUICKSHELL_BACKUP_DIR="$NIRI_DESKTOP_STATE_DIR/quickshell-backups"
 NIRI_QUICKSHELL_SOURCE_STATE_FILE="$NIRI_DESKTOP_STATE_DIR/quickshell-source"
 FEDORA_QUICKSHELL_CHECKOUT="$TEST_DIR/fedora-quickshell-source"
 desktop_niri_contract_init
+niri_user_bus_is_available() { return 1; }
 mkdir -p "$FEDORA_QUICKSHELL_CHECKOUT/dotfiles/.config/quickshell/scripts" \
     "$FEDORA_QUICKSHELL_CHECKOUT/dotfiles/.config/quickshell/lockscreen" \
     "$FEDORA_QUICKSHELL_CHECKOUT/dotfiles/.config/quickshell/config"

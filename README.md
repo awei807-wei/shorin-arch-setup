@@ -12,6 +12,8 @@ Fedora 的 Niri 会话必须通过已启用且正在运行的正式 display mana
 或 GDM）进入，并提供 `/usr/share/wayland-sessions/niri.desktop`，其中唯一的会话命令为
 `Exec=niri-session`；Fedora 不创建 tty1 自动登录或 TTY 回退。Arch 保留 tty1 的托管
 `~/.bash_profile` 会话入口。
+Fedora Niri 默认通过 `DISABLE_LSFG=1` 禁用全局 LSFG-VK implicit layer；游戏需显式使用
+`shorin-lsfg COMMAND [ARG...]` 启用，避免 QQ 等桌面应用崩溃。
 
 执行模型如下：
 

@@ -122,6 +122,10 @@ desktop_niri_inspect() {
     fi
     desktop_niri_expect "$phase" config:fedora-session-compatibility \
         niri_fedora_session_compatibility_satisfied
+    if platform_is_fedora; then
+        desktop_niri_expect "$phase" config:fedora-lsfg-environment \
+            niri_fedora_lsfg_session_satisfied "$TARGET_USER"
+    fi
     desktop_niri_expect "$phase" config:fedora-wallpaper-session \
         niri_fedora_wallpaper_session_satisfied
     if platform_is_fedora; then

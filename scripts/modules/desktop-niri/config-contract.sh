@@ -22,7 +22,11 @@ niri_session_contract_init() {
     NIRI_LOCKSCREEN_SCRIPT_FILE=${NIRI_LOCKSCREEN_SCRIPT_FILE:-$NIRI_QUICKSHELL_DIR/scripts/lockscreen.sh}
     NIRI_FEDORA_WALLPAPER_SESSION_FILE=${NIRI_FEDORA_WALLPAPER_SESSION_FILE:-$NIRI_LOCAL_BIN/shorin-fedora-wallpaper-session}
     NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE=${NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE:-$NIRI_LOCAL_BIN/shorin-fedora-awww-query}
+    NIRI_FEDORA_LSFG_ENV_FILE=${NIRI_FEDORA_LSFG_ENV_FILE:-$HOME_DIR/.config/environment.d/90-shorin-lsfg.conf}
+    NIRI_FEDORA_LSFG_WRAPPER_FILE=${NIRI_FEDORA_LSFG_WRAPPER_FILE:-$NIRI_LOCAL_BIN/shorin-lsfg}
     NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE=${NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE:-$HOME_DIR/.config/autostart/org.kde.xwaylandvideobridge.desktop}
+    NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT=${NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT:-app-org.kde.xwaylandvideobridge@autostart.service}
+    NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE=${NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE:-$HOME_DIR/.config/systemd/user/$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT}
     NIRI_FEDORA_POLKIT_AGENT_PATH=${NIRI_FEDORA_POLKIT_AGENT_PATH:-/usr/libexec/kf6/polkit-kde-authentication-agent-1}
 }
 
@@ -181,17 +185,126 @@ niri_fedora_xwayland_videobridge_autostart_contract() {
     printf '[Desktop Entry]\nHidden=true\n'
 }
 
+niri_fedora_xwayland_videobridge_mask_satisfied() {
+    local user=${1:-$TARGET_USER}
+
+    [ -L "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE" ] || return 1
+    [ "$(readlink "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE")" = /dev/null ] ||
+        return 1
+    [ "$(stat -c '%U' "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE")" = \
+        "$user" ]
+}
+
+niri_fedora_xwayland_videobridge_user_systemctl() {
+    local user=$1 uid runtime_dir
+    shift
+
+    command -v systemctl >/dev/null 2>&1 || return 2
+    uid=$(id -u "$user") || return 1
+    runtime_dir="${SHORIN_USER_RUNTIME_ROOT:-/run/user}/$uid"
+    niri_run_as_user "$user" env \
+        LC_ALL=C \
+        XDG_RUNTIME_DIR="$runtime_dir" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime_dir/bus" \
+        systemctl --user "$@"
+}
+
+niri_fedora_xwayland_videobridge_reset_failed() {
+    local user=$1 output status
+
+    if output=$(niri_fedora_xwayland_videobridge_user_systemctl "$user" \
+        reset-failed "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT" 2>&1); then
+        return 0
+    else
+        status=$?
+    fi
+    case "$status" in
+        1|5)
+            printf '%s\n' "$output" |
+                grep -Eiq '(^|[[:space:]])Unit[[:space:]]+[^[:space:]]+[[:space:]]+not loaded([.:]|$)' &&
+                return 0
+            ;;
+    esac
+    return "$status"
+}
+
+niri_fedora_xwayland_videobridge_reload_user_manager() {
+    local user=$1 status=0
+
+    if niri_user_bus_is_available "$user"; then
+        niri_fedora_xwayland_videobridge_user_systemctl "$user" \
+            daemon-reload
+    else
+        status=$?
+        [ "$status" -eq 1 ] || return "$status"
+    fi
+}
+
+niri_fedora_xwayland_videobridge_unit_inactive() {
+    local user=$1 status=0
+
+    if niri_fedora_xwayland_videobridge_user_systemctl "$user" \
+        is-active --quiet "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT"; then
+        return 1
+    else
+        status=$?
+    fi
+    case "$status" in
+        1|3|4) return 0 ;;
+        *) return "$status" ;;
+    esac
+}
+
+niri_fedora_xwayland_videobridge_process_inactive() {
+    local user=$1 pid status=0
+
+    pid=$(niri_fedora_xwayland_videobridge_user_systemctl "$user" \
+        show -p MainPID --value "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT") || {
+        status=$?
+        case "$status" in
+            1|3|4) return 0 ;;
+            *) return "$status" ;;
+        esac
+    }
+    case "$pid" in
+        ''|0) return 0 ;;
+        *[!0-9]*) return 2 ;;
+    esac
+    if kill -0 "$pid" 2>/dev/null; then
+        return 1
+    else
+        status=$?
+    fi
+    [ "$status" -eq 1 ] || return "$status"
+}
+
+niri_fedora_xwayland_videobridge_service_satisfied() {
+    local user=${1:-$TARGET_USER} status=0
+
+    niri_fedora_xwayland_videobridge_mask_satisfied "$user" || return 1
+    if niri_user_bus_is_available "$user"; then
+        :
+    else
+        status=$?
+        [ "$status" -eq 1 ] || return "$status"
+        return 0
+    fi
+    niri_fedora_xwayland_videobridge_unit_inactive "$user" || return
+    niri_fedora_xwayland_videobridge_process_inactive "$user"
+}
+
 niri_fedora_xwayland_videobridge_autostart_satisfied() {
-    local actual expected
+    local actual expected user=${1:-$TARGET_USER}
 
     platform_is_fedora || return 0
     [ -f "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE" ] || return 1
     [ ! -L "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE" ] || return 1
     [ "$(stat -c '%U' "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE")" = \
-        "$TARGET_USER" ] || return 1
+        "$user" ] || return 1
     actual=$(< "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE")
     expected=$(niri_fedora_xwayland_videobridge_autostart_contract)
-    [ "$actual" = "$expected" ]
+    [ "$actual" = "$expected" ] || return 1
+    niri_fedora_xwayland_videobridge_service_satisfied "$user"
 }
 
 niri_fedora_install_if_stale_user_file() {
@@ -242,7 +355,7 @@ ensure_niri_fedora_wallpaper_session() {
 }
 
 ensure_niri_fedora_xwayland_videobridge_autostart() {
-    local user=$1 group temporary
+    local user=$1 group temporary status=0 mask_file bus_available=0
 
     require_writable_mode || return
     platform_is_fedora || return 0
@@ -262,7 +375,45 @@ ensure_niri_fedora_xwayland_videobridge_autostart() {
     }
     rm -f "$temporary"
     chown "$user:$group" "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE" || return 1
-    niri_fedora_xwayland_videobridge_autostart_satisfied
+    niri_path_is_safe_no_symlink \
+        "$(dirname "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE")" ||
+        return 1
+    install -d -o "$user" -g "$group" \
+        "$(dirname "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE")" ||
+        return 1
+    mask_file=$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE
+    if niri_user_bus_is_available "$user"; then
+        bus_available=1
+    else
+        status=$?
+        [ "$status" -eq 1 ] || return "$status"
+    fi
+    if [ -e "$mask_file" ] || [ -L "$mask_file" ]; then
+        [ -L "$mask_file" ] || return 1
+        [ "$(readlink "$mask_file")" = /dev/null ] || return 1
+        if [ "$(stat -c '%U' "$mask_file")" != "$user" ]; then
+            chown -h "$user:$group" "$mask_file" || return 1
+        fi
+    else
+        niri_run_as_user "$user" ln -s /dev/null "$mask_file" || return
+    fi
+    if [ "$bus_available" -eq 1 ]; then
+        # The order is intentional: make the mask visible to the user
+        # manager, reload its cache, stop any already-running generated unit,
+        # clear its failure state, then validate inactive state.  Keep stop as
+        # a separate command so the operation remains auditable.
+        niri_fedora_xwayland_videobridge_reload_user_manager "$user" || return
+        niri_fedora_xwayland_videobridge_user_systemctl "$user" \
+            stop "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT" || {
+            status=$?
+            case "$status" in
+                1|3|4|5) ;;
+                *) return "$status" ;;
+            esac
+        }
+        niri_fedora_xwayland_videobridge_reset_failed "$user" || return
+    fi
+    niri_fedora_xwayland_videobridge_autostart_satisfied "$user"
 }
 
 ensure_niri_fedora_wallpaper_initializer() {
@@ -303,11 +454,16 @@ niri_fedora_lockscreen_contract_satisfied() {
     niri_fedora_wallpaper_session_satisfied
 }
 
-niri_fedora_session_compatibility_satisfied() {
+niri_fedora_session_compatibility_files_satisfied() {
     platform_is_fedora || return 0
     niri_fedora_lockscreen_contract_satisfied || return 1
     niri_fedora_config_file_compatibility_satisfied "$NIRI_CONFIG_FILE" || return 1
-    niri_fedora_config_file_compatibility_satisfied "$NIRI_BINDS_FILE" || return 1
+    niri_fedora_config_file_compatibility_satisfied "$NIRI_BINDS_FILE"
+}
+
+niri_fedora_session_compatibility_satisfied() {
+    platform_is_fedora || return 0
+    niri_fedora_session_compatibility_files_satisfied || return 1
     niri_fedora_xwayland_videobridge_autostart_satisfied
 }
 
@@ -341,14 +497,24 @@ ensure_niri_fedora_config_file_compatibility() {
     niri_fedora_config_file_compatibility_satisfied "$file"
 }
 
-ensure_niri_fedora_session_compatibility() {
+ensure_niri_fedora_session_compatibility_files() {
     local user=$1
 
     platform_is_fedora || return 0
     ensure_niri_fedora_wallpaper_session "$user" || return
+    ensure_niri_fedora_config_file_compatibility "$NIRI_CONFIG_FILE" "$user" ||
+        return
+    ensure_niri_fedora_config_file_compatibility "$NIRI_BINDS_FILE" "$user" ||
+        return
+    niri_fedora_session_compatibility_files_satisfied
+}
+
+ensure_niri_fedora_session_compatibility() {
+    local user=$1
+
+    platform_is_fedora || return 0
+    ensure_niri_fedora_session_compatibility_files "$user" || return
     ensure_niri_fedora_xwayland_videobridge_autostart "$user" || return
-    ensure_niri_fedora_config_file_compatibility "$NIRI_CONFIG_FILE" "$user" || return
-    ensure_niri_fedora_config_file_compatibility "$NIRI_BINDS_FILE" "$user" || return
     niri_fedora_session_compatibility_satisfied
 }
 

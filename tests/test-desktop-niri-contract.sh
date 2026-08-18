@@ -32,6 +32,69 @@ assert_equal() {
         fail "$message (expected=$expected actual=$actual)"
 }
 
+write_fedora_videobridge_systemctl_mock() {
+    local bin=$1
+
+    cat > "$bin/systemctl" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${VIDEOBRIDGE_SYSTEMCTL_LOG:?}"
+if [ "${1:-}" = --user ] && [ "${2:-}" = stop ] &&
+    [ "${3:-}" = "${NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT:?}" ]; then
+    printf '%s\n' inactive > "${VIDEOBRIDGE_STATE:?}"
+    printf '%s\n' 0 > "${VIDEOBRIDGE_PID:?}"
+    exit 0
+fi
+if [ "${1:-}" = --user ] && [ "${2:-}" = daemon-reload ]; then
+    exit 0
+fi
+if [ "${1:-}" = --user ] && [ "${2:-}" = reset-failed ] &&
+    [ "${3:-}" = "${NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT:?}" ]; then
+    reset_failed_status=${VIDEOBRIDGE_RESET_FAILED_STATUS:-0}
+    if [ "$reset_failed_status" -ne 0 ]; then
+        printf '%s\n' "${VIDEOBRIDGE_RESET_FAILED_OUTPUT:-}" >&2
+    fi
+    exit "$reset_failed_status"
+fi
+if [ "${1:-}" = --user ] && [ "${2:-}" = show-environment ]; then
+    printf '%s\n' 'DISABLE_LSFG=1'
+    exit 0
+fi
+if [ "${1:-}" = --user ] && [ "${2:-}" = set-environment ] &&
+    [ "${3:-}" = DISABLE_LSFG=1 ]; then
+    exit 0
+fi
+if [ "${1:-}" = --user ] && [ "${2:-}" = is-active ] &&
+    [ "${3:-}" = --quiet ] &&
+    [ "${4:-}" = "${NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT:?}" ]; then
+    [ "$(< "${VIDEOBRIDGE_STATE:?}")" = active ]
+    exit $?
+fi
+if [ "${1:-}" = --user ] && [ "${2:-}" = show ] &&
+    [ "${3:-}" = -p ] && [ "${4:-}" = MainPID ] &&
+    [ "${5:-}" = --value ] &&
+    [ "${6:-}" = "${NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT:?}" ]; then
+    cat "${VIDEOBRIDGE_PID:?}"
+    exit 0
+fi
+exit 99
+EOF
+    chmod 755 "$bin/systemctl"
+    cat > "$bin/runuser" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = -u ]; then
+    shift 2
+    [ "${1:-}" = -- ] || exit 2
+    shift
+fi
+while [[ "${1:-}" == *=* ]]; do
+    export "$1"
+    shift
+done
+exec "$@"
+EOF
+    chmod 755 "$bin/runuser"
+}
+
 source "$ROOT_DIR/scripts/modules/desktop-niri/targets.sh"
 source "$ROOT_DIR/scripts/modules/desktop-niri/dotfiles-apply.sh"
 
@@ -1154,17 +1217,32 @@ test_fedora_niri_session_compatibility() (
     local empty_path="$TEST_DIR/empty-path"
     local config_copy binds_copy arch_copy guard noise_file noise_output \
         unguarded_file lockscreen_config_noise lockscreen_binds_noise \
-        saved_config_file saved_binds_file
+        saved_config_file saved_binds_file wrong_mask_target
+    local videobridge_systemctl_log="$TEST_DIR/fedora-videobridge-systemctl.log"
+    local videobridge_state="$TEST_DIR/fedora-videobridge-state"
+    local videobridge_pid="$TEST_DIR/fedora-videobridge-pid"
 
     export SHORIN_DISTRO=fedora HOME_DIR="$fedora_home"
     unset NIRI_CONFIG_FILE NIRI_BINDS_FILE NIRI_LOCAL_BIN
     unset NIRI_LOCKSCREEN_SCRIPT_FILE NIRI_FEDORA_POLKIT_AGENT_PATH
     desktop_niri_contract_init
+    export NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT \
+        NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE
     mkdir -p "$HOME_DIR/.config/niri" "$HOME_DIR/.config/quickshell/scripts" \
         "$HOME_DIR/.local/bin" \
         "$fedora_bin" "$empty_path"
+    write_fedora_videobridge_systemctl_mock "$fedora_bin"
+    export VIDEOBRIDGE_SYSTEMCTL_LOG="$videobridge_systemctl_log"
+    export VIDEOBRIDGE_STATE="$videobridge_state"
+    export VIDEOBRIDGE_PID="$videobridge_pid"
+    unset VIDEOBRIDGE_RESET_FAILED_STATUS VIDEOBRIDGE_RESET_FAILED_OUTPUT
+    printf '%s\n' inactive > "$VIDEOBRIDGE_STATE"
+    printf '%s\n' 0 > "$VIDEOBRIDGE_PID"
+    export PATH="$fedora_bin:$PATH"
+    niri_user_bus_is_available() { return 0; }
     printf '#!/usr/bin/env bash\n' > "$NIRI_LOCKSCREEN_SCRIPT_FILE"
     chmod 755 "$NIRI_LOCKSCREEN_SCRIPT_FILE"
+    printf '%s\n' active > "$VIDEOBRIDGE_STATE"
     cat > "$NIRI_CONFIG_FILE" <<'EOF'
 environment {
     PATH "/usr/local/bin:/usr/bin"
@@ -1374,6 +1452,10 @@ test_fedora_wallpaper_backend_integration() (
     local fedora_checkout="$TEST_DIR/fedora-wallpaper-integration-checkout"
     local validate_bin="$TEST_DIR/fedora-wallpaper-integration-bin"
     local check_profile config_copy state_copy helper_digest status output
+    local videobridge_bin="$TEST_DIR/fedora-wallpaper-videobridge-bin"
+    local videobridge_systemctl_log="$TEST_DIR/fedora-wallpaper-videobridge-systemctl.log"
+    local videobridge_state="$TEST_DIR/fedora-wallpaper-videobridge-state"
+    local videobridge_pid="$TEST_DIR/fedora-wallpaper-videobridge-pid"
 
     export SHORIN_DISTRO=fedora HOME_DIR="$fedora_home"
     unset NIRI_CONFIG_FILE NIRI_BINDS_FILE NIRI_LOCAL_BIN \
@@ -1381,8 +1463,21 @@ test_fedora_wallpaper_backend_integration() (
         NIRI_QUICKSHELL_BACKUP_DIR NIRI_QUICKSHELL_SOURCE_STATE_FILE \
         NIRI_WAYPAPER_CONFIG_FILE NIRI_FEDORA_WALLPAPER_SESSION_FILE \
         NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE \
-        NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE
+        NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE \
+        NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE
     desktop_niri_contract_init
+    export NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT \
+        NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE
+    mkdir -p "$videobridge_bin"
+    write_fedora_videobridge_systemctl_mock "$videobridge_bin"
+    export VIDEOBRIDGE_SYSTEMCTL_LOG="$videobridge_systemctl_log"
+    export VIDEOBRIDGE_STATE="$videobridge_state"
+    export VIDEOBRIDGE_PID="$videobridge_pid"
+    printf '%s\n' inactive > "$VIDEOBRIDGE_STATE"
+    printf '%s\n' 0 > "$VIDEOBRIDGE_PID"
+    export PATH="$videobridge_bin:$PATH"
+    niri_user_bus_is_available() { return 0; }
+    printf '%s\n' active > "$VIDEOBRIDGE_STATE"
     mkdir -p "$HOME_DIR/.config/niri" "$HOME_DIR/.config/waypaper" \
         "$HOME_DIR/.config/quickshell" "$HOME_DIR/.local/bin" \
         "$fedora_checkout/dotfiles/.config/quickshell/lockscreen" \
@@ -1452,6 +1547,86 @@ EOF
     grep -Fqx 'Hidden=true' \
         "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE" ||
         fail 'Xwayland bridge override must disable user autostart'
+    niri_fedora_xwayland_videobridge_mask_satisfied ||
+        fail 'Xwayland bridge generated user unit must be masked'
+    wrong_mask_target="$TEST_DIR/fedora-wrong-videobridge-mask-target"
+    : > "$wrong_mask_target"
+    rm -f "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE"
+    ln -s "$wrong_mask_target" \
+        "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE"
+    if niri_fedora_xwayland_videobridge_mask_satisfied "$TARGET_USER"; then
+        fail 'Xwayland bridge mask must reject a symlink not pointing to /dev/null'
+    fi
+    rm -f "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE"
+    ln -s /dev/null "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE"
+    [ "$(readlink "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE")" = /dev/null ] ||
+        fail 'Xwayland bridge mask must point exactly to /dev/null'
+    grep -Fqx -- \
+        "--user stop $NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT" \
+        "$VIDEOBRIDGE_SYSTEMCTL_LOG" ||
+        fail 'Xwayland bridge apply must stop the generated user unit after masking'
+    grep -Fqx -- '--user daemon-reload' "$VIDEOBRIDGE_SYSTEMCTL_LOG" ||
+        fail 'Xwayland bridge apply must reload the target user manager'
+    grep -Fqx -- \
+        "--user reset-failed $NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT" \
+        "$VIDEOBRIDGE_SYSTEMCTL_LOG" ||
+        fail 'Xwayland bridge apply must clear the generated unit failure state'
+    ! grep -Fq -- 'stop --now' "$VIDEOBRIDGE_SYSTEMCTL_LOG" ||
+        fail 'Xwayland bridge apply must not use stop --now'
+    daemon_reload_line=$(grep -n -F -- '--user daemon-reload' \
+        "$VIDEOBRIDGE_SYSTEMCTL_LOG" | head -1 | cut -d: -f1)
+    stop_line=$(grep -n -F -- \
+        "--user stop $NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT" \
+        "$VIDEOBRIDGE_SYSTEMCTL_LOG" | head -1 | cut -d: -f1)
+    reset_failed_line=$(grep -n -F -- \
+        "--user reset-failed $NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT" \
+        "$VIDEOBRIDGE_SYSTEMCTL_LOG" | head -1 | cut -d: -f1)
+    [ -n "$daemon_reload_line" ] && [ -n "$stop_line" ] &&
+        [ -n "$reset_failed_line" ] &&
+        [ "$daemon_reload_line" -lt "$stop_line" ] &&
+        [ "$stop_line" -lt "$reset_failed_line" ] ||
+        fail 'Xwayland bridge apply must reload, stop, then reset-failed in order'
+    if niri_fedora_xwayland_videobridge_unit_inactive "$TARGET_USER"; then
+        :
+    else
+        fail 'masked Xwayland bridge unit must be inactive'
+    fi
+    printf '%s\n' active > "$VIDEOBRIDGE_STATE"
+    if niri_fedora_xwayland_videobridge_service_satisfied "$TARGET_USER"; then
+        fail 'active Xwayland bridge unit must fail the service contract'
+    fi
+    printf '%s\n' inactive > "$VIDEOBRIDGE_STATE"
+    printf '%s\n' "$$" > "$VIDEOBRIDGE_PID"
+    if niri_fedora_xwayland_videobridge_service_satisfied "$TARGET_USER"; then
+        fail 'running Xwayland bridge main process must fail the service contract'
+    fi
+    rm -f "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE" \
+        "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE"
+    export VIDEOBRIDGE_RESET_FAILED_STATUS=5
+    export VIDEOBRIDGE_RESET_FAILED_OUTPUT="Failed to reset failed state of unit $NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT: Unit $NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT not loaded."
+    ensure_niri_fedora_xwayland_videobridge_autostart "$TARGET_USER" ||
+        fail 'an explicit not-loaded reset-failed status 5 must be accepted'
+    rm -f "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE" \
+        "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE"
+    export VIDEOBRIDGE_RESET_FAILED_STATUS=1
+    ensure_niri_fedora_xwayland_videobridge_autostart "$TARGET_USER" ||
+        fail 'an explicit not-loaded reset-failed status 1 must be accepted'
+    rm -f "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE" \
+        "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE"
+    export VIDEOBRIDGE_RESET_FAILED_OUTPUT='Failed to reset failed state: Permission denied.'
+    if ensure_niri_fedora_xwayland_videobridge_autostart "$TARGET_USER"; then
+        fail 'an unrelated reset-failed error must not be accepted'
+    fi
+    unset VIDEOBRIDGE_RESET_FAILED_STATUS VIDEOBRIDGE_RESET_FAILED_OUTPUT
+    printf '%s\n' 0 > "$VIDEOBRIDGE_PID"
+    rm -f "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE" \
+        "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE"
+    niri_user_bus_is_available() { return 1; }
+    ensure_niri_fedora_xwayland_videobridge_autostart "$TARGET_USER" ||
+        fail 'Xwayland bridge apply must persist its mask before the first login'
+    niri_fedora_xwayland_videobridge_autostart_satisfied "$TARGET_USER" ||
+        fail 'Xwayland bridge contract must accept a persistent mask without a user bus'
+    niri_user_bus_is_available() { return 0; }
 
     # Repair/apply must replace stale deployed wrappers with the current source
     # bytes rather than assuming an existing executable is already current.
@@ -1536,6 +1711,16 @@ EOF
         printf '%s\n' "$output"
         return 0
     }
+    run_desktop_niri_verify() {
+        local verify_status=0
+
+        output=$(PATH="$PATH" SHORIN_PROFILE_DIR="$check_profile" \
+            PACKAGE_SOURCE_DIR="$TEST_DIR/package-sources" \
+            bash "$ROOT_DIR/scripts/modules/desktop-niri.sh" verify 2>&1) ||
+            verify_status=$?
+        printf '%s\n' "$output"
+        return 0
+    }
     run_desktop_niri_check
     if grep -Fq 'config:niri-wallpaper-backend' <<< "$output"; then
         fail 'Fedora initializer-managed desktop check must not report wallpaper backend drift'
@@ -1554,6 +1739,20 @@ EOF
         fail 'desktop check must report a missing Xwayland bridge override'
     ensure_niri_fedora_xwayland_videobridge_autostart "$TARGET_USER" ||
         fail 'Xwayland bridge override must be restorable after check drift'
+    rm -f "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE"
+    run_desktop_niri_check
+    grep -Fq 'config:fedora-xwaylandvideobridge-autostart' <<< "$output" ||
+        fail 'desktop check must report a missing Xwayland bridge mask'
+    ensure_niri_fedora_xwayland_videobridge_autostart "$TARGET_USER" ||
+        fail 'Xwayland bridge mask must be restorable after check drift'
+    printf '%s\n' active > "$VIDEOBRIDGE_STATE"
+    run_desktop_niri_check
+    grep -Fq 'config:fedora-xwaylandvideobridge-autostart' <<< "$output" ||
+        fail 'desktop check must report an active generated Xwayland bridge unit'
+    run_desktop_niri_verify
+    grep -Fq 'config:fedora-xwaylandvideobridge-autostart' <<< "$output" ||
+        fail 'desktop verify must report an active generated Xwayland bridge unit'
+    printf '%s\n' inactive > "$VIDEOBRIDGE_STATE"
 
     state_copy="$TEST_DIR/fedora-wallpaper-check-state-copy"
     cp "$NIRI_QUICKSHELL_SOURCE_STATE_FILE" "$state_copy"
