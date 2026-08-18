@@ -164,6 +164,8 @@ desktop_niri_inspect() {
     fi
     desktop_niri_expect "$phase" config:fish-env-sources \
         niri_fish_sources_satisfied
+    desktop_niri_expect "$phase" config:fish-fd-rdd \
+        niri_fish_fd_rdd_satisfied
     desktop_niri_expect "$phase" config:fish-config \
         niri_fish_config_satisfied
     if platform_is_fedora; then

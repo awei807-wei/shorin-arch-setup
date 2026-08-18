@@ -13,6 +13,12 @@ end
 if not contains "$HOME/.local/bin" $PATH
     set -gx PATH "$HOME/.local/bin" $PATH
 end
+
+if test -d "$HOME/.vcp/bin"
+    if not contains "$HOME/.vcp/bin" $PATH
+        set -gx PATH "$HOME/.vcp/bin" $PATH
+    end
+end
 EOF
 }
 
@@ -50,6 +56,24 @@ niri_fish_sources_satisfied() {
         ! niri_legacy_fish_file_is_managed "$NIRI_FISH_LOCAL_ENV_FILE" \
             niri_fish_local_env_contract 'source "$HOME/.local/bin/env.fish"' \
             'test -f "$HOME/.local/bin/env.fish"; and source "$HOME/.local/bin/env.fish"'
+}
+
+niri_fish_fd_rdd_satisfied() {
+    local fd_rdd="$HOME_DIR/.vcp/bin/fd-rdd" resolved status=0
+    local user=${TARGET_USER:-$(id -un)}
+
+    # fd-rdd is an optional Fedora user target. Do not require Fish merely
+    # because the target directory exists before the installer publishes the
+    # executable.
+    [ -x "$fd_rdd" ] || return 0
+    niri_fish_sources_satisfied || return 1
+    command -v fish >/dev/null 2>&1 || return 2
+    resolved=$(niri_run_as_user "$user" env \
+        HOME="$HOME_DIR" XDG_CONFIG_HOME="$HOME_DIR/.config" \
+        fish --login --interactive --command 'command -v fd-rdd' \
+        2>/dev/null) || status=$?
+    [ "$status" -eq 0 ] || return "$status"
+    [ "$resolved" = "$fd_rdd" ]
 }
 
 niri_fish_config_contract() {
@@ -173,8 +197,8 @@ niri_fish_config_satisfied() {
 }
 
 # Kept as a compatibility query for callers that used to perform a live Fish
-# login.  Verification is intentionally static and has no user-shell side
-# effects.
+# login. File checks remain side-effect free; when fd-rdd is installed, an
+# isolated target-user Fish login/interactive lookup verifies its PATH entry.
 niri_fish_login_satisfied() {
     local file
 
@@ -191,6 +215,7 @@ niri_fish_login_satisfied() {
             return 1
         fi
     done < <(find "$HOME_DIR/.config/fish" -type l -print0)
+    niri_fish_fd_rdd_satisfied
 }
 
 ensure_niri_fish_config() {

@@ -881,11 +881,50 @@ grep -Fqx '    set -gx PATH "$HOME/.cargo/bin" $PATH' "$NIRI_FISH_GUARD_FILE" ||
     fail 'managed Fish environment must add Cargo bin without generated env files'
 grep -Fqx '    set -gx PATH "$HOME/.local/bin" $PATH' "$NIRI_FISH_GUARD_FILE" ||
     fail 'managed Fish environment must add local bin without generated env files'
+grep -Fqx 'if test -d "$HOME/.vcp/bin"' "$NIRI_FISH_GUARD_FILE" ||
+    fail 'managed Fish environment must guard the optional vcp bin directory'
+grep -Fqx '        set -gx PATH "$HOME/.vcp/bin" $PATH' "$NIRI_FISH_GUARD_FILE" ||
+    fail 'managed Fish environment must add the vcp bin directory'
 if grep -Fq 'source "$HOME/' "$NIRI_FISH_GUARD_FILE"; then
     fail 'managed Fish environment must not depend on installer-generated env files'
 fi
 [ ! -e "$NIRI_FISH_RUSTUP_FILE" ] && [ ! -e "$NIRI_FISH_LOCAL_ENV_FILE" ] ||
     fail 'known legacy Fish source files must be migrated without duplicate sourcing'
+
+# The official Fedora fd-rdd installer publishes ~/.vcp/bin/fd-rdd. Verify
+# both the optional-directory guard and a real interactive/login Fish lookup,
+# while preserving a user-provided PATH entry and avoiding duplicate vcp
+# entries when the caller already exported the directory.
+command -v fish >/dev/null 2>&1 || fail 'Fish fixture requires the fish executable'
+VCP_BIN="$HOME_DIR/.vcp/bin"
+VCP_BIN_STASH="$TEST_DIR/vcp-bin-stash"
+FISH_PATH_SENTINEL="$TEST_DIR/custom-fish-bin"
+mkdir -p "$VCP_BIN" "$FISH_PATH_SENTINEL"
+printf '#!/usr/bin/env bash\n' > "$VCP_BIN/fd-rdd"
+chmod 755 "$VCP_BIN/fd-rdd"
+PATH="$FISH_PATH_SENTINEL:$VCP_BIN:$PATH" \
+    niri_fish_fd_rdd_satisfied ||
+    fail 'installed fd-rdd must resolve in a Fish login/interactive shell'
+FISH_EFFECTIVE_PATH=$(PATH="$FISH_PATH_SENTINEL:$VCP_BIN:$PATH" \
+    env HOME="$HOME_DIR" XDG_CONFIG_HOME="$HOME_DIR/.config" \
+    fish --login --interactive --command 'string join : $PATH')
+printf '%s\n' "$FISH_EFFECTIVE_PATH" | tr ':' '\n' |
+    grep -Fqx "$FISH_PATH_SENTINEL" ||
+    fail 'Fish environment must preserve an unrelated user PATH entry'
+[ "$(printf '%s\n' "$FISH_EFFECTIVE_PATH" | tr ':' '\n' |
+    awk -v target="$VCP_BIN" '$0 == target { count++ } END { print count + 0 }')" -eq 1 ] ||
+    fail 'Fish environment must not duplicate an existing vcp PATH entry'
+mv "$VCP_BIN" "$VCP_BIN_STASH"
+FISH_EFFECTIVE_PATH=$(PATH="$FISH_PATH_SENTINEL:$PATH" \
+    env HOME="$HOME_DIR" XDG_CONFIG_HOME="$HOME_DIR/.config" \
+    fish --login --interactive --command 'string join : $PATH')
+if printf '%s\n' "$FISH_EFFECTIVE_PATH" | tr ':' '\n' |
+    grep -Fqx "$VCP_BIN"; then
+    fail 'Fish environment must not add vcp bin when the directory is absent'
+fi
+mv "$VCP_BIN_STASH" "$VCP_BIN"
+niri_fish_login_satisfied ||
+    fail 'Fish login verification must resolve an installed fd-rdd'
 
 FISH_CONFIG_USER_COPY="$TEST_DIR/fish-config-user-copy"
 cat > "$NIRI_FISH_CONFIG_FILE" <<'EOF'

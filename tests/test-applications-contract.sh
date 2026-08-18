@@ -70,6 +70,10 @@ export SHORIN_DISTRO=arch
     fail 'Arch Lutris contract must retain openal'
 [[ " ${LUTRIS_CONFIG_PACKAGES[*]} " == *' lib32-openal '* ]] ||
     fail 'Arch Lutris contract must retain lib32-openal'
+[[ " ${LUTRIS_CONFIG_PACKAGES[*]} " == *' ttf-liberation '* ]] ||
+    fail 'Arch Lutris contract must retain ttf-liberation'
+[[ " ${LUTRIS_CONFIG_PACKAGES[*]} " != *' liberation-fonts '* ]] ||
+    fail 'Arch Lutris contract must not leak the Fedora liberation-fonts name'
 
 declare -A INSTALLED_PACKAGES=()
 FLATPAK_STEAM_INSTALLED=0
