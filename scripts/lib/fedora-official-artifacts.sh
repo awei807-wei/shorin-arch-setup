@@ -245,7 +245,7 @@ fedora_official_rpm_identity_for_target() {
         clash-verge-rev) pattern='([Cc]lash|[Vv]erge)' ;;
         lsfg-vk-bin) pattern='lsfg[-_]?vk' ;;
         mark-shot) pattern='[Mm]ark[-_]?shot' ;;
-        wechat-appimage) pattern='^com\.tencent\.WeChat$' ;;
+        wechat-appimage) pattern='^wechat$' ;;
         thorium-browser-bin) pattern='^thorium-browser$' ;;
         *) return 0 ;;
     esac

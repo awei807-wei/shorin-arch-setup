@@ -102,18 +102,28 @@ source "$ROOT_DIR/scripts/lib/fedora-official-artifacts.sh"
     6cd793ac245ff7f0e7b76a1dc9b2c694d996b3eefb4a9ee40e39dc5e0ae11f45 ] ||
     fail 'Thorium checksum must not be environment-overridable'
 
-RPM_IDENTITY_METADATA='com.tencent.WeChat x86_64'
+RPM_IDENTITY_METADATA='wechat x86_64'
 rpm() {
     [ "${1:-}" = -qp ] && [ "${2:-}" = --qf ] || return 1
     printf '%s\n' "$RPM_IDENTITY_METADATA"
 }
 fedora_verify_official_rpm_identity \
-    "$TEST_DIR/wechat.rpm" 'WeChat Linux' '^com\.tencent\.WeChat$' ||
+    "$TEST_DIR/wechat.rpm" 'WeChat Linux' '^wechat$' ||
     fail 'WeChat RPM identity must accept the exact official package name and x86_64'
-RPM_IDENTITY_METADATA='com.tencent.WeChat aarch64'
+RPM_IDENTITY_METADATA='wechat aarch64'
 if fedora_verify_official_rpm_identity \
-    "$TEST_DIR/wechat.rpm" 'WeChat Linux' '^com\.tencent\.WeChat$'; then
+    "$TEST_DIR/wechat.rpm" 'WeChat Linux' '^wechat$'; then
     fail 'WeChat RPM identity must reject non-x86_64 artifacts'
+fi
+RPM_IDENTITY_METADATA='com.tencent.WeChat x86_64'
+if fedora_verify_official_rpm_identity \
+    "$TEST_DIR/wechat.rpm" 'WeChat Linux' '^wechat$'; then
+    fail 'WeChat RPM identity must reject the desktop-id-like package name'
+fi
+RPM_IDENTITY_METADATA='wechat-helper x86_64'
+if fedora_verify_official_rpm_identity \
+    "$TEST_DIR/wechat.rpm" 'WeChat Linux' '^wechat$'; then
+    fail 'WeChat RPM identity must reject similar package names'
 fi
 RPM_IDENTITY_METADATA='thorium-browser x86_64'
 fedora_verify_official_rpm_identity \
@@ -155,9 +165,7 @@ fedora_download_verified_official_asset \
         FEDORA_OFFICIAL_DOWNLOAD_RESULT="$TEST_DIR/pinned-wechat.rpm"
         : > "$FEDORA_OFFICIAL_DOWNLOAD_RESULT"
     }
-    fedora_official_rpm_identity_for_target() {
-        [ "$1" = wechat-appimage ] && [ "$2" = "$TEST_DIR/pinned-wechat.rpm" ]
-    }
+    RPM_IDENTITY_METADATA='wechat x86_64'
     fedora_application_target_satisfied() { return 0; }
     dnf() {
         [ "${1:-}" = install ] || return 1
