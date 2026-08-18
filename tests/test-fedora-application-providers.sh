@@ -310,13 +310,16 @@ curl() {
 [ "$(fedora_yazi_release_url)" = \
     'https://github.com/sxyazi/yazi/releases/download/v26.8.15/yazi-x86_64-unknown-linux-gnu.zip' ] ||
     fail 'Yazi x86_64 release URL must be pinned to the official GNU ZIP'
-fedora_yazi_version_output_satisfied $'Yazi\\nVersion: 26.8.15 (fixture)' ||
+fedora_yazi_version_output_satisfied $'Yazi\nVersion: 26.8.15 (fixture)' ||
     fail 'Yazi version parser must accept the real multi-line output'
-if fedora_yazi_version_output_satisfied $'Yazi\\nVersion: 26.8.16 (fixture)'; then
+if fedora_yazi_version_output_satisfied $'Yazi\nVersion: 26.8.16 (fixture)'; then
     fail 'Yazi version parser must reject an unpinned version'
 fi
-if fedora_yazi_version_output_satisfied $'Yazi\\nVersion: 26.8.150 (fixture)'; then
+if fedora_yazi_version_output_satisfied $'Yazi\nVersion: 26.8.150 (fixture)'; then
     fail 'Yazi version parser must reject a version that only contains the pin'
+fi
+if fedora_yazi_version_output_satisfied $'Yazi 26.8.15'; then
+    fail 'Yazi version parser must require the real Version line'
 fi
 fedora_application_target_satisfied yazi "$TARGET_USER" "$HOME_DIR" &&
     fail 'Yazi must be drift before release installation'
@@ -346,6 +349,18 @@ printf '%s\n' 'Yazi'
 printf '%s\n' 'Version: 26.8.15 (fixture)'
 EOF
 chmod 755 "$HOME_DIR/.local/bin/yazi"
+[ -x "$HOME_DIR/.local/bin/yazi" ] ||
+    fail 'Yazi positive fixture must provide an executable yazi command'
+rm -f "$HOME_DIR/.local/bin/ya"
+if fedora_application_target_satisfied yazi "$TARGET_USER" "$HOME_DIR"; then
+    fail 'Yazi application verification must reject a missing ya command'
+fi
+cat > "$HOME_DIR/.local/bin/ya" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' 'Ya'
+printf '%s\n' 'Version: 26.8.15 (fixture)'
+EOF
+chmod 755 "$HOME_DIR/.local/bin/ya"
 [ "$(grep -c '^package:curl$' "$PROVIDER_CALLS" || true)" -gt 0 ] ||
     fail 'Yazi release provider must converge curl through ensure_packages'
 [ "$(grep -c '^package:unzip$' "$PROVIDER_CALLS" || true)" -gt 0 ] ||

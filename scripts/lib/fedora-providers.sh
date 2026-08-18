@@ -336,7 +336,7 @@ fedora_yazi_version_output_satisfied() {
 
     [[ "$expected" =~ ^[0-9]+([.][0-9]+){2}$ ]] || return 2
     expected_pattern=${expected//./\\.}
-    grep -Eq "(^|[^[:digit:].])${expected_pattern}([^[:digit:].]|$)" <<< "$output"
+    grep -Eq "^Version:[[:space:]]+${expected_pattern}[[:space:]]+\\(" <<< "$output"
 }
 
 fedora_yazi_target_satisfied() {
