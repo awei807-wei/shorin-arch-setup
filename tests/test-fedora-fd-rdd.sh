@@ -130,11 +130,22 @@ fedora_install_fd_rdd "$TARGET_USER" "$HOME_DIR" ||
     fail 'successful fd-rdd retry must publish the verified source cache'
 [ -x "$HOME_DIR/.vcp/bin/fd-rdd" ] ||
     fail 'successful fd-rdd retry must run the installer from the source checkout'
+[ -L "$HOME_DIR/.local/bin/fd-rdd" ] ||
+    fail 'successful fd-rdd install must publish the ~/.local/bin compatibility symlink'
+[ "$(readlink "$HOME_DIR/.local/bin/fd-rdd")" = '../../.vcp/bin/fd-rdd' ] ||
+    fail 'fd-rdd compatibility symlink must use the stable relative target'
+[ "$(stat -c '%U:%G' "$HOME_DIR/.local/bin")" = \
+    "$(id -un):$(id -gn)" ] ||
+    fail 'fd-rdd compatibility directory must be owned by the target user'
+[ "$(stat -c '%U:%G' "$HOME_DIR/.local/bin/fd-rdd")" = \
+    "$(id -un):$(id -gn)" ] ||
+    fail 'fd-rdd compatibility symlink must be owned by the target user'
 [ "$(< "$HOME_DIR/.vcp/fd-rdd-installer.path")" = \
     "$HOME_DIR/.cargo/bin:/usr/local/bin:/usr/bin:/bin" ] ||
     fail 'fd-rdd installer must receive the explicit target-user PATH'
 
 printf 'old-cache\n' > "$source_dir/old-marker"
+rm -f "$HOME_DIR/.vcp/bin/fd-rdd" "$HOME_DIR/.local/bin/fd-rdd"
 export FEDORA_TEST_GIT_MODE=checkout-fail
 status=0
 fedora_install_fd_rdd "$TARGET_USER" "$HOME_DIR" || status=$?
@@ -179,19 +190,35 @@ fedora_install_application_target fd-rdd-git "$TARGET_USER" "$HOME_DIR" ||
     fail 'fd-rdd target must remain successful on an idempotent rerun'
 [ "$(wc -l < "$LOCAL_INSTALL_CALLS")" -eq 1 ] ||
     fail 'fd-rdd target must not rerun a satisfied fake installer'
-rm -rf "$HOME_DIR/.vcp"
-mkdir -p "$HOME_DIR/.local/bin"
-printf '#!/usr/bin/env bash\n' > "$HOME_DIR/.local/bin/fd-rdd"
-chmod 755 "$HOME_DIR/.local/bin/fd-rdd"
-fedora_application_target_satisfied fd-rdd-git "$TARGET_USER" "$HOME_DIR" ||
-    fail 'fd-rdd satisfaction must retain ~/.local/bin compatibility'
 rm -f "$HOME_DIR/.local/bin/fd-rdd"
+printf 'user-owned fd-rdd\n' > "$HOME_DIR/.local/bin/fd-rdd"
+status=0
+fedora_install_fd_rdd "$TARGET_USER" "$HOME_DIR" || status=$?
+[ "$status" -eq 1 ] ||
+    fail 'fd-rdd must fail closed on an ordinary user-owned file'
+[ "$(< "$HOME_DIR/.local/bin/fd-rdd")" = 'user-owned fd-rdd' ] ||
+    fail 'fd-rdd conflict handling must preserve the user-owned file'
+rm -f "$HOME_DIR/.local/bin/fd-rdd"
+ln -s /tmp/unexpected-fd-rdd "$HOME_DIR/.local/bin/fd-rdd"
+status=0
+fedora_install_fd_rdd "$TARGET_USER" "$HOME_DIR" || status=$?
+[ "$status" -eq 1 ] ||
+    fail 'fd-rdd must fail closed on an unexpected symlink target'
+[ "$(readlink "$HOME_DIR/.local/bin/fd-rdd")" = /tmp/unexpected-fd-rdd ] ||
+    fail 'fd-rdd conflict handling must preserve an unexpected symlink'
+rm -f "$HOME_DIR/.local/bin/fd-rdd"
+fedora_fd_rdd_ensure_local_link "$TARGET_USER" "$HOME_DIR" ||
+    fail 'fd-rdd must converge its compatibility symlink after a preserved conflict'
+fedora_application_target_satisfied fd-rdd-git "$TARGET_USER" "$HOME_DIR" ||
+    fail 'fd-rdd satisfaction must verify the official binary and compatibility symlink'
+rm -rf "$HOME_DIR/.vcp"
 cat > "$BIN_DIR/fd-rdd" <<'EOF_PATH_FD_RDD'
 #!/usr/bin/env bash
 exit 0
 EOF_PATH_FD_RDD
 chmod 755 "$BIN_DIR/fd-rdd"
-fedora_application_target_satisfied fd-rdd-git "$TARGET_USER" "$HOME_DIR" ||
-    fail 'fd-rdd satisfaction must retain PATH compatibility'
+if fedora_application_target_satisfied fd-rdd-git "$TARGET_USER" "$HOME_DIR"; then
+    fail 'fd-rdd satisfaction must not trust an unrelated PATH command'
+fi
 
 printf 'PASS: Fedora fd-rdd target-user cargo, staged clone, retry, and rollback contract\n'

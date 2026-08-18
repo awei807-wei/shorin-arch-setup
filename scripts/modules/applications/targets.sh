@@ -23,7 +23,7 @@ if platform_is_fedora; then
     LUTRIS_CONFIG_PACKAGES=(
         alsa-plugins-pulseaudio giflib glfw gstreamer1-plugins-base gtk3
         libjpeg-turbo libva libxslt mpg123 openal-soft openal-soft.i686
-        liberation-fonts
+        liberation-sans-fonts liberation-serif-fonts liberation-mono-fonts
     )
 fi
 APPLICATION_DESKTOP_DIR=${APPLICATION_DESKTOP_DIR:-/usr/share/applications}

@@ -13,13 +13,125 @@ fedora_fd_rdd_source_dir() {
     printf '%s\n' "$home/.local/src/vcp-fd-rdd"
 }
 
-fedora_fd_rdd_binary_satisfied() {
+fedora_fd_rdd_binary_path() {
     local home=${1:-${HOME_DIR:-}}
 
-    # 官方安装器写入 ~/.vcp/bin；保留历史 ~/.local/bin 交接和 PATH 查找兼容。
-    [ -x "$home/.vcp/bin/fd-rdd" ] ||
-        [ -x "$(fedora_user_bin fd-rdd "$home")" ] ||
-        command -v fd-rdd >/dev/null 2>&1
+    printf '%s\n' "$home/.vcp/bin/fd-rdd"
+}
+
+fedora_fd_rdd_local_bin_dir() {
+    local home=${1:-${HOME_DIR:-}}
+
+    printf '%s\n' "$home/.local/bin"
+}
+
+fedora_fd_rdd_local_link_path() {
+    local home=${1:-${HOME_DIR:-}}
+
+    printf '%s\n' "$(fedora_fd_rdd_local_bin_dir "$home")/fd-rdd"
+}
+
+fedora_fd_rdd_local_link_target() {
+    printf '%s\n' '../../.vcp/bin/fd-rdd'
+}
+
+fedora_fd_rdd_link_target_matches() {
+    local home=$1 link target resolved expected
+
+    link=$(fedora_fd_rdd_local_link_path "$home")
+    target=$(fedora_fd_rdd_binary_path "$home")
+    [ -L "$link" ] || return 1
+    expected=$(readlink -- "$link") || return 1
+    case "$expected" in
+        "$target"|../../.vcp/bin/fd-rdd) ;;
+        *) return 1 ;;
+    esac
+    resolved=$(readlink -f -- "$link" 2>/dev/null) || return 1
+    [ "$resolved" = "$(readlink -f -- "$target" 2>/dev/null)" ]
+}
+
+fedora_fd_rdd_link_satisfied() {
+    local user=$1 home=$2 link parent binary group owner parent_owner
+
+    [ -n "$user" ] && [ -n "$home" ] || return 2
+    binary=$(fedora_fd_rdd_binary_path "$home")
+    link=$(fedora_fd_rdd_local_link_path "$home")
+    parent=$(fedora_fd_rdd_local_bin_dir "$home")
+    [ -x "$binary" ] && [ ! -L "$binary" ] || return 1
+    [ -d "$parent" ] && [ ! -L "$parent" ] || return 1
+    fedora_fd_rdd_link_target_matches "$home" || return 1
+    group=$(id -gn "$user" 2>/dev/null) || return 2
+    owner=$(stat -c '%U:%G' "$link" 2>/dev/null) || return 2
+    parent_owner=$(stat -c '%U:%G' "$parent" 2>/dev/null) || return 2
+    [ "$owner" = "$user:$group" ] && [ "$parent_owner" = "$user:$group" ]
+}
+
+fedora_fd_rdd_ensure_local_link() {
+    local user=$1 home=$2 group parent link binary owner expected
+
+    require_writable_mode || return
+    [ -n "$user" ] && [ -n "$home" ] || {
+        error 'fd-rdd link convergence requires a target user and home.'
+        return 1
+    }
+    group=$(id -gn "$user" 2>/dev/null) || {
+        error "Unable to resolve the primary group for target user $user."
+        return 1
+    }
+    parent=$(fedora_fd_rdd_local_bin_dir "$home")
+    link=$(fedora_fd_rdd_local_link_path "$home")
+    binary=$(fedora_fd_rdd_binary_path "$home")
+    [ -x "$binary" ] && [ ! -L "$binary" ] || {
+        error "The official fd-rdd binary is missing or unsafe: $binary"
+        return 1
+    }
+    # Never follow a user-controlled directory symlink while preparing the
+    # compatibility entry point.
+    [ ! -L "$home/.local" ] && [ ! -L "$parent" ] || {
+        error "Refusing fd-rdd link convergence through a symlinked parent: $parent"
+        return 1
+    }
+    install -d -m 755 -o "$user" -g "$group" "$parent" || {
+        error "Unable to prepare the target-user fd-rdd directory: $parent"
+        return 1
+    }
+    if [ -e "$link" ] || [ -L "$link" ]; then
+        if [ ! -L "$link" ]; then
+            error "Refusing to replace the user-owned fd-rdd path: $link"
+            return 1
+        fi
+        fedora_fd_rdd_link_target_matches "$home" || {
+            expected=$(readlink -- "$link" 2>/dev/null || printf '<unreadable>')
+            error "Refusing fd-rdd symlink with an unexpected target: $link -> $expected"
+            return 1
+        }
+        owner=$(stat -c '%U:%G' "$link" 2>/dev/null) || {
+            error "Unable to inspect fd-rdd symlink ownership: $link"
+            return 1
+        }
+        if [ "$owner" != "$user:$group" ]; then
+            chown -h "$user:$group" "$link" || {
+                error "Unable to assign fd-rdd symlink ownership: $link"
+                return 1
+            }
+        fi
+    else
+        fedora_fd_rdd_as_user "$user" "$home" ln -s \
+            "$(fedora_fd_rdd_local_link_target)" "$link" || {
+            error "Unable to create the target-user fd-rdd symlink: $link"
+            return 1
+        }
+    fi
+    fedora_fd_rdd_link_satisfied "$user" "$home"
+}
+
+fedora_fd_rdd_binary_satisfied() {
+    local home=${1:-${HOME_DIR:-}} user=${2:-${TARGET_USER:-}}
+
+    # The official installer writes ~/.vcp/bin.  The managed ~/.local/bin
+    # symlink is the stable Bash/Fish entry point and is part of the target
+    # contract; an unrelated PATH command must never satisfy this target.
+    fedora_fd_rdd_link_satisfied "$user" "$home"
 }
 
 fedora_fd_rdd_target_path() {
@@ -67,6 +179,14 @@ fedora_install_fd_rdd() {
     local parent_dir
 
     require_writable_mode || return
+    # A previous official install only needs the compatibility entry point
+    # converged; do not reclone or rerun the upstream installer.
+    if [ -x "$(fedora_fd_rdd_binary_path "$home")" ] &&
+        [ ! -L "$(fedora_fd_rdd_binary_path "$home")" ]; then
+        fedora_fd_rdd_ensure_local_link "$user" "$home" || return
+        fedora_application_target_satisfied fd-rdd-git "$user" "$home"
+        return
+    fi
     if [ -n "${FEDORA_FD_RDD_INSTALL_SCRIPT:-}" ] &&
         [ -r "$FEDORA_FD_RDD_INSTALL_SCRIPT" ]; then
         script=$FEDORA_FD_RDD_INSTALL_SCRIPT
@@ -78,6 +198,7 @@ fedora_install_fd_rdd() {
             error 'The official fd-rdd install.sh failed for the target user.'
             return 1
         fi
+        fedora_fd_rdd_ensure_local_link "$user" "$home" || return
         fedora_application_target_satisfied fd-rdd-git "$user" "$home"
         return
     fi
@@ -180,5 +301,6 @@ fedora_install_fd_rdd() {
         error 'Pinned fd-rdd scripts/install.sh failed for the target user.'
         return 1
     fi
+    fedora_fd_rdd_ensure_local_link "$user" "$home" || return
     fedora_application_target_satisfied fd-rdd-git "$user" "$home"
 }

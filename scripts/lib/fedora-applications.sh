@@ -40,7 +40,7 @@ fedora_application_target_satisfied() {
             [ "$gearlever" -eq 1 ] && [ -x "$appimage" ] &&
                 fedora_vicinae_desktop_satisfied "$home" ;;
         fd-rdd-git)
-            fedora_fd_rdd_binary_satisfied "$home" ;;
+            fedora_fd_rdd_binary_satisfied "$home" "$user" ;;
         tsukimi-bin)
             fedora_copr_application_target_satisfied tsukimi-bin ;;
         thorium-browser-bin)

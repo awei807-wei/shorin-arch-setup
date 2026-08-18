@@ -59,7 +59,8 @@ niri_fish_sources_satisfied() {
 }
 
 niri_fish_fd_rdd_satisfied() {
-    local fd_rdd="$HOME_DIR/.vcp/bin/fd-rdd" resolved status=0
+    local fd_rdd="$HOME_DIR/.vcp/bin/fd-rdd"
+    local local_link="$HOME_DIR/.local/bin/fd-rdd" resolved status=0
     local user=${TARGET_USER:-$(id -un)}
 
     # fd-rdd is an optional Fedora user target. Do not require Fish merely
@@ -73,7 +74,10 @@ niri_fish_fd_rdd_satisfied() {
         fish --login --interactive --command 'command -v fd-rdd' \
         2>/dev/null) || status=$?
     [ "$status" -eq 0 ] || return "$status"
-    [ "$resolved" = "$fd_rdd" ]
+    [ "$resolved" = "$fd_rdd" ] && return 0
+    [ "$resolved" = "$local_link" ] || return 1
+    [ "$(readlink -f -- "$resolved" 2>/dev/null)" = \
+        "$(readlink -f -- "$fd_rdd" 2>/dev/null)" ]
 }
 
 niri_fish_config_contract() {

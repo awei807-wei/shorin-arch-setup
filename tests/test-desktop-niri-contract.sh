@@ -898,13 +898,15 @@ fi
 command -v fish >/dev/null 2>&1 || fail 'Fish fixture requires the fish executable'
 VCP_BIN="$HOME_DIR/.vcp/bin"
 VCP_BIN_STASH="$TEST_DIR/vcp-bin-stash"
+LOCAL_BIN="$HOME_DIR/.local/bin"
 FISH_PATH_SENTINEL="$TEST_DIR/custom-fish-bin"
-mkdir -p "$VCP_BIN" "$FISH_PATH_SENTINEL"
+mkdir -p "$VCP_BIN" "$LOCAL_BIN" "$FISH_PATH_SENTINEL"
 printf '#!/usr/bin/env bash\n' > "$VCP_BIN/fd-rdd"
 chmod 755 "$VCP_BIN/fd-rdd"
+ln -s ../../.vcp/bin/fd-rdd "$LOCAL_BIN/fd-rdd"
 PATH="$FISH_PATH_SENTINEL:$VCP_BIN:$PATH" \
     niri_fish_fd_rdd_satisfied ||
-    fail 'installed fd-rdd must resolve in a Fish login/interactive shell'
+    fail 'installed fd-rdd must resolve in a Fish login/interactive shell through either entry point'
 FISH_EFFECTIVE_PATH=$(PATH="$FISH_PATH_SENTINEL:$VCP_BIN:$PATH" \
     env HOME="$HOME_DIR" XDG_CONFIG_HOME="$HOME_DIR/.config" \
     fish --login --interactive --command 'string join : $PATH')

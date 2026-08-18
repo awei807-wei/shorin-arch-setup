@@ -438,8 +438,12 @@ unset FEDORA_RPM_DIR SHORIN_ARTIFACT_DIR
     fail 'Fedora Lutris contract must not request the nonexistent openal package'
 [[ " ${LUTRIS_CONFIG_PACKAGES[*]} " != *' lib32-openal '* ]] ||
     fail 'Fedora Lutris contract must translate away the Arch lib32-openal target'
-[[ " ${LUTRIS_CONFIG_PACKAGES[*]} " == *' liberation-fonts '* ]] ||
-    fail 'Fedora Lutris contract must use liberation-fonts'
+for font_package in liberation-sans-fonts liberation-serif-fonts liberation-mono-fonts; do
+    [[ " ${LUTRIS_CONFIG_PACKAGES[*]} " == *" $font_package "* ]] ||
+        fail "Fedora Lutris contract must use $font_package"
+done
+[[ " ${LUTRIS_CONFIG_PACKAGES[*]} " != *' liberation-fonts '* ]] ||
+    fail 'Fedora Lutris contract must not request the nonexistent liberation-fonts package'
 [[ " ${LUTRIS_CONFIG_PACKAGES[*]} " != *' ttf-liberation '* ]] ||
     fail 'Fedora Lutris contract must not request the Arch font name'
 [ "$(fedora_arch_target_name gstreamer1-plugins-base)" = gstreamer1-plugins-base ] ||
@@ -455,10 +459,16 @@ fi
     fail 'Fedora package whitelist must accept openal-soft'
 [ "$(fedora_arch_target_name openal-soft.i686)" = openal-soft.i686 ] ||
     fail 'Fedora package whitelist must accept openal-soft.i686'
-[ "$(fedora_arch_target_name ttf-liberation)" = liberation-fonts ] ||
-    fail 'Fedora ttf-liberation target must map to liberation-fonts'
-[ "$(fedora_arch_target_name liberation-fonts)" = liberation-fonts ] ||
-    fail 'Fedora package whitelist must accept liberation-fonts'
+for font_package in liberation-sans-fonts liberation-serif-fonts liberation-mono-fonts; do
+    [ "$(fedora_arch_target_name "$font_package")" = "$font_package" ] ||
+        fail "Fedora package whitelist must accept $font_package"
+done
+if fedora_arch_target_name liberation-fonts >/dev/null 2>&1; then
+    fail 'Fedora package whitelist must reject the nonexistent liberation-fonts package'
+fi
+if fedora_arch_target_name ttf-liberation >/dev/null 2>&1; then
+    fail 'Fedora package whitelist must reject the Arch-only ttf-liberation target'
+fi
 INSTALLED_PACKAGES[lutris]=1
 for package in "${LUTRIS_CONFIG_PACKAGES[@]}"; do
     INSTALLED_PACKAGES["$package"]=1
@@ -468,8 +478,10 @@ grep -Fqx 'package:openal-soft' "$PROVIDER_CALLS" ||
     fail 'Fedora Lutris apply must install openal-soft'
 grep -Fqx 'package:openal-soft.i686' "$PROVIDER_CALLS" ||
     fail 'Fedora Lutris apply must install openal-soft.i686'
-grep -Fqx 'package:liberation-fonts' "$PROVIDER_CALLS" ||
-    fail 'Fedora Lutris apply must install liberation-fonts'
+for font_package in liberation-sans-fonts liberation-serif-fonts liberation-mono-fonts; do
+    grep -Fqx "package:$font_package" "$PROVIDER_CALLS" ||
+        fail "Fedora Lutris apply must install $font_package"
+done
 application_entry_satisfied lutris ||
     fail 'Fedora Lutris contract must accept both OpenAL architectures'
 INSTALLED_PACKAGES[openal-soft.i686]=0

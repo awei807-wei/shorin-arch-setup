@@ -39,10 +39,16 @@ done
     fail 'Fedora package mapping is missing: openal-soft'
 [ "$(fedora_arch_target_name openal-soft.i686)" = openal-soft.i686 ] ||
     fail 'Fedora package mapping is missing: openal-soft.i686'
-[ "$(fedora_arch_target_name ttf-liberation)" = liberation-fonts ] ||
-    fail 'Arch ttf-liberation must map to Fedora liberation-fonts'
-[ "$(fedora_arch_target_name liberation-fonts)" = liberation-fonts ] ||
-    fail 'Fedora package mapping is missing: liberation-fonts'
+for package in liberation-sans-fonts liberation-serif-fonts liberation-mono-fonts; do
+    [ "$(fedora_arch_target_name "$package")" = "$package" ] ||
+        fail "Fedora package mapping is missing: $package"
+done
+if fedora_arch_target_name liberation-fonts >/dev/null 2>&1; then
+    fail 'Fedora must reject the nonexistent liberation-fonts package'
+fi
+if fedora_arch_target_name ttf-liberation >/dev/null 2>&1; then
+    fail 'Fedora must keep the Arch-only ttf-liberation spelling out of DNF'
+fi
 [ "$(fedora_arch_target_name openal)" != openal ] ||
     fail 'Fedora must not pass the nonexistent openal package to dnf'
 

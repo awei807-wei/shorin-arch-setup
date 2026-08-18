@@ -192,6 +192,9 @@ fedora_application_target_pending() {
             return 0
             ;;
         fd-rdd-git)
+            if [ -x "$home/.vcp/bin/fd-rdd" ]; then
+                return 1
+            fi
             [ -n "${FEDORA_FD_RDD_INSTALL_SCRIPT:-}" ] &&
                 [ -r "$FEDORA_FD_RDD_INSTALL_SCRIPT" ] && return 1
             FEDORA_APPLICATION_PENDING_REASON='official-source-at-apply:git+fixed-commit:44b60573129c67f4471fa70f21b4a0b70bc1fec8:scripts/install.sh'

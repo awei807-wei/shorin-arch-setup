@@ -212,7 +212,7 @@ fedora_package_name() {
         xdg-desktop-portal-gtk|xwayland-satellite|zoxide|btop|baobab|\
         bluetui|bluez|brightnessctl|cava|dosfstools|eza|exfatprogs|f2fs-tools|\
         file-roller|fragments|gamescope|gnome-disk-utility|grub2-tools|ddcutil|dbus|\
-        alsa-plugins|alsa-plugins-pulseaudio|fd-find|giflib|glfw|gstreamer1-plugins-base|gtk3|libjpeg-turbo|libva|libxslt|mpg123|openal-soft|openal-soft.i686|liberation-fonts|wine-mono|mingw32-wine-gecko|mingw64-wine-gecko|\
+        alsa-plugins|alsa-plugins-pulseaudio|fd-find|giflib|glfw|gstreamer1-plugins-base|gtk3|libjpeg-turbo|libva|libxslt|mpg123|openal-soft|openal-soft.i686|liberation-sans-fonts|liberation-serif-fonts|liberation-mono-fonts|wine-mono|mingw32-wine-gecko|mingw64-wine-gecko|\
         hyprpicker|libva-utils|libvirt|libvirt-daemon|libvirt-daemon-kvm|\
         libvirt-client|libvirt-daemon-config-network|librime-tools|\
         librsvg2-tools|nwg-look|\
@@ -254,7 +254,6 @@ fedora_package_name() {
         gst-plugins-base) printf '%s\n' gstreamer1-plugins-base ;;
         gst-plugins-good) printf '%s\n' gstreamer1-plugins-good ;;
         gst-libav) printf '%s\n' gstreamer1-plugin-libav ;;
-        ttf-liberation) printf '%s\n' liberation-fonts ;;
         qt6-wayland) printf '%s\n' qt6-qtwayland ;;
         qt6-multimedia) printf '%s\n' qt6-qtmultimedia ;;
         bluez-utils) printf '%s\n' bluez ;;
