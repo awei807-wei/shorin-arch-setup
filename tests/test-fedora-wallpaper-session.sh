@@ -424,12 +424,97 @@ niri_restore_output=$(WALLPAPER_TEST_LOG="$niri_restore/log/events" \
     HOME="$niri_restore/home" \
     bash -c 'source "$1"; fedora_wallpaper_run_niri_helper niri-helper 1 "$2"; printf "restored:%s\\n" "${NIRI_SOCKET-<unset>}"' \
     bash "$SESSION_SCRIPT" "$niri_restore/bin/niri-helper")
-grep -Fqx "niri-socket:$niri_restore/runtime/old.sock" "$niri_restore/log/events" ||
+for _ in {1..50}; do
+    grep -Fqx "niri-socket:$niri_restore/runtime/old.sock" \
+        "$niri_restore/log/events" && break
+    sleep 0.1
+done
+grep -Fqx "niri-socket:$niri_restore/runtime/old.sock" \
+    "$niri_restore/log/events" ||
     fail 'missing NIRI_SOCKET must remain unchanged when no Niri candidate exists'
 grep -Fq 'no active niri socket candidate found' "$niri_restore/log/session.log" ||
     fail 'missing Niri candidate must record a warning'
 grep -Fqx "restored:$niri_restore/runtime/old.sock" <<< "$niri_restore_output" ||
     fail 'NIRI_SOCKET wrapper must restore the original value after helper execution'
+
+# A resident blur helper (the same shape as niri_auto_blur_bg.sh's
+# niri msg event-stream loop) must not hold the initializer open.  Its stdio
+# and lock descriptor are detached, and a second full initializer still runs
+# while the first helper remains alive.
+resident_helper="$TEST_DIR/resident-helper"
+make_fixture "$resident_helper"
+: > "$resident_helper/log/events"
+mkdir -p "$resident_helper/log/blur-pids"
+cat > "$resident_helper/bin/auto-blur-resident" <<'AWEOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+printf 'auto-blur-resident:%s\n' "$*" >> "${WALLPAPER_TEST_LOG:?}"
+pid_file="${WALLPAPER_TEST_BLUR_PID_DIR:?}/auto-resident.pid"
+mkdir -p "$(dirname "$pid_file")"
+printf '%s\n' "$$" > "$pid_file"
+trap 'rm -f "$pid_file"' EXIT
+exec niri msg event-stream
+AWEOF
+cat > "$resident_helper/bin/niri" <<'AWEOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+[ "${1:-}" = msg ] && [ "${2:-}" = event-stream ] || exit 64
+while :; do
+    sleep 1
+done
+AWEOF
+chmod 755 "$resident_helper/bin/auto-blur-resident"
+chmod 755 "$resident_helper/bin/niri"
+run_session_resident_helper() {
+    WALLPAPER_TEST_LOG="$resident_helper/log/events" \
+        WALLPAPER_TEST_STATE="$resident_helper/state" \
+        WALLPAPER_TEST_BLUR_PID_DIR="$resident_helper/log/blur-pids" \
+        FEDORA_WALLPAPER_PATH="$resident_helper/bin:/usr/bin:/bin" \
+        AWWW_BIN="$resident_helper/bin/awww" \
+        AWWW_DAEMON_BIN="$resident_helper/bin/awww-daemon" \
+        WAYPAPER_BIN="$resident_helper/bin/waypaper" \
+        FEDORA_WALLPAPER_STATE_DIR="$resident_helper/log" \
+        FEDORA_WALLPAPER_LOG="$resident_helper/log/session.log" \
+        FEDORA_WALLPAPER_LOCK="$resident_helper/log/session.lock" \
+        FEDORA_WALLPAPER_OVERVIEW_SCRIPT="$resident_helper/bin/overview-blur" \
+        FEDORA_WALLPAPER_AUTO_BLUR_SCRIPT="$resident_helper/bin/auto-blur-resident" \
+        FEDORA_WALLPAPER_QUERY_TIMEOUT=1 \
+        FEDORA_WALLPAPER_READY_TIMEOUT=2 \
+        FEDORA_WALLPAPER_IMAGE_TIMEOUT=1 \
+        FEDORA_WALLPAPER_WAYPAPER_TIMEOUT=2 \
+        HOME="$resident_helper/home" \
+        "$SESSION_SCRIPT"
+}
+resident_start=$SECONDS
+run_session_resident_helper
+resident_elapsed=$((SECONDS - resident_start))
+[ "$resident_elapsed" -lt 5 ] ||
+    fail "resident blur helper must not block initializer (elapsed ${resident_elapsed}s)"
+resident_pid_file="$resident_helper/log/blur-pids/auto-resident.pid"
+resident_pid=
+for _ in {1..50}; do
+    if [ -s "$resident_pid_file" ]; then
+        candidate_pid=$(cat "$resident_pid_file")
+        if kill -0 "$candidate_pid" 2>/dev/null; then
+            resident_pid=$candidate_pid
+            break
+        fi
+    fi
+    sleep 0.1
+done
+[ -n "$resident_pid" ] ||
+    fail 'resident blur helper must remain alive after initializer returns'
+exec 9>"$resident_helper/log/session.lock"
+flock -n 9 || fail 'resident blur helper must not retain the initializer lock'
+exec 9>&-
+first_resident_pid=$resident_pid
+run_session_resident_helper
+[ "$(grep -Fc 'waypaper:--random' "$resident_helper/log/events")" -eq 2 ] ||
+    fail 'second initializer must complete while resident blur helper remains alive'
+second_resident_pid=$(cat "$resident_pid_file")
+kill "$first_resident_pid" "$second_resident_pid" 2>/dev/null || true
 
 # A stale socket that never becomes ready is bounded by the retry budget and
 # must surface as a session failure rather than being swallowed.

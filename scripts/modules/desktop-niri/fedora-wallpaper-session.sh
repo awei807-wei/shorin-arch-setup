@@ -338,6 +338,34 @@ fedora_wallpaper_run_quietly() {
     return 1
 }
 
+fedora_wallpaper_start_niri_helper() {
+    local label=$1 helper_pid
+    shift
+
+    # Niri blur helpers are not ordinary bounded startup commands.  In
+    # particular, niri_auto_blur_bg.sh owns an event-stream subscription and
+    # is expected to stay alive for the session.  Starting it in the
+    # initializer's foreground command chain makes Niri wait until its
+    # timeout, so launch it as a separate session instead.  Close the lock in
+    # both the caller subshell and the child to keep compatibility with old
+    # helpers that fork before exec, and make every stdio stream independent
+    # of the initializer's startup pipe.
+    fedora_wallpaper_close_lock_fd
+    (
+        local_setsid=$(command -v setsid 2>/dev/null || true)
+        fedora_wallpaper_close_lock_fd
+        exec </dev/null
+        export PATH="$FEDORA_WALLPAPER_PATH"
+        if [ -n "$local_setsid" ]; then
+            exec "$local_setsid" -- "$@"
+        else
+            exec "$@"
+        fi
+    ) >> "$FEDORA_WALLPAPER_LOG" 2>&1 &
+    helper_pid=$!
+    fedora_wallpaper_log "started $label helper pid=$helper_pid"
+}
+
 fedora_wallpaper_niri_socket_is_valid() {
     local socket=${NIRI_SOCKET:-}
 
@@ -395,13 +423,16 @@ fedora_wallpaper_prepare_niri_socket() {
 }
 
 fedora_wallpaper_run_niri_helper() (
-    local label=$1 timeout_seconds=$2
+    local label=$1 _timeout_seconds=$2
     shift 2
 
+    # Keep the historical timeout argument for callers that source this
+    # coordinator directly; resident helpers are intentionally not wrapped in
+    # timeout anymore.
     # Keep any temporary socket override inside this subshell so callers keep
     # their original NIRI_SOCKET value and export state after the helper.
     fedora_wallpaper_prepare_niri_socket || true
-    fedora_wallpaper_run_quietly "$label" "$timeout_seconds" "$@"
+    fedora_wallpaper_start_niri_helper "$label" "$@"
 )
 
 fedora_wallpaper_query_wrapper() {
