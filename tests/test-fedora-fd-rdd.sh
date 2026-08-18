@@ -38,7 +38,13 @@ if [ "${1:-}" = clone ]; then
     [ "$mode" != clone-fail ] || exit 1
     destination=${3:?}
     mkdir -p "$destination/.git" "$destination/scripts"
-    printf '#!/usr/bin/env bash\nexit 0\n' > "$destination/scripts/install.sh"
+    cat > "$destination/scripts/install.sh" <<'EOF_INSTALLER'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+mkdir -p "$HOME/.vcp/bin"
+printf '#!/usr/bin/env bash\n' > "$HOME/.vcp/bin/fd-rdd"
+chmod 755 "$HOME/.vcp/bin/fd-rdd"
+EOF_INSTALLER
     chmod 755 "$destination/scripts/install.sh"
     exit 0
 fi
@@ -67,12 +73,16 @@ export FEDORA_TEST_GIT_LOG="$TEST_DIR/git.log"
 
 source "$ROOT_DIR/scripts/lib/core.sh"
 require_writable_mode() { return 0; }
-fedora_application_target_satisfied() { return 0; }
 runuser() {
     [ "${1:-}" = -u ] && shift 2
     [ "${1:-}" = -- ] && shift
-    [ "${1:-}" = env ] && shift
-    while [ "$#" -gt 0 ] && [[ "$1" == *=* ]]; do shift; done
+    if [ "${1:-}" = env ]; then
+        shift
+        while [ "$#" -gt 0 ] && [[ "$1" == *=* ]]; do
+            export "$1"
+            shift
+        done
+    fi
     "$@"
 }
 
@@ -106,5 +116,44 @@ if find "$HOME_DIR/.local/src" -maxdepth 1 -name '.vcp-fd-rdd.*' -print -quit |
     grep -q .; then
     fail 'failed fd-rdd checkout must clean its temporary staging directory'
 fi
+
+# 官方安装器写入 ~/.vcp/bin/fd-rdd；通过应用目标包装器验证真实路径，并确认目标
+# 满足后的第二次运行不会重复执行。
+LOCAL_INSTALLER="$TEST_DIR/fd-rdd-install.sh"
+LOCAL_INSTALL_CALLS="$TEST_DIR/fd-rdd-install.calls"
+cat > "$LOCAL_INSTALLER" <<'EOF_LOCAL_INSTALLER'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+printf 'install\n' >> "${FEDORA_TEST_LOCAL_INSTALL_CALLS:?}"
+mkdir -p "$HOME/.vcp/bin"
+printf '#!/usr/bin/env bash\n' > "$HOME/.vcp/bin/fd-rdd"
+chmod 755 "$HOME/.vcp/bin/fd-rdd"
+EOF_LOCAL_INSTALLER
+chmod 755 "$LOCAL_INSTALLER"
+export FEDORA_FD_RDD_INSTALL_SCRIPT="$LOCAL_INSTALLER"
+export FEDORA_TEST_LOCAL_INSTALL_CALLS="$LOCAL_INSTALL_CALLS"
+rm -rf "$HOME_DIR/.vcp" "$HOME_DIR/.local/bin/fd-rdd"
+fedora_install_fd_rdd "$TARGET_USER" "$HOME_DIR" ||
+    fail 'fd-rdd fake installer must return success'
+[ -x "$HOME_DIR/.vcp/bin/fd-rdd" ] ||
+    fail 'fd-rdd fake installer must create the official ~/.vcp/bin path'
+fedora_install_application_target fd-rdd-git "$TARGET_USER" "$HOME_DIR" ||
+    fail 'fd-rdd target must remain successful on an idempotent rerun'
+[ "$(wc -l < "$LOCAL_INSTALL_CALLS")" -eq 1 ] ||
+    fail 'fd-rdd target must not rerun a satisfied fake installer'
+rm -rf "$HOME_DIR/.vcp"
+mkdir -p "$HOME_DIR/.local/bin"
+printf '#!/usr/bin/env bash\n' > "$HOME_DIR/.local/bin/fd-rdd"
+chmod 755 "$HOME_DIR/.local/bin/fd-rdd"
+fedora_application_target_satisfied fd-rdd-git "$TARGET_USER" "$HOME_DIR" ||
+    fail 'fd-rdd satisfaction must retain ~/.local/bin compatibility'
+rm -f "$HOME_DIR/.local/bin/fd-rdd"
+cat > "$BIN_DIR/fd-rdd" <<'EOF_PATH_FD_RDD'
+#!/usr/bin/env bash
+exit 0
+EOF_PATH_FD_RDD
+chmod 755 "$BIN_DIR/fd-rdd"
+fedora_application_target_satisfied fd-rdd-git "$TARGET_USER" "$HOME_DIR" ||
+    fail 'fd-rdd satisfaction must retain PATH compatibility'
 
 printf 'PASS: Fedora fd-rdd target-user cargo, staged clone, retry, and rollback contract\n'

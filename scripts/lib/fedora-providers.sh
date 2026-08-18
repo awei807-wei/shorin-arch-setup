@@ -177,7 +177,7 @@ fedora_application_target_pending() {
             return 0
             ;;
         mark-shot)
-            fedora_rpm_file 'mark-shot-*.rpm' >/dev/null && return 1
+            fedora_rpm_file 'mark-shot*.rpm' >/dev/null && return 1
             FEDORA_APPLICATION_PENDING_REASON='official-download-at-apply:x86_64:v0.1.48'
             return 0
             ;;

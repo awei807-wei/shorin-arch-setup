@@ -13,6 +13,15 @@ fedora_fd_rdd_source_dir() {
     printf '%s\n' "$home/.local/src/vcp-fd-rdd"
 }
 
+fedora_fd_rdd_binary_satisfied() {
+    local home=${1:-${HOME_DIR:-}}
+
+    # 官方安装器写入 ~/.vcp/bin；保留历史 ~/.local/bin 交接和 PATH 查找兼容。
+    [ -x "$home/.vcp/bin/fd-rdd" ] ||
+        [ -x "$(fedora_user_bin fd-rdd "$home")" ] ||
+        command -v fd-rdd >/dev/null 2>&1
+}
+
 fedora_fd_rdd_as_user() {
     local user=$1 home=$2
     shift 2

@@ -135,9 +135,14 @@ fedora_install_vicinae() {
     if [ -z "$file" ]; then
         fedora_official_x86_64_guard 'Vicinae' || return
         cache_dir=${FEDORA_OFFICIAL_CACHE_DIR:-$home/.cache/shorin-arch-setup/fedora-applications}
-        file=$(fedora_download_verified_official_asset \
+        FEDORA_OFFICIAL_DOWNLOAD_RESULT=''
+        if fedora_download_verified_official_asset \
             "$FEDORA_VICINAE_URL" "$FEDORA_VICINAE_ASSET" \
-            "$FEDORA_VICINAE_SHA256" "$cache_dir") || download_status=$?
+            "$FEDORA_VICINAE_SHA256" "$cache_dir" >/dev/null; then
+            file=$FEDORA_OFFICIAL_DOWNLOAD_RESULT
+        else
+            download_status=$?
+        fi
         if [ "$download_status" -ne 0 ]; then
             warn 'Pending Fedora artifact: official Vicinae AppImage could not be downloaded.'
             warn 'Set FEDORA_VICINAE_APPIMAGE to the official AppImage, or place vicinae*.AppImage in FEDORA_RPM_DIR/SHORIN_ARTIFACT_DIR, the target user Downloads, or /tmp.'

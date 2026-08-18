@@ -31,9 +31,19 @@ source "$ROOT_DIR/scripts/lib/core.sh"
 [ "$FEDORA_LSFG_VK_SHA256" = \
     77749bbd5bddd19ea38b090e0cec8912e9285a92b9345429df924dc33cc47786 ] ||
     fail 'LSFG-VK official checksum contract changed'
+[ "$FEDORA_LSFG_VK_ASSET" = lsfg-vk-1.0.0.x86_64.rpm ] ||
+    fail 'LSFG-VK official asset name contract changed'
+[ "$FEDORA_LSFG_VK_URL" = \
+    https://github.com/PancakeTAS/lsfg-vk/releases/download/v1.0.0/lsfg-vk-1.0.0.x86_64.rpm ] ||
+    fail 'LSFG-VK official URL contract changed'
 [ "$FEDORA_MARK_SHOT_SHA256" = \
     a037e2733480cf0bb3e671472c6fe9d33b8189ff174c1f13972d1a0cfaa4d1e2 ] ||
     fail 'Mark Shot official checksum contract changed'
+[ "$FEDORA_MARK_SHOT_ASSET" = mark-shot_0.1.48_fedora_x86_64.rpm ] ||
+    fail 'Mark Shot official asset name contract changed'
+[ "$FEDORA_MARK_SHOT_URL" = \
+    https://github.com/jswysnemc/mark-shot/releases/download/v0.1.48/mark-shot_0.1.48_fedora_x86_64.rpm ] ||
+    fail 'Mark Shot official URL contract changed'
 [ "$FEDORA_LINUXQQ_URL" = \
     https://qqdl.gtimg.cn/qqfile/QQNT/9.9.33/release/3f89efc5/QQ_3.2.32_260812_x86_64_01.rpm ] ||
     fail 'Linux QQ official URL contract changed'
@@ -60,6 +70,31 @@ fedora_download_verified_official_asset \
 [ "$status" -eq 1 ] || fail 'official checksum mismatch must fail closed'
 [ ! -e "$FEDORA_OFFICIAL_CACHE_DIR/fixed.rpm" ] ||
     fail 'checksum mismatch must not leave an official cache entry'
+
+# 直接由安装器调用下载器时必须保留待处理原因；命令替换会在子 shell 中丢失赋值。
+fedora_ensure_flatpak_target() { return 0; }
+fedora_rpm_file() { return 1; }
+fedora_install_local_rpm() { return "$RC_SKIPPED"; }
+curl() { return 1; }
+VICINAE_HOME="$TEST_DIR/vicinae-home"
+mkdir -p "$VICINAE_HOME"
+status=0
+fedora_install_official_rpm_target \
+    mark-shot "$TARGET_USER" "$VICINAE_HOME" 'Mark Shot' 'mark-shot*.rpm' \
+    "$FEDORA_MARK_SHOT_URL" "$FEDORA_MARK_SHOT_ASSET" \
+    "$FEDORA_MARK_SHOT_SHA256" || status=$?
+[ "$status" -eq "$RC_SKIPPED" ] ||
+    fail 'official RPM download failure must remain a pending skip'
+[ "$FEDORA_APPLICATION_PENDING_REASON" = \
+    "official-download-failed:asset=$FEDORA_MARK_SHOT_ASSET:url=$FEDORA_MARK_SHOT_URL" ] ||
+    fail 'official RPM download failure reason must survive direct invocation'
+status=0
+fedora_install_vicinae "$TARGET_USER" "$VICINAE_HOME" || status=$?
+[ "$status" -eq "$RC_SKIPPED" ] ||
+    fail 'Vicinae download failure must remain a pending skip'
+[ "$FEDORA_APPLICATION_PENDING_REASON" = \
+    "official-download-failed:asset=$FEDORA_VICINAE_ASSET:url=$FEDORA_VICINAE_URL" ] ||
+    fail 'Vicinae download failure reason must survive direct invocation'
 
 FEDORA_OFFICIAL_MACHINE=aarch64
 status=0

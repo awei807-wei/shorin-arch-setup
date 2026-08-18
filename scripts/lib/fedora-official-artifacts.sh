@@ -19,13 +19,13 @@ FEDORA_CLASH_VERGE_URL_PINNED=https://github.com/clash-verge-rev/clash-verge-rev
 FEDORA_CLASH_VERGE_SHA256_PINNED=5b8edb94cd270b1d4655217378aeddf37a735151574ddb8853128bdd1ca86454
 
 FEDORA_LSFG_VK_VERSION_PINNED=1.0.0
-FEDORA_LSFG_VK_ASSET_PINNED=lsfg-vk-1.0.0-1.x86_64.rpm
-FEDORA_LSFG_VK_URL_PINNED=https://github.com/PancakeTAS/lsfg-vk/releases/download/v1.0.0/lsfg-vk-1.0.0-1.x86_64.rpm
+FEDORA_LSFG_VK_ASSET_PINNED=lsfg-vk-1.0.0.x86_64.rpm
+FEDORA_LSFG_VK_URL_PINNED=https://github.com/PancakeTAS/lsfg-vk/releases/download/v1.0.0/lsfg-vk-1.0.0.x86_64.rpm
 FEDORA_LSFG_VK_SHA256_PINNED=77749bbd5bddd19ea38b090e0cec8912e9285a92b9345429df924dc33cc47786
 
 FEDORA_MARK_SHOT_VERSION_PINNED=0.1.48
-FEDORA_MARK_SHOT_ASSET_PINNED=mark-shot-0.1.48-1.x86_64.rpm
-FEDORA_MARK_SHOT_URL_PINNED=https://github.com/marktext/mark-shot/releases/download/v0.1.48/mark-shot-0.1.48-1.x86_64.rpm
+FEDORA_MARK_SHOT_ASSET_PINNED=mark-shot_0.1.48_fedora_x86_64.rpm
+FEDORA_MARK_SHOT_URL_PINNED=https://github.com/jswysnemc/mark-shot/releases/download/v0.1.48/mark-shot_0.1.48_fedora_x86_64.rpm
 FEDORA_MARK_SHOT_SHA256_PINNED=a037e2733480cf0bb3e671472c6fe9d33b8189ff174c1f13972d1a0cfaa4d1e2
 
 FEDORA_LINUXQQ_VERSION_PINNED=3.2.32
@@ -56,6 +56,11 @@ FEDORA_LINUXQQ_ASSET=$FEDORA_LINUXQQ_ASSET_PINNED
 FEDORA_LINUXQQ_URL=$FEDORA_LINUXQQ_URL_PINNED
 FEDORA_LINUXQQ_SIZE=$FEDORA_LINUXQQ_SIZE_PINNED
 FEDORA_LINUXQQ_SHA256=$FEDORA_LINUXQQ_SHA256_PINNED
+
+# 安装器直接调用下载器，使当前 shell 设置的待处理原因得以保留。结果路径
+# 通过全局变量暴露，避免命令替换在子 shell 中执行函数并丢失
+# FEDORA_APPLICATION_PENDING_REASON。
+FEDORA_OFFICIAL_DOWNLOAD_RESULT=''
 
 fedora_official_x86_64_guard() {
     local label=$1 machine=${FEDORA_OFFICIAL_MACHINE:-$(uname -m)}
@@ -93,6 +98,8 @@ fedora_download_verified_official_asset() {
     local url=$1 asset=$2 expected=$3 cache_dir=$4 expected_size=${5:-}
     local destination temporary
 
+    FEDORA_OFFICIAL_DOWNLOAD_RESULT=''
+
     [[ "$url" == https://* ]] || {
         error "Refusing non-HTTPS Fedora official asset URL: $url"
         return 1
@@ -110,6 +117,7 @@ fedora_download_verified_official_asset() {
     destination="$cache_dir/$asset"
     if fedora_verify_official_asset_file "$destination" "$expected" "$asset" &&
         { [ -z "$expected_size" ] || [ "$(stat -c '%s' "$destination")" = "$expected_size" ]; }; then
+        FEDORA_OFFICIAL_DOWNLOAD_RESULT=$destination
         printf '%s\n' "$destination"
         return 0
     fi
@@ -138,6 +146,7 @@ fedora_download_verified_official_asset() {
         error "Unable to atomically cache Fedora official asset: $destination"
         return 1
     fi
+    FEDORA_OFFICIAL_DOWNLOAD_RESULT=$destination
     printf '%s\n' "$destination"
 }
 
@@ -165,8 +174,10 @@ fedora_install_official_rpm_target() {
 
     fedora_official_x86_64_guard "$label" || return
     cache_dir=${FEDORA_OFFICIAL_CACHE_DIR:-$home/.cache/shorin-arch-setup/fedora-applications}
-    downloaded=$(fedora_download_verified_official_asset \
-        "$url" "$asset" "$expected" "$cache_dir") || return
+    FEDORA_OFFICIAL_DOWNLOAD_RESULT=''
+    fedora_download_verified_official_asset \
+        "$url" "$asset" "$expected" "$cache_dir" >/dev/null || return
+    downloaded=$FEDORA_OFFICIAL_DOWNLOAD_RESULT
     fedora_official_rpm_identity_for_target "$package" "$downloaded" "$label" || return
     dnf install -y "$downloaded" || {
         error "Failed to install verified Fedora official RPM: $downloaded"
@@ -249,9 +260,11 @@ fedora_install_official_linuxqq() {
     [ "$status" -eq "$RC_SKIPPED" ] || [ "$status" -eq 1 ] || return "$status"
     fedora_official_x86_64_guard 'Linux QQ' || return
     cache_dir=${FEDORA_OFFICIAL_CACHE_DIR:-$home/.cache/shorin-arch-setup/fedora-applications}
-    downloaded=$(fedora_download_verified_official_asset \
+    FEDORA_OFFICIAL_DOWNLOAD_RESULT=''
+    fedora_download_verified_official_asset \
         "$FEDORA_LINUXQQ_URL" "$FEDORA_LINUXQQ_ASSET" \
-        "$FEDORA_LINUXQQ_SHA256" "$cache_dir" "$FEDORA_LINUXQQ_SIZE") || return
+        "$FEDORA_LINUXQQ_SHA256" "$cache_dir" "$FEDORA_LINUXQQ_SIZE" >/dev/null || return
+    downloaded=$FEDORA_OFFICIAL_DOWNLOAD_RESULT
     fedora_verify_official_rpm_identity "$downloaded" 'Linux QQ' \
         '([Qq][Qq]|[Ll]inux[Qq][Qq])' || return
     dnf install -y "$downloaded" || {

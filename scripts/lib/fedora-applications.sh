@@ -40,8 +40,7 @@ fedora_application_target_satisfied() {
             [ "$gearlever" -eq 1 ] && [ -x "$appimage" ] &&
                 fedora_vicinae_desktop_satisfied "$home" ;;
         fd-rdd-git)
-            [ -x "$(fedora_user_bin fd-rdd "$home")" ] ||
-                command -v fd-rdd >/dev/null 2>&1 ;;
+            fedora_fd_rdd_binary_satisfied "$home" ;;
         tsukimi-bin)
             fedora_copr_application_target_satisfied tsukimi-bin ;;
         thorium-browser-bin)
@@ -350,7 +349,7 @@ fedora_install_application_target() {
                 FEDORA_THORIUM_SHA256 '[Tt]horium([-_]?browser)?' ;;
         mark-shot)
             fedora_install_official_rpm_target \
-                "$package" "$user" "$home" 'Mark Shot' 'mark-shot-*.rpm' \
+                "$package" "$user" "$home" 'Mark Shot' 'mark-shot*.rpm' \
                 "$FEDORA_MARK_SHOT_URL" "$FEDORA_MARK_SHOT_ASSET" \
                 "$FEDORA_MARK_SHOT_SHA256" ;;
         typora-free)
