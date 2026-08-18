@@ -109,11 +109,18 @@ ensure_flatpak_steam_locale() {
 
     steam_flatpak_locale_satisfied && return 0
     if platform_is_fedora; then
-        scope=$(fedora_flatpak_app_scope com.valvesoftware.Steam) || status=$?
+        scope=$(fedora_flatpak_app_scope com.valvesoftware.Steam \
+            "$TARGET_USER" "$HOME_DIR") || status=$?
         [ "$status" -eq 0 ] || return "$status"
     fi
-    flatpak override "--$scope" --env=LANG=zh_CN.UTF-8 \
-        com.valvesoftware.Steam
+    if [ "$scope" = user ]; then
+        fedora_flatpak_user_override_apply \
+            com.valvesoftware.Steam "$TARGET_USER" "$HOME_DIR" \
+            --env=LANG=zh_CN.UTF-8
+    else
+        flatpak override --system --env=LANG=zh_CN.UTF-8 \
+            com.valvesoftware.Steam
+    fi
     steam_flatpak_locale_satisfied
 }
 

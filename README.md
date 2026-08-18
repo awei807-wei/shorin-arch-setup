@@ -56,12 +56,18 @@ aarch64: `f5a85771f06bb0e8c488136ae0aedaec8d341a7cee995549df391d7d852fe8d1`）�
 使用 `alsa-plugins-pulseaudio`、`gstreamer1-plugins-base`、`openal-soft` 与
 `openal-soft.i686`，分别覆盖 Fedora 的 64 位和 32 位 Wine 游戏运行时。
 Fedora Wine 使用 `wine`、`wine-mono`、`mingw32-wine-gecko` 和 `mingw64-wine-gecko`，不请求已不存在的 `wine-gecko`。
-Clash Verge、Linux QQ、微信、Thorium 和 Mark Shot 从 `FEDORA_RPM_DIR`（或目标用户
-XDG Downloads，包括中文 `下载`、以及 `/tmp`）发现官方 RPM；`tsukimi-bin` 使用
-`walker874/tsukimi` COPR；Vicinae 使用官方 AppImage，同时确保 Gear Lever Flatpak
-可用；`lsfg-vk-bin` 先收敛 `qt6-qtdeclarative` 和 `qt6-qtbase`，再安装本地官方 RPM。
-`fd-rdd-git` 不再重试已失效的固定网络 URL，只接受
-`FEDORA_FD_RDD_INSTALL_SCRIPT` 指定的本地官方 installer；`typora-free` 没有声明来源，
+Clash Verge Rev、Linux QQ、LSFG-VK 和 Mark Shot 在 Fedora x86_64 上优先从固定版本的官方
+HTTPS release 下载，并在安装前校验内置 SHA-256；Linux QQ 额外校验固定文件大小和 RPM
+架构/名称，缓存使用原子替换。微信、Thorium 默认保持 pending：只有 installer/root
+显式提供 `FEDORA_WECHAT_SHA256` 或 `FEDORA_THORIUM_SHA256` 时，才会从
+`FEDORA_RPM_DIR`、`SHORIN_ARTIFACT_DIR`、目标用户 Downloads/`下载` 与 `/tmp` 搜索并严格校验 RPM；同目录
+sidecar 不会被信任。无预期 SHA 会立即报告明确 pending 原因。`tsukimi-bin` 使用统一的
+`walker874/tsukimi` COPR；Vicinae 固定 v0.26.0 官方 AppImage（SHA-256 校验），以目标
+用户尝试交给 Gear Lever，CLI 不可用时保留项目托管 AppImage 与 desktop entry fallback；
+`lsfg-vk-bin` 先收敛 `qt6-qtdeclarative` 和 `qt6-qtbase`。
+`fd-rdd-git` 使用固定 commit `44b60573129c67f4471fa70f21b4a0b70bc1fec8` 的官方仓库源码，
+要求目标用户环境有 `git`、`cargo`，并强制以目标用户运行 `scripts/install.sh`；也可通过
+`FEDORA_FD_RDD_INSTALL_SCRIPT` 交接经确认的本地 installer。`typora-free` 没有声明来源，
 会明确标记为 skipped。找不到外部 artifact 时安装器会输出来源、glob 和可执行的交接
 路径，不会把“依赖已安装”冒充为主程序已安装；这类目标会记录为 `pending/skip`，写入
 `~/Documents/安装待处理的软件.txt`，且不会阻断其他独立可选模块。
@@ -190,20 +196,20 @@ sudo bash install.sh install \
 - `applications.list`：通用应用目标，保留 Repo、`AUR:`、`flatpak:`、`GitHub:` 来源信息。
 - `niri-packages.list`：Niri 附加包目标。必需桌面目标由安装器维护，旧清单不能屏蔽新增的必需组件。
 
-首次交互安装会把最终选择原子写入 profile。后续 `repair`、`audit` 和 `verify` 读取同一声明，避免把“用户没有选择”误判为“安装失败”。自定义 profile 路径必须在后续运行中保持一致。
+首次交互安装会把最终选择原子写入 profile，并生成 `applications.list.meta`（schema=2、source/provider revision、manifest hash 与 mode）。后续 `repair`、`audit` 和 `verify` 读取同一声明，避免把“用户没有选择”误判为“安装失败”。自定义 profile 路径必须在后续运行中保持一致。
 
 `niri-packages.list` 只要存在且可读就是权威的可选包清单，包括零字节空清单。空清单表示不安装任何可选桌面包，但安装器维护的必需桌面目标仍会合并并验收。
 
 ### 旧版本 Applications 迁移
 
-旧版 `99-apps.sh` 不保存用户当时的应用选择。升级后首次运行 `audit` 会把缺少 `applications.list` 报告为待迁移差异，但不会写入文件。首次运行 `repair` 时，applications 模块会根据当前系统中可确认的安装痕迹生成一次性清单：
+旧版 `99-apps.sh` 不保存用户当时的应用选择。升级后首次运行 `audit` 会把缺少 `applications.list` 报告为待迁移差异，但不会写入文件。首次运行 `repair` 时，applications 模块会根据当前系统中可确认的安装痕迹生成一次性清单；对于带有精确 `# Migrated from legacy installed state.` 标记但尚无 metadata 的旧 installer 清单，则先生成 `.bak` 备份，再按 `common-applist.txt` 原顺序仅追加缺失条目，绝不删除、重排或覆盖自定义条目：
 
 - Repo 与 AUR 应用通过已安装软件包识别，并保留原始 `AUR:` 来源。
-- Flatpak 通过系统级安装状态识别，并保留 `flatpak:` 来源。
+- Flatpak 同时检查系统 scope 与目标用户 user scope，并保留 `flatpak:` 来源。
 - GitHub 应用通过二进制、源码 checkout 或用户单元识别。
 - LazyVim 通过现有 Neovim 配置识别。
 
-迁移是保守的，不会因为清单缺失就默认安装 `common-applist.txt` 中的全部应用。无法从当前状态证明曾被选择、且目前已经完全移除的应用不会自动加入清单。没有检测到任何旧目标时也会写入显式空清单，后续运行不再重复迁移。
+迁移是保守的，不会因为清单缺失就默认安装 `common-applist.txt` 中的全部应用。无法从当前状态证明曾被选择、且目前已经完全移除的应用不会自动加入清单。没有检测到任何旧目标时不会声明空清单。若用户之后修改 manifest，校验会报告 `drift/adopt-required`，repair 不会自动恢复被删除的条目；需要显式重新选择或 adopt。
 
 生成位置默认是：
 
@@ -302,7 +308,10 @@ scripts/
     packages.sh                  # pacman、AUR 与系统级 Flatpak
     platform.sh                  # Arch/Fedora 检测与 Fedora 包名翻译
     fedora.sh                    # Fedora Flatpak、COPR、RPM/AppImage/provider 目标
+    fedora-flatpak.sh            # Fedora system/user scope Flatpak 合同
     fedora-providers.sh          # Fedora provider 合同与目标路由
+    fedora-official-artifacts.sh # 固定版本官方 AppImage/RPM 下载、缓存与校验
+    fedora-fd-rdd.sh             # 固定 commit 的 fd-rdd 目标用户源码安装
     fedora-starship-provider.sh  # Starship target-user provider
     fedora-font-provider.sh      # 精确字体 family/glyph 合同
     fedora-font-installer.sh     # 固定字体资产下载、解压与回滚
@@ -320,6 +329,8 @@ scripts/
     desktop-niri/fedora-provider-apply.sh # Fedora provider 系统/目标用户 apply 入口
     desktop-niri/awww.sh        # Fedora awww 源码构建与命令合同
     applications.sh
+    applications/manifest.sh     # 应用清单迁移、元数据与原子回滚
+    applications/targets.sh      # 应用目标合同与执行路由
     virtualization.sh
     nas-rime.sh
     vcp.sh

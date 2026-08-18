@@ -17,24 +17,25 @@ fedora_application_target_satisfied() {
     fi
     case "$package" in
         heroic-games-launcher-bin)
-            state_flatpak_present com.heroicgameslauncher.hgl ;;
+            fedora_flatpak_present com.heroicgameslauncher.hgl "$user" "$home" ;;
         upscaler)
-            state_flatpak_present io.gitlab.theevilskeleton.Upscaler ;;
+            fedora_flatpak_present io.gitlab.theevilskeleton.Upscaler "$user" "$home" ;;
         clash-verge-rev)
             fedora_rpm_or_command '(^|[-.])clash[-_]?verge' clash-verge ;;
         linuxqq-appimage)
-            fedora_rpm_or_command '(^|[-.])linuxqq' qq ;;
+            fedora_rpm_or_command '(^|[-_.])([Ll]inux)?[Qq][Qq]($|[-_.])' qq ;;
         wechat-appimage)
-            fedora_rpm_or_command '(^|[-.])wechat' wechat ;;
+            fedora_installer_sha256_valid FEDORA_WECHAT_SHA256 || return 1
+            fedora_rpm_or_command '([Ww]e[Cc]hat|[Ww]x|[Cc]om\.[Tt]encent\.[Ww]e[Cc]hat)' wechat ;;
         lsfg-vk-bin)
             package_is_installed qt6-qtdeclarative &&
                 package_is_installed qt6-qtbase &&
                 fedora_rpm_or_command 'lsfg[-_]?vk' lsfg-vk ;;
         mangojuice-bin)
-            state_flatpak_present io.github.radiolamp.mangojuice ;;
+            fedora_flatpak_present io.github.radiolamp.mangojuice "$user" "$home" ;;
         vicinae-bin|vicinae)
             gearlever=1
-            state_flatpak_present it.mijorus.gearlever || gearlever=0
+            fedora_flatpak_present it.mijorus.gearlever "$user" "$home" || gearlever=0
             appimage=$(fedora_user_bin vicinae.AppImage "$home")
             [ "$gearlever" -eq 1 ] && [ -x "$appimage" ] &&
                 fedora_vicinae_desktop_satisfied "$home" ;;
@@ -42,9 +43,10 @@ fedora_application_target_satisfied() {
             [ -x "$(fedora_user_bin fd-rdd "$home")" ] ||
                 command -v fd-rdd >/dev/null 2>&1 ;;
         tsukimi-bin)
-            package_is_installed tsukimi || command -v tsukimi >/dev/null 2>&1 ;;
+            fedora_copr_application_target_satisfied tsukimi-bin ;;
         thorium-browser-bin)
-            fedora_rpm_or_command 'thorium[-_]?browser' thorium-browser ;;
+            fedora_installer_sha256_valid FEDORA_THORIUM_SHA256 || return 1
+            fedora_rpm_or_command '[Tt]horium([-_]?browser)?' thorium-browser ;;
         mark-shot)
             fedora_rpm_or_command '(^|[-.])mark[-_]?shot' mark-shot ;;
         typora-free)
@@ -55,29 +57,6 @@ fedora_application_target_satisfied() {
             package_is_installed "$mapped"
             ;;
     esac
-}
-
-fedora_install_fd_rdd() {
-    local user=$1 home=$2 script
-
-    require_writable_mode || return
-    if [ -n "${FEDORA_FD_RDD_INSTALL_SCRIPT:-}" ] &&
-        [ -r "$FEDORA_FD_RDD_INSTALL_SCRIPT" ]; then
-        script=$FEDORA_FD_RDD_INSTALL_SCRIPT
-    else
-        warn 'Pending Fedora target: fd-rdd-git has no verified upstream installer source.'
-        warn 'Provide FEDORA_FD_RDD_INSTALL_SCRIPT with the official local installer to continue.'
-        return "$RC_SKIPPED"
-    fi
-    grep -q '^#!' "$script" || {
-        error 'Local fd-rdd installer did not contain a shebang.'
-        return 1
-    }
-    if ! runuser -u "$user" -- env HOME="$home" bash "$script"; then
-        error 'The official fd-rdd install.sh failed for the target user.'
-        return 1
-    fi
-    fedora_application_target_satisfied fd-rdd-git "$user" "$home"
 }
 
 fedora_install_lact() {
@@ -102,6 +81,15 @@ fedora_install_lact() {
     fi
     ensure_service_started "$FEDORA_LACT_SERVICE" || return
     fedora_lact_target_satisfied
+}
+
+fedora_install_tsukimi() {
+    local repository
+
+    repository=$(fedora_application_provider_id tsukimi-bin) || return 1
+    fedora_ensure_copr_repository "$repository" || return
+    ensure_package tsukimi || return
+    fedora_copr_application_target_satisfied tsukimi-bin
 }
 
 fedora_yazi_cleanup() {
@@ -243,23 +231,38 @@ fedora_install_yazi() {
 }
 
 fedora_install_verified_rpm_target() {
-    local package=$1 user=$2 home=$3 label=$4 pattern=$5
+    local package=$1 user=$2 home=$3 label=$4 pattern=$5 expected_var=$6
+    local identity_pattern=$7 expected file
 
-    fedora_install_local_rpm "$label" "$pattern" &&
-        fedora_application_target_satisfied "$package" "$user" "$home"
+    expected=${!expected_var:-}
+    if [ -z "$expected" ]; then
+        FEDORA_APPLICATION_PENDING_REASON="official-rpm-sha256-required:label=$label:env=$expected_var:sidecar=ignored"
+        warn "Pending Fedora artifact: $label requires an installer-provided $expected_var; sidecar checksums are not trusted."
+        return "$RC_SKIPPED"
+    fi
+    [[ "$expected" =~ ^[[:xdigit:]]{64}$ ]] || {
+        error "Invalid installer-provided SHA-256 for $label: $expected_var"
+        return 1
+    }
+    file=$(fedora_rpm_file "$pattern" 2>/dev/null || true)
+    if [ -n "$file" ]; then
+        fedora_install_verified_official_rpm_file \
+            "$package" "$user" "$home" "$label" "$file" "$expected" \
+            "$identity_pattern"
+        return $?
+    fi
+    FEDORA_APPLICATION_PENDING_REASON="official-rpm-missing:label=$label:pattern=$pattern:search=FEDORA_RPM_DIR,SHORIN_ARTIFACT_DIR,target-Downloads,target-下载,/tmp"
+    warn "Pending Fedora artifact: $label RPM was not found (pattern: $pattern); no unverified local install is allowed."
+    return "$RC_SKIPPED"
 }
 
 fedora_install_clash_verge() {
     local package=$1 user=$2 home=$3
 
-    fedora_install_verified_rpm_target \
-        "$package" "$user" "$home" 'Clash Verge' 'Clash Verge-*.rpm' &&
-        return 0
-    fedora_install_verified_rpm_target \
-        "$package" "$user" "$home" 'Clash Verge' 'Clash.Verge*.rpm' &&
-        return 0
-    fedora_install_verified_rpm_target \
-        "$package" "$user" "$home" 'Clash Verge' 'clash-verge*.rpm'
+    fedora_install_official_rpm_target \
+        "$package" "$user" "$home" 'Clash Verge' 'Clash.Verge-*.rpm' \
+        "$FEDORA_CLASH_VERGE_URL" "$FEDORA_CLASH_VERGE_ASSET" \
+        "$FEDORA_CLASH_VERGE_SHA256"
 }
 
 fedora_install_application_target() {
@@ -284,7 +287,9 @@ fedora_install_application_target() {
     if fedora_application_provider_target "$package"; then
         case "$(fedora_application_provider_kind "$package")" in
             flatpak)
-                ensure_flatpak "$(fedora_application_provider_id "$package")" ;;
+                fedora_ensure_flatpak_target \
+                    "$(fedora_application_provider_id "$package")" \
+                    "$user" "$home" ;;
             package)
                 ensure_package fd-find || return
                 [ -x "$FEDORA_FD_COMMAND_PATH" ] || {
@@ -292,7 +297,13 @@ fedora_install_application_target() {
                     return 1
                 }
                 ;;
-            copr) fedora_install_lact "$user" "$home" ;;
+            copr)
+                case "$package" in
+                    lact) fedora_install_lact "$user" "$home" ;;
+                    tsukimi-bin) fedora_install_tsukimi ;;
+                    *) error "Unsupported Fedora COPR target: $package"; return 1 ;;
+                esac
+                ;;
             release) fedora_install_yazi "$user" "$home" ;;
             target-user) fedora_install_starship "$user" "$home" ;;
             font) fedora_install_font_provider_target "$package" "$user" "$home" ;;
@@ -305,37 +316,43 @@ fedora_install_application_target() {
     fi
     case "$package" in
         heroic-games-launcher-bin)
-            ensure_flatpak com.heroicgameslauncher.hgl ;;
+            fedora_ensure_flatpak_target com.heroicgameslauncher.hgl \
+                "$user" "$home" ;;
         upscaler)
-            ensure_flatpak io.gitlab.theevilskeleton.Upscaler ;;
+            fedora_ensure_flatpak_target io.gitlab.theevilskeleton.Upscaler \
+                "$user" "$home" ;;
         clash-verge-rev)
             fedora_install_clash_verge "$package" "$user" "$home" ;;
         linuxqq-appimage)
-            fedora_install_verified_rpm_target \
-                "$package" "$user" "$home" 'Linux QQ' 'linuxqq*.rpm' ;;
+            fedora_install_official_linuxqq "$package" "$user" "$home" ;;
         wechat-appimage)
             fedora_install_verified_rpm_target \
-                "$package" "$user" "$home" 'WeChat Linux' 'WeChatLinux*.rpm' ;;
+                "$package" "$user" "$home" 'WeChat Linux' 'WeChatLinux*.rpm' \
+                FEDORA_WECHAT_SHA256 '([Ww]e[Cc]hat|[Ww]x|[Cc]om\.[Tt]encent\.[Ww]e[Cc]hat)' ;;
         lsfg-vk-bin)
             ensure_packages qt6-qtdeclarative qt6-qtbase
-            fedora_install_verified_rpm_target \
-                "$package" "$user" "$home" 'lsfg-vk' 'lsfg-vk*.rpm' ;;
+            fedora_install_official_rpm_target \
+                "$package" "$user" "$home" 'lsfg-vk' 'lsfg-vk*.rpm' \
+                "$FEDORA_LSFG_VK_URL" "$FEDORA_LSFG_VK_ASSET" \
+                "$FEDORA_LSFG_VK_SHA256" ;;
         mangojuice-bin)
-            ensure_flatpak io.github.radiolamp.mangojuice ;;
+            fedora_ensure_flatpak_target io.github.radiolamp.mangojuice \
+                "$user" "$home" ;;
         vicinae-bin|vicinae)
             fedora_install_vicinae "$user" "$home" ;;
         fd-rdd-git)
             fedora_install_fd_rdd "$user" "$home" ;;
         tsukimi-bin)
-            dnf copr enable -y walker874/tsukimi
-            ensure_package tsukimi
-            fedora_application_target_satisfied "$package" "$user" "$home" ;;
+            fedora_install_tsukimi ;;
         thorium-browser-bin)
             fedora_install_verified_rpm_target \
-                "$package" "$user" "$home" 'Thorium Browser' 'thorium-browser*.rpm' ;;
+                "$package" "$user" "$home" 'Thorium Browser' 'thorium-browser*.rpm' \
+                FEDORA_THORIUM_SHA256 '[Tt]horium([-_]?browser)?' ;;
         mark-shot)
-            fedora_install_verified_rpm_target \
-                "$package" "$user" "$home" 'Mark Shot' 'mark-shot-*.rpm' ;;
+            fedora_install_official_rpm_target \
+                "$package" "$user" "$home" 'Mark Shot' 'mark-shot-*.rpm' \
+                "$FEDORA_MARK_SHOT_URL" "$FEDORA_MARK_SHOT_ASSET" \
+                "$FEDORA_MARK_SHOT_SHA256" ;;
         typora-free)
             warn 'Pending Fedora artifact: typora-free has no declared official Fedora source; install it manually and add a Fedora-specific target.'
             return "$RC_SKIPPED" ;;

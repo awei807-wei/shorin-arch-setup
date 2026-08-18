@@ -282,7 +282,12 @@ run_modules() {
             done
         fi
         if [ -n "$blocked" ]; then
-            record_module_failure "$module" converge "blocked-by:$blocked"
+            if [ "$module" = applications ] && [ "$blocked" = base ]; then
+                record_module_failure "$module" converge \
+                    'blocked-by:base; rerun: sudo bash install.sh repair --distro fedora --user <u> base applications'
+            else
+                record_module_failure "$module" converge "blocked-by:$blocked"
+            fi
             halted_modules[$module]=1
             status=1
             continue

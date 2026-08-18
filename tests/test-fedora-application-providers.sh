@@ -165,6 +165,10 @@ for target in code curtail mission-center; do
     fedora_install_application_target "$target" "$TARGET_USER" "$HOME_DIR" ||
         fail "Flatpak provider did not converge for $target"
 done
+[ "$(fedora_application_provider_kind tsukimi-bin)" = copr ] ||
+    fail 'Tsukimi must use the shared COPR provider registry'
+[ "$(fedora_application_provider_id tsukimi-bin)" = walker874/tsukimi ] ||
+    fail 'Tsukimi provider registry must expose walker874/tsukimi'
 for app in com.visualstudio.code com.github.huluti.Curtail \
     io.missioncenter.MissionCenter; do
     [ "${INSTALLED_FLATPAKS[$app]:-0}" -eq 1 ] ||

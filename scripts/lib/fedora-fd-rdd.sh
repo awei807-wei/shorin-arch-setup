@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+trap 'printf "ERROR: %s:%s: %s\n" \
+  "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
+
+FEDORA_FD_RDD_REPO_URL=https://github.com/awei807-wei/vcp-fd-rdd.git
+FEDORA_FD_RDD_COMMIT=44b60573129c67f4471fa70f21b4a0b70bc1fec8
+
+fedora_fd_rdd_source_dir() {
+    local home=${1:-${HOME_DIR:-}}
+
+    printf '%s\n' "$home/.local/src/vcp-fd-rdd"
+}
+
+fedora_fd_rdd_as_user() {
+    local user=$1 home=$2
+    shift 2
+    runuser -u "$user" -- env HOME="$home" "$@"
+}
+
+fedora_fd_rdd_cleanup() {
+    local path=${1:-}
+
+    [ -n "$path" ] && [ -e "$path" ] || return 0
+    find "$path" -depth -delete
+}
+
+fedora_fd_rdd_cargo_available() {
+    local user=$1 home=$2
+
+    runuser -u "$user" -- env HOME="$home" \
+        PATH="${PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}" \
+        bash -c 'command -v cargo >/dev/null 2>&1'
+}
+
+fedora_install_fd_rdd() {
+    local user=$1 home=$2 script source_dir current_head
+    local staging_root='' staged_checkout remote previous_dir
+    local parent_dir
+
+    require_writable_mode || return
+    if [ -n "${FEDORA_FD_RDD_INSTALL_SCRIPT:-}" ] &&
+        [ -r "$FEDORA_FD_RDD_INSTALL_SCRIPT" ]; then
+        script=$FEDORA_FD_RDD_INSTALL_SCRIPT
+        grep -q '^#!' "$script" || {
+            error 'Local fd-rdd installer did not contain a shebang.'
+            return 1
+        }
+        if ! runuser -u "$user" -- env HOME="$home" bash "$script"; then
+            error 'The official fd-rdd install.sh failed for the target user.'
+            return 1
+        fi
+        fedora_application_target_satisfied fd-rdd-git "$user" "$home"
+        return
+    fi
+
+    command -v git >/dev/null 2>&1 || {
+        FEDORA_APPLICATION_PENDING_REASON="official-source-requires-git:repo=$FEDORA_FD_RDD_REPO_URL:commit=$FEDORA_FD_RDD_COMMIT"
+        warn 'Pending Fedora target: fd-rdd requires git to fetch the pinned official source.'
+        warn "Install git or provide FEDORA_FD_RDD_INSTALL_SCRIPT; source is $FEDORA_FD_RDD_REPO_URL at commit $FEDORA_FD_RDD_COMMIT."
+        return "$RC_SKIPPED"
+    }
+    command -v runuser >/dev/null 2>&1 || {
+        FEDORA_APPLICATION_PENDING_REASON='target-user-install-requires-runuser'
+        warn 'Pending Fedora target: fd-rdd requires runuser for target-user installation.'
+        return "$RC_SKIPPED"
+    }
+    fedora_fd_rdd_cargo_available "$user" "$home" || {
+        FEDORA_APPLICATION_PENDING_REASON='target-user-cargo-missing:fd-rdd'
+        warn 'Pending Fedora target: fd-rdd requires cargo in the target-user environment.'
+        return "$RC_SKIPPED"
+    }
+    parent_dir="$home/.local/src"
+    fedora_fd_rdd_as_user "$user" "$home" mkdir -p "$parent_dir" || return 1
+    source_dir=$(fedora_fd_rdd_source_dir "$home")
+    if [ -e "$source_dir" ] && [ ! -d "$source_dir/.git" ]; then
+        error "Cannot update fd-rdd: $source_dir exists but is not a Git repository."
+        return 1
+    fi
+    # Keep a failed network or checkout attempt out of the controlled cache.
+    # RETURN trap cleanup runs for every return path after staging begins.
+    trap 'if [ -n "${staging_root:-}" ]; then fedora_fd_rdd_cleanup "$staging_root"; staging_root=""; fi; trap - RETURN' RETURN
+    staging_root=$(fedora_fd_rdd_as_user "$user" "$home" \
+        mktemp -d "$parent_dir/.vcp-fd-rdd.XXXXXX") || {
+        FEDORA_APPLICATION_PENDING_REASON="official-source-staging-failed:repo=$FEDORA_FD_RDD_REPO_URL:commit=$FEDORA_FD_RDD_COMMIT"
+        warn 'Pending Fedora target: unable to create a temporary fd-rdd source directory.'
+        return "$RC_SKIPPED"
+    }
+    staged_checkout="$staging_root/checkout"
+    if ! fedora_fd_rdd_as_user "$user" "$home" git clone \
+        "$FEDORA_FD_RDD_REPO_URL" "$staged_checkout"; then
+        FEDORA_APPLICATION_PENDING_REASON="official-source-clone-failed:repo=$FEDORA_FD_RDD_REPO_URL:commit=$FEDORA_FD_RDD_COMMIT"
+        warn "Pending Fedora target: unable to clone fd-rdd at commit $FEDORA_FD_RDD_COMMIT."
+        return "$RC_SKIPPED"
+    fi
+    remote=$(fedora_fd_rdd_as_user "$user" "$home" git -C "$staged_checkout" \
+        remote get-url origin) || {
+        error 'Cannot read the staged fd-rdd origin remote.'
+        return 1
+    }
+    case "$remote" in
+        "$FEDORA_FD_RDD_REPO_URL"|https://github.com/awei807-wei/vcp-fd-rdd) ;;
+        *) error "Refusing staged fd-rdd checkout with unexpected origin: $remote"; return 1 ;;
+    esac
+    fedora_fd_rdd_as_user "$user" "$home" git -C "$staged_checkout" \
+        checkout --detach "$FEDORA_FD_RDD_COMMIT" || {
+        FEDORA_APPLICATION_PENDING_REASON="official-source-commit-unavailable:$FEDORA_FD_RDD_COMMIT"
+        warn "Pending Fedora target: fd-rdd commit is unavailable: $FEDORA_FD_RDD_COMMIT"
+        return "$RC_SKIPPED"
+    }
+    current_head=$(fedora_fd_rdd_as_user "$user" "$home" git -C "$staged_checkout" \
+        rev-parse HEAD) || return 1
+    [ "$current_head" = "$FEDORA_FD_RDD_COMMIT" ] || {
+        error "fd-rdd checkout is not pinned to $FEDORA_FD_RDD_COMMIT: $current_head"
+        return 1
+    }
+    script="$staged_checkout/scripts/install.sh"
+    [ -r "$script" ] && grep -q '^#!' "$script" || {
+        error "Pinned fd-rdd source has no usable scripts/install.sh: $script"
+        return 1
+    }
+    previous_dir=''
+    if [ -e "$source_dir" ]; then
+        previous_dir=$(fedora_fd_rdd_as_user "$user" "$home" \
+            mktemp -d "${source_dir}.previous.XXXXXX")
+        fedora_fd_rdd_as_user "$user" "$home" rmdir "$previous_dir"
+        if ! fedora_fd_rdd_as_user "$user" "$home" mv \
+            "$source_dir" "$previous_dir"; then
+            error "Unable to stage the previous fd-rdd cache for replacement: $source_dir"
+            return 1
+        fi
+    fi
+    if ! fedora_fd_rdd_as_user "$user" "$home" mv \
+        "$staged_checkout" "$source_dir"; then
+        if [ -n "$previous_dir" ]; then
+            fedora_fd_rdd_as_user "$user" "$home" mv \
+                "$previous_dir" "$source_dir" ||
+                error "Unable to restore the previous fd-rdd cache: $source_dir"
+        fi
+        error "Unable to publish the verified fd-rdd source cache: $source_dir"
+        return 1
+    fi
+    if [ -n "$previous_dir" ]; then
+        if ! fedora_fd_rdd_cleanup "$previous_dir"; then
+            error "Unable to remove the superseded fd-rdd cache: $previous_dir"
+            return 1
+        fi
+        previous_dir='' # The old cache is removed only after the new one is live.
+    fi
+    if ! fedora_fd_rdd_as_user "$user" "$home" bash \
+        "$source_dir/scripts/install.sh"; then
+        error 'Pinned fd-rdd scripts/install.sh failed for the target user.'
+        return 1
+    fi
+    fedora_application_target_satisfied fd-rdd-git "$user" "$home"
+}

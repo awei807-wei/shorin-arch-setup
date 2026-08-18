@@ -35,26 +35,9 @@ FOCUS_SHIFT_COMMIT=cb841ebd12db77517dfe60ab0c980cf7d55ad788
 NIRI_CLIP_COMMIT=81daa7b8b2044765a562e8fe30b3e7e3c10576e2
 LAZYVIM_STARTER_COMMIT=803bc181d7c0d6d5eeba9274d9be49b287294d99
 GITHUB_PROVENANCE_DIR=${GITHUB_PROVENANCE_DIR:-}
+APPLICATION_PROVIDER_REVISION=${APPLICATION_PROVIDER_REVISION:-applications-provider-v2}
+source "$SHORIN_ROOT/scripts/modules/applications/manifest.sh"
 source "$SHORIN_ROOT/scripts/modules/applications/vicinae-contract.sh"
-
-application_entries_from_file() {
-    local file=$1
-
-    [ -f "$file" ] && [ -r "$file" ] || return 2
-    awk '
-        /^[[:space:]]*(#|$)/ { next }
-        {
-            sub(/[[:space:]]+#.*/, "")
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "")
-            if (tolower($0) == "lazyvim") $0="lazyvim"
-            if (length) print
-        }
-    ' "$file"
-}
-
-application_manifest_entries() {
-    application_entries_from_file "$APPLICATION_MANIFEST"
-}
 
 lazyvim_config_satisfied() {
     local config_dir="$HOME_DIR/.config/nvim"
@@ -127,7 +110,8 @@ steam_flatpak_locale_satisfied() {
     if platform_is_fedora; then
         fedora_flatpak_desktop_export_satisfied \
             com.valvesoftware.Steam "${HOME_DIR:-}" || return 1
-        fedora_flatpak_override_satisfied com.valvesoftware.Steam
+        fedora_flatpak_override_satisfied com.valvesoftware.Steam \
+            "${TARGET_USER:-}" "${HOME_DIR:-}"
         return
     fi
     command -v flatpak >/dev/null 2>&1 || return 2
@@ -207,7 +191,14 @@ application_entry_payload_satisfied() {
 
     case "$entry" in
         AUR:*) declared_package_target_satisfied "$entry" ;;
-        flatpak:*) state_flatpak_present "${entry#flatpak:}" ;;
+        flatpak:*)
+            if platform_is_fedora; then
+                fedora_flatpak_present "${entry#flatpak:}" \
+                    "${TARGET_USER:-}" "${HOME_DIR:-}"
+            else
+                state_flatpak_present "${entry#flatpak:}"
+            fi
+            ;;
         GitHub:*) github_application_satisfied "${entry#GitHub:}" ;;
         lazyvim) lazyvim_target_satisfied ;;
         *)
@@ -298,48 +289,4 @@ application_entry_detected() {
         lazyvim) [ -s "$HOME_DIR/.config/nvim/lua/config/lazy.lua" ] ;;
         *) application_entry_payload_satisfied "$entry" ;;
     esac
-}
-
-collect_legacy_application_targets() {
-    local source_file=$1 entry
-
-    while IFS= read -r entry; do
-        application_entry_is_valid "$entry" || {
-            error "Invalid application entry in $source_file: $entry"
-            return 1
-        }
-        application_entry_detected "$entry" && printf '%s\n' "$entry"
-    done < <(application_entries_from_file "$source_file")
-    return 0
-}
-
-migrate_legacy_application_manifest() {
-    local source_file=$1 destination=${2:-$APPLICATION_MANIFEST}
-    local temporary detected
-
-    require_writable_mode || return
-    [ -f "$source_file" ] && [ -r "$source_file" ] ||
-        die "Application source list is not readable: $source_file"
-    if ! detected=$(collect_legacy_application_targets "$source_file" |
-        sort -u); then
-        return 1
-    fi
-    # An empty result usually means the installed state is gone (fresh machine
-    # or a rolled-back system), not that the user wants zero applications.
-    # Declaring it would permanently drop every previously selected target.
-    if [ -z "$detected" ]; then
-        warn 'No installed application targets were detected; refusing to declare an empty manifest. Run install mode to select applications.'
-        return "$RC_SKIPPED"
-    fi
-    install -d -m 755 "$(dirname "$destination")"
-    temporary=$(mktemp)
-    {
-        printf '# Migrated from legacy installed state.\n'
-        printf '%s\n' "$detected"
-    } > "$temporary"
-    if ! install_if_changed "$temporary" "$destination" 644; then
-        rm -f "$temporary"
-        return 1
-    fi
-    rm -f "$temporary"
 }

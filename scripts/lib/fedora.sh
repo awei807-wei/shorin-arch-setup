@@ -80,6 +80,7 @@ fedora_install_local_rpm() {
     require_writable_mode || return
     file=$(fedora_rpm_file "$pattern") || true
     if [ -z "$file" ]; then
+        FEDORA_APPLICATION_PENDING_REASON="official-rpm-missing:label=$label:pattern=$pattern:search=FEDORA_RPM_DIR,SHORIN_ARTIFACT_DIR,target-Downloads,target-下载,/tmp"
         warn "Pending Fedora artifact: $label RPM was not found (pattern: $pattern)."
         warn "Place the official RPM in FEDORA_RPM_DIR, SHORIN_ARTIFACT_DIR, the target user's Downloads, or /tmp, then rerun."
         return "$RC_SKIPPED"
@@ -115,10 +116,11 @@ fedora_vicinae_desktop_satisfied() {
 }
 
 fedora_install_vicinae() {
-    local user=$1 home=$2 file destination desktop group temporary
+    local user=$1 home=$2 file destination desktop group temporary cache_dir
+    local download_status=0
 
     require_writable_mode || return
-    ensure_flatpak it.mijorus.gearlever
+    fedora_ensure_flatpak_target it.mijorus.gearlever "$user" "$home"
     destination=$(fedora_user_bin vicinae.AppImage "$home")
     desktop="$home/.local/share/applications/vicinae.desktop"
     if [ -x "$destination" ] && fedora_vicinae_desktop_satisfied "$home"; then
@@ -131,17 +133,49 @@ fedora_install_vicinae() {
         file=$(fedora_rpm_file '*vicinae*.AppImage') || true
     fi
     if [ -z "$file" ]; then
-        warn 'Pending Fedora artifact: official Vicinae AppImage was not found.'
-        warn 'Set FEDORA_VICINAE_APPIMAGE to the downloaded official AppImage, or place vicinae*.AppImage in FEDORA_RPM_DIR/SHORIN_ARTIFACT_DIR, the target user Downloads, or /tmp.'
-        warn 'Gear Lever is installed, but no Vicinae integration is claimed until the AppImage and its managed desktop entry are present.'
-        return "$RC_SKIPPED"
+        fedora_official_x86_64_guard 'Vicinae' || return
+        cache_dir=${FEDORA_OFFICIAL_CACHE_DIR:-$home/.cache/shorin-arch-setup/fedora-applications}
+        file=$(fedora_download_verified_official_asset \
+            "$FEDORA_VICINAE_URL" "$FEDORA_VICINAE_ASSET" \
+            "$FEDORA_VICINAE_SHA256" "$cache_dir") || download_status=$?
+        if [ "$download_status" -ne 0 ]; then
+            warn 'Pending Fedora artifact: official Vicinae AppImage could not be downloaded.'
+            warn 'Set FEDORA_VICINAE_APPIMAGE to the official AppImage, or place vicinae*.AppImage in FEDORA_RPM_DIR/SHORIN_ARTIFACT_DIR, the target user Downloads, or /tmp.'
+            warn 'Gear Lever is installed, but no Vicinae integration is claimed until the AppImage and managed desktop entry are present.'
+            return "$RC_SKIPPED"
+        fi
     fi
     [[ "$(basename "$file")" =~ [Vv]icinae ]] || {
         error "Artifact does not look like a Vicinae AppImage: $file"
         return 1
     }
+    if [ "$file" != "$destination" ]; then
+        fedora_verify_official_asset_file "$file" "$FEDORA_VICINAE_SHA256" \
+            'Vicinae' || return 1
+    fi
     group=$(id -gn "$user")
-    install -D -m 755 -o "$user" -g "$group" "$file" "$destination"
+    install -d -o "$user" -g "$group" "$home/.local"
+    temporary=$(mktemp "$home/.local/.vicinae.XXXXXX")
+    if ! install -m 755 -o "$user" -g "$group" "$file" "$temporary"; then
+        rm -f "$temporary"
+        error "Unable to stage Vicinae AppImage for target user $user."
+        return 1
+    fi
+    install -D -m 755 -o "$user" -g "$group" "$temporary" "$destination"
+    rm -f "$temporary"
+    # Prefer Gear Lever's target-user integration contract.  The managed
+    # desktop entry is deliberately created only when the CLI is absent or
+    # rejected, so a successful Gear Lever run cannot be duplicated.
+    if runuser -u "$user" -- env HOME="$home" \
+        XDG_CONFIG_HOME="$home/.config" flatpak run \
+        it.mijorus.gearlever --integrate "$destination" --yes \
+        >/dev/null 2>&1; then
+        if fedora_vicinae_desktop_satisfied "$home"; then
+            return 0
+        fi
+    else
+        warn 'Gear Lever CLI integration failed; falling back to one managed Vicinae desktop entry.'
+    fi
     install -d -o "$user" -g "$group" "$(dirname "$desktop")"
     temporary=$(mktemp)
     cat > "$temporary" <<EOF
@@ -162,9 +196,12 @@ EOF
 
 # Provider and application target implementations are kept separate from
 # shared Fedora artifact helpers to keep each library focused and auditable.
+source "$SHORIN_LIB_DIR/fedora-flatpak.sh"
 source "$SHORIN_LIB_DIR/fedora-providers.sh"
+source "$SHORIN_LIB_DIR/fedora-official-artifacts.sh"
 source "$SHORIN_LIB_DIR/fedora-starship-provider.sh"
 source "$SHORIN_LIB_DIR/fedora-font-provider.sh"
 source "$SHORIN_LIB_DIR/fedora-font-installer.sh"
 source "$SHORIN_LIB_DIR/fedora-provider-transaction.sh"
+source "$SHORIN_LIB_DIR/fedora-fd-rdd.sh"
 source "$SHORIN_LIB_DIR/fedora-applications.sh"

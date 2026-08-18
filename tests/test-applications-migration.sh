@@ -97,6 +97,14 @@ assert_contains "$APPLICATION_MANIFEST" lazyvim
 assert_not_contains "$APPLICATION_MANIFEST" wine
 assert_not_contains "$APPLICATION_MANIFEST" flatpak:com.example.Missing
 assert_not_contains "$APPLICATION_MANIFEST" GitHub:niri-clip
+[ -s "$APPLICATION_MANIFEST.meta" ] ||
+    fail 'legacy migration must emit schema=2 metadata'
+grep -Fqx 'schema=2' "$APPLICATION_MANIFEST.meta" ||
+    fail 'legacy migration metadata must declare schema=2'
+grep -Fqx 'mode=migrated' "$APPLICATION_MANIFEST.meta" ||
+    fail 'legacy migration metadata must declare migrated mode'
+grep -Eq '^manifest_hash=' "$APPLICATION_MANIFEST.meta" ||
+    fail 'legacy migration metadata must record manifest hash'
 
 EMPTY_SOURCE="$TEST_DIR/empty-source.txt"
 EMPTY_MANIFEST="$TEST_DIR/empty-profile/applications.list"
@@ -122,6 +130,72 @@ if (SHORIN_READ_ONLY=1; migrate_legacy_application_manifest \
 fi
 [ ! -e "$READ_ONLY_TARGET" ] ||
     fail 'read-only migration must not create a manifest'
+
+MARKED_SOURCE="$TEST_DIR/marked-source.txt"
+MARKED_MANIFEST="$TEST_DIR/marked-profile/applications.list"
+cat > "$MARKED_SOURCE" <<'EOF'
+neovim
+wine
+flatpak:it.mijorus.gearlever
+GitHub:niri-clip
+EOF
+mkdir -p "$(dirname "$MARKED_MANIFEST")"
+cat > "$MARKED_MANIFEST" <<'EOF'
+# Migrated from legacy installed state.
+custom-user-target
+neovim
+EOF
+migrate_marked_legacy_application_manifest "$MARKED_SOURCE" "$MARKED_MANIFEST"
+grep -Fqx custom-user-target "$MARKED_MANIFEST" ||
+    fail 'marked legacy migration must preserve custom entries'
+grep -Fqx wine "$MARKED_MANIFEST" ||
+    fail 'marked legacy migration must append source entries in order'
+grep -Fqx 'flatpak:it.mijorus.gearlever' "$MARKED_MANIFEST" ||
+    fail 'marked legacy migration must append missing Flatpak entries'
+grep -Fqx 'GitHub:niri-clip' "$MARKED_MANIFEST" ||
+    fail 'marked legacy migration must append missing GitHub entries'
+MARKED_BACKUP=$(find "$(dirname "$MARKED_MANIFEST")" -maxdepth 1 -type f \
+    -name "$(basename "$MARKED_MANIFEST").bak.*" -print -quit)
+[ -n "$MARKED_BACKUP" ] && [ -s "$MARKED_BACKUP" ] ||
+    fail 'marked legacy migration must create a unique backup before switching'
+cp "$MARKED_MANIFEST" "$TEST_DIR/marked-first"
+migrate_marked_legacy_application_manifest "$MARKED_SOURCE" "$MARKED_MANIFEST" &&
+    fail 'metadata-bearing marked manifest must not be re-adopted'
+cmp -s "$TEST_DIR/marked-first" "$MARKED_MANIFEST" ||
+    fail 'repeated marked migration must remain content-idempotent'
+printf '%s\n' 'custom-edit' >> "$MARKED_MANIFEST"
+MARKED_STATUS=0
+application_manifest_metadata_status check "$MARKED_MANIFEST" || MARKED_STATUS=$?
+[ "$MARKED_STATUS" -eq 10 ] ||
+    fail 'modified manifest must report hash drift/adopt-required'
+
+ROLLBACK_SOURCE="$TEST_DIR/rollback-source.txt"
+ROLLBACK_MANIFEST="$TEST_DIR/rollback-profile/applications.list"
+mkdir -p "$(dirname "$ROLLBACK_MANIFEST")"
+printf 'neovim\nwine\n' > "$ROLLBACK_SOURCE"
+cat > "$ROLLBACK_MANIFEST" <<'EOF'
+# Migrated from legacy installed state.
+custom-before-rollback
+neovim
+EOF
+printf 'stale-backup-content\n' > "$ROLLBACK_MANIFEST.bak"
+ROLLBACK_ORIGINAL="$TEST_DIR/rollback-original"
+cp "$ROLLBACK_MANIFEST" "$ROLLBACK_ORIGINAL"
+write_application_manifest_metadata() { return 1; }
+ROLLBACK_STATUS=0
+migrate_marked_legacy_application_manifest "$ROLLBACK_SOURCE" \
+    "$ROLLBACK_MANIFEST" 2>/dev/null || ROLLBACK_STATUS=$?
+unset -f write_application_manifest_metadata
+[ "$ROLLBACK_STATUS" -eq 1 ] ||
+    fail 'metadata failure must fail the marked manifest migration'
+cmp -s "$ROLLBACK_ORIGINAL" "$ROLLBACK_MANIFEST" ||
+    fail 'metadata failure must restore the current manifest, not a stale backup'
+grep -Fqx 'stale-backup-content' "$ROLLBACK_MANIFEST.bak" ||
+    fail 'migration must not overwrite a stale legacy backup path'
+ROLLBACK_BACKUP=$(find "$(dirname "$ROLLBACK_MANIFEST")" -maxdepth 1 -type f \
+    -name "$(basename "$ROLLBACK_MANIFEST").bak.*" -print -quit)
+[ -n "$ROLLBACK_BACKUP" ] ||
+    fail 'metadata failure must leave a unique transaction backup for audit'
 
 MISSING_MANIFEST="$TEST_DIR/missing-profile/applications.list"
 run_applications_phase "$MISSING_MANIFEST" check repair

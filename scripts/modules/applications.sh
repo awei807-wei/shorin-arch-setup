@@ -9,9 +9,11 @@ source "$SHORIN_ROOT/scripts/lib/verify.sh"
 source "$SHORIN_ROOT/scripts/modules/applications/targets.sh"
 
 APPLICATION_SOURCE_LIST=${APPLICATION_SOURCE_LIST:-$SHORIN_ROOT/common-applist.txt}
+export APPLICATION_SOURCE_LIST
 
 applications_inspect() {
     local phase=$1 entry manifest_entries pending_status=0
+    local metadata_status=0 pending_reason
 
     if [ -z "${TARGET_USER:-}" ] || [ -z "${HOME_DIR:-}" ]; then
         module_inspection_failed target-user-context
@@ -27,6 +29,32 @@ applications_inspect() {
         fi
         return 0
     fi
+    application_manifest_metadata_status "$phase" "$APPLICATION_MANIFEST" ||
+        metadata_status=$?
+    case "$metadata_status" in
+        0) ;;
+        10)
+            if [ "$phase" = check ]; then
+                module_drift application-manifest-drift-adopt-required
+            else
+                module_verify_failed application-manifest-drift-adopt-required
+            fi
+            ;;
+        11)
+            if [ "$phase" = check ]; then
+                module_drift application-source-revision-drift-adopt-required
+            else
+                module_verify_failed application-source-revision-drift-adopt-required
+            fi
+            ;;
+        *)
+            if [ "$phase" = check ]; then
+                module_inspection_failed application-manifest-metadata-invalid
+            else
+                module_verify_failed application-manifest-metadata-invalid
+            fi
+            ;;
+    esac
     if ! manifest_entries=$(application_manifest_entries); then
         if [ "$phase" = check ]; then
             module_inspection_failed application-manifest-unreadable
@@ -51,13 +79,16 @@ applications_inspect() {
                 "$HOME_DIR" || pending_status=$?
             case "$pending_status" in
                 0)
+                    pending_reason=${FEDORA_APPLICATION_PENDING_REASON:-reason-unavailable}
                     if [ "$phase" = check ]; then
                         # A missing handoff artifact must trigger apply so
                         # other application targets still converge. The apply
                         # phase records this target as pending and skips only
                         # the optional applications module verification.
+                        warn "Application target pending: $entry ($pending_reason)"
                         module_drift "application-pending:$entry"
                     else
+                        warn "Application target pending: $entry ($pending_reason)"
                         module_skip "application-pending:$entry"
                     fi
                     continue
@@ -97,6 +128,15 @@ applications_apply() {
     local status=0 manifest_entries migrate_status=0
 
     if [ "${SHORIN_MODE:-install}" = repair ] &&
+        [ -f "$APPLICATION_MANIFEST" ] &&
+        application_manifest_has_legacy_marker "$APPLICATION_MANIFEST" &&
+        ! application_manifest_metadata_present "$APPLICATION_MANIFEST"; then
+        log "Adopting additions from the current application source list without removing user entries..."
+        migrate_marked_legacy_application_manifest \
+            "$APPLICATION_SOURCE_LIST" "$APPLICATION_MANIFEST" ||
+            migrate_status=$?
+        [ "$migrate_status" -eq 0 ] || return "$migrate_status"
+    elif [ "${SHORIN_MODE:-install}" = repair ] &&
         [ ! -s "$APPLICATION_MANIFEST" ]; then
         log "Migrating legacy application targets from current installed state..."
         migrate_legacy_application_manifest \

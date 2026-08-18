@@ -61,16 +61,27 @@ chmod +x "$BIN_DIR"/*
 
 export PATH="$BIN_DIR:$PATH"
 export SHORIN_DISTRO=fedora SHORIN_MODE=install SHORIN_READ_ONLY=0
-export TARGET_USER=tester HOME_DIR FEDORA_RPM_DIR="$RPM_DIR" \
+# This contract test must never reach the network.  Official download failure
+# is intentionally exercised as a deterministic pending state below.
+curl() { return 1; }
+TARGET_USER=$(id -un)
+export TARGET_USER HOME_DIR FEDORA_RPM_DIR="$RPM_DIR" \
     SHORIN_ARTIFACT_DIR="$ARTIFACT_DIR"
 export FEDORA_TEST_INSTALLED_FILE="$TEST_DIR/installed"
 export PACKAGE_SOURCE_DIR="$TEST_DIR/package-sources"
 source "$ROOT_DIR/scripts/lib/core.sh"
+fedora_verify_official_asset_file() {
+    case "$1" in
+        "$RPM_DIR"/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+fedora_verify_official_rpm_identity() { :; }
 
-rpm_file="$RPM_DIR/linuxqq 1.2.3.x86_64.rpm"
+rpm_file="$RPM_DIR/QQ_3.2.32_260812_x86_64_01.rpm"
 : > "$rpm_file"
 : > "$ARTIFACT_DIR/linuxqq-secondary.rpm"
-found=$(fedora_rpm_file 'linuxqq*.rpm')
+found=$(fedora_rpm_file 'QQ_*.rpm')
 [ "$found" = "$rpm_file" ] || fail 'RPM discovery must preserve directories and spaces in filenames'
 
 CALLS="$TEST_DIR/dnf-calls"
@@ -103,6 +114,22 @@ if fedora_application_target_pending lsfg-vk-bin "$HOME_DIR"; then
     fail 'an available manual RPM must not remain classified as pending'
 fi
 rm -f "$RPM_DIR/lsfg-vk-1.0.x86_64.rpm"
+
+unset FEDORA_WECHAT_SHA256 FEDORA_THORIUM_SHA256
+status=0
+fedora_install_application_target wechat-appimage "$TARGET_USER" "$HOME_DIR" ||
+    status=$?
+[ "$status" -eq "$RC_SKIPPED" ] ||
+    fail 'WeChat without installer SHA must remain pending'
+[[ "$FEDORA_APPLICATION_PENDING_REASON" == *'FEDORA_WECHAT_SHA256'* ]] ||
+    fail 'WeChat pending reason must require the explicit SHA interface'
+status=0
+fedora_install_application_target thorium-browser-bin "$TARGET_USER" "$HOME_DIR" ||
+    status=$?
+[ "$status" -eq "$RC_SKIPPED" ] ||
+    fail 'Thorium without installer SHA must remain pending'
+[[ "$FEDORA_APPLICATION_PENDING_REASON" == *'FEDORA_THORIUM_SHA256'* ]] ||
+    fail 'Thorium pending reason must require the explicit SHA interface'
 
 gearlever_dir="$HOME_DIR/.local/share/applications"
 mkdir -p "$HOME_DIR/.local/bin" "$gearlever_dir"

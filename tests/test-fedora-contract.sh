@@ -15,7 +15,8 @@ fail() {
 }
 
 export SHORIN_DISTRO=fedora SHORIN_READ_ONLY=0
-export TARGET_USER=tester HOME_DIR="$TEST_DIR/home"
+TARGET_USER=$(id -un)
+export TARGET_USER HOME_DIR="$TEST_DIR/home"
 export FEDORA_RPM_DIR="$TEST_DIR/rpms"
 mkdir -p "$HOME_DIR" "$FEDORA_RPM_DIR"
 
@@ -157,17 +158,25 @@ fedora_application_target_satisfied() {
     esac
 }
 
+export FEDORA_WECHAT_SHA256=0000000000000000000000000000000000000000000000000000000000000000
+export FEDORA_THORIUM_SHA256=0000000000000000000000000000000000000000000000000000000000000000
 for target in heroic-games-launcher-bin upscaler mangojuice-bin; do
     fedora_install_application_target "$target" "$TARGET_USER" "$HOME_DIR"
 done
 fedora_install_application_target clash-verge-rev "$TARGET_USER" "$HOME_DIR"
 fedora_install_application_target linuxqq-appimage "$TARGET_USER" "$HOME_DIR"
-fedora_install_application_target wechat-appimage "$TARGET_USER" "$HOME_DIR"
+status=0
+fedora_install_application_target wechat-appimage "$TARGET_USER" "$HOME_DIR" || status=$?
+[ "$status" -eq "$RC_SKIPPED" ] ||
+    fail 'WeChat without a local RPM must remain pending even with an explicit SHA'
 fedora_install_application_target lsfg-vk-bin "$TARGET_USER" "$HOME_DIR"
 fedora_install_application_target vicinae-bin "$TARGET_USER" "$HOME_DIR"
 fedora_install_application_target fd-rdd-git "$TARGET_USER" "$HOME_DIR"
 fedora_install_application_target tsukimi-bin "$TARGET_USER" "$HOME_DIR"
-fedora_install_application_target thorium-browser-bin "$TARGET_USER" "$HOME_DIR"
+status=0
+fedora_install_application_target thorium-browser-bin "$TARGET_USER" "$HOME_DIR" || status=$?
+[ "$status" -eq "$RC_SKIPPED" ] ||
+    fail 'Thorium without a local RPM must remain pending even with an explicit SHA'
 fedora_install_application_target mark-shot "$TARGET_USER" "$HOME_DIR"
 
 grep -Fqx 'flatpak:com.heroicgameslauncher.hgl' "$CALLS" ||
@@ -176,12 +185,12 @@ grep -Fqx 'flatpak:io.gitlab.theevilskeleton.Upscaler' "$CALLS" ||
     fail 'Upscaler must use its Flathub app id'
 grep -Fqx 'flatpak:io.github.radiolamp.mangojuice' "$CALLS" ||
     fail 'MangoJuice must use its Flathub app id'
-grep -Fqx 'rpm:Clash Verge:Clash Verge-*.rpm' "$CALLS" ||
+grep -Fqx 'rpm:Clash Verge:Clash.Verge-*.rpm' "$CALLS" ||
     fail 'Clash Verge must use an official RPM glob'
-grep -Fqx 'rpm:Linux QQ:linuxqq*.rpm' "$CALLS" ||
-    fail 'Linux QQ must use linuxqq*.rpm'
-grep -Fqx 'rpm:WeChat Linux:WeChatLinux*.rpm' "$CALLS" ||
-    fail 'WeChat must use WeChatLinux*.rpm'
+grep -Fqx 'rpm:Linux QQ:QQ_*.rpm' "$CALLS" ||
+    fail 'Linux QQ must use the fixed official QQ RPM glob'
+! grep -Fq 'rpm:WeChat Linux:' "$CALLS" ||
+    fail 'WeChat must not use the unverified local RPM installer'
 grep -Fqx 'packages:qt6-qtdeclarative qt6-qtbase' "$CALLS" ||
     fail 'lsfg-vk must install both Qt6 dependencies first'
 grep -Fqx 'dnf:copr enable -y walker874/tsukimi' "$CALLS" ||

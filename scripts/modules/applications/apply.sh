@@ -102,6 +102,9 @@ else
         sort -u > "$MANIFEST_TMP"
     install_if_changed "$MANIFEST_TMP" "$APPLICATION_MANIFEST" 644
     rm -f "$MANIFEST_TMP"
+    write_application_manifest_metadata \
+        "$APPLICATION_MANIFEST" "$APPLICATION_SOURCE_LIST" selected ||
+        die "Unable to record application manifest metadata: $APPLICATION_MANIFEST"
     if ! SELECTED_RAW=$(application_manifest_entries); then
         die "Application manifest is not readable: $APPLICATION_MANIFEST"
     fi
@@ -176,7 +179,7 @@ if [ ${#FEDORA_PROVIDER_APPS[@]} -gt 0 ]; then
         else
             install_status=$?
             if [ "$install_status" -eq "$RC_SKIPPED" ]; then
-                PENDING_PACKAGES+=("provider:$pkg")
+                PENDING_PACKAGES+=("provider:$pkg:${FEDORA_APPLICATION_PENDING_REASON:-reason-unavailable}")
                 warn "Application target pending manual action: $pkg"
             else
                 error "Failed to install Fedora provider target: $pkg"
@@ -243,7 +246,7 @@ if [ ${#AUR_APPS[@]} -gt 0 ]; then
             else
                 install_status=$?
                 if [ "$install_status" -eq "$RC_SKIPPED" ]; then
-                    PENDING_PACKAGES+=("aur:$app")
+                    PENDING_PACKAGES+=("aur:$app:${FEDORA_APPLICATION_PENDING_REASON:-reason-unavailable}")
                     warn "Application target pending manual action: AUR:$app"
                     pending_target=true
                     break
@@ -264,7 +267,12 @@ if [ ${#FLATPAK_APPS[@]} -gt 0 ]; then
     section "Step 4/5" "Flatpak Packages (Individual)"
     
     for app in "${FLATPAK_APPS[@]}"; do
-        if flatpak info --system "$app" &>/dev/null; then
+        if platform_is_fedora && fedora_flatpak_present "$app" \
+            "$TARGET_USER" "$HOME_DIR"; then
+            log "Skipping '$app' (Already installed in system or target-user scope)."
+            continue
+        fi
+        if ! platform_is_fedora && flatpak info --system "$app" &>/dev/null; then
             log "Skipping '$app' (Already installed)."
             continue
         fi

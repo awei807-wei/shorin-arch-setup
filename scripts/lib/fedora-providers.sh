@@ -14,6 +14,7 @@ FEDORA_FD_COMMAND_PATH=${FEDORA_FD_COMMAND_PATH:-/usr/bin/fd}
 FEDORA_LACT_COMMAND_PATH=${FEDORA_LACT_COMMAND_PATH:-/usr/bin/lact}
 FEDORA_LACT_SERVICE=${FEDORA_LACT_SERVICE:-lactd.service}
 FEDORA_LACT_COPR=${FEDORA_LACT_COPR:-ilyaz/LACT}
+FEDORA_TSUKIMI_COPR=${FEDORA_TSUKIMI_COPR:-walker874/tsukimi}
 FEDORA_YAZI_VERSION=${FEDORA_YAZI_VERSION:-26.8.15}
 FEDORA_YAZI_X86_64_SHA256=${FEDORA_YAZI_X86_64_SHA256:-cc67eb7991550c2f9407cda52d3f5af0937627aa6884e7de99a04fcf059807e0}
 FEDORA_YAZI_AARCH64_SHA256=${FEDORA_YAZI_AARCH64_SHA256:-f5a85771f06bb0e8c488136ae0aedaec8d341a7cee995549df391d7d852fe8d1}
@@ -68,7 +69,7 @@ fedora_application_provider_kind() {
     case "$1" in
         code|curtail|mission-center|steam) printf '%s\n' flatpak ;;
         fd) printf '%s\n' package ;;
-        lact) printf '%s\n' copr ;;
+        lact|tsukimi-bin) printf '%s\n' copr ;;
         yazi) printf '%s\n' release ;;
         starship) printf '%s\n' target-user ;;
         ttf-jetbrains-mono-nerd|ttf-jetbrains-maple-mono-nf-xx-xx|material-design-icons)
@@ -85,6 +86,7 @@ fedora_application_provider_id() {
         steam) printf '%s\n' com.valvesoftware.Steam ;;
         fd) printf '%s\n' fd-find ;;
         lact) printf '%s\n' lact ;;
+        tsukimi-bin) printf '%s\n' "$FEDORA_TSUKIMI_COPR" ;;
         yazi) printf '%s\n' "yazi-v$FEDORA_YAZI_VERSION" ;;
         starship) printf '%s\n' "starship-v$FEDORA_STARSHIP_VERSION" ;;
         ttf-jetbrains-mono-nerd) printf '%s\n' "$FEDORA_NERD_FONT_FAMILY" ;;
@@ -102,6 +104,7 @@ fedora_application_provider_description() {
         steam) printf '%s\n' 'Flatpak com.valvesoftware.Steam (Flathub)' ;;
         fd) printf '%s\n' 'Fedora package fd-find (/usr/bin/fd)' ;;
         lact) printf '%s\n' "COPR $FEDORA_LACT_COPR, package lact, service $FEDORA_LACT_SERVICE" ;;
+        tsukimi-bin) printf '%s\n' "COPR $FEDORA_TSUKIMI_COPR, package tsukimi" ;;
         yazi) printf '%s\n' "GitHub release v$FEDORA_YAZI_VERSION (verified GNU ZIP, yazi + ya)" ;;
         starship) printf '%s\n' "GitHub release v$FEDORA_STARSHIP_VERSION (verified musl x86_64, target-user ~/.local/bin/starship)" ;;
         ttf-jetbrains-mono-nerd) printf '%s\n' "Nerd Fonts JetBrainsMono v$FEDORA_JETBRAINSMONO_NERD_VERSION (target-user exact family $FEDORA_NERD_FONT_FAMILY)" ;;
@@ -115,59 +118,18 @@ fedora_application_provider_target() {
     fedora_application_provider_kind "$1" >/dev/null 2>&1
 }
 
-fedora_flatpak_desktop_export_satisfied() {
-    local app=$1 home=${2:-${HOME_DIR:-}} export_dir candidate
-    local -a export_dirs=()
+fedora_installer_sha256_valid() {
+    local variable=$1 value=${!1:-}
 
-    export_dir=${FEDORA_FLATPAK_EXPORT_DIR:-}
-    [ -n "$export_dir" ] && export_dirs+=("$export_dir")
-    export_dirs+=(
-        /var/lib/flatpak/exports/share/applications
-        /usr/local/share/flatpak/exports/share/applications
-        "$home/.local/share/flatpak/exports/share/applications"
-    )
-    for export_dir in "${export_dirs[@]}"; do
-        candidate="$export_dir/$app.desktop"
-        [ -s "$candidate" ] && return 0
-    done
-    return 1
+    [ -n "$value" ] && [[ "$value" =~ ^[[:xdigit:]]{64}$ ]]
 }
 
-fedora_flatpak_app_scope() {
-    local app=$1 system_status=0 user_status=0
-
-    command -v flatpak >/dev/null 2>&1 || return 2
-    flatpak info --system "$app" >/dev/null 2>&1 || system_status=$?
-    [ "$system_status" -eq 0 ] && {
-        printf '%s\n' system
-        return 0
-    }
-    flatpak info --user "$app" >/dev/null 2>&1 || user_status=$?
-    [ "$user_status" -eq 0 ] && {
-        printf '%s\n' user
-        return 0
-    }
-    [ "$system_status" -gt 1 ] || [ "$user_status" -gt 1 ] && return 2
-    return 1
-}
-
-fedora_flatpak_present() {
-    fedora_flatpak_app_scope "$1" >/dev/null
-}
-
-fedora_flatpak_override_satisfied() {
-    local app=$1 scope status=0
-
-    scope=$(fedora_flatpak_app_scope "$app") || status=$?
-    [ "$status" -eq 0 ] || return "$status"
-    flatpak override "--$scope" --show "$app" 2>/dev/null |
-        grep -Fqx 'LANG=zh_CN.UTF-8'
-}
 fedora_application_target_pending() {
     local package=$1 home=${2:-${HOME_DIR:-/nonexistent}}
     local pattern satisfied_status=0
 
     platform_is_fedora || return 1
+    FEDORA_APPLICATION_PENDING_REASON=''
     fedora_application_target_satisfied "$package" "${TARGET_USER:-}" \
         "$home" || satisfied_status=$?
     case "$satisfied_status" in
@@ -177,30 +139,46 @@ fedora_application_target_pending() {
     esac
     case "$package" in
         clash-verge-rev)
-            for pattern in 'Clash Verge-*.rpm' 'Clash.Verge*.rpm' \
+            for pattern in 'Clash.Verge-*.rpm' 'Clash Verge-*.rpm' 'Clash.Verge*.rpm' \
                 'clash-verge*.rpm'; do
                 fedora_rpm_file "$pattern" >/dev/null && return 1
             done
+            FEDORA_APPLICATION_PENDING_REASON='official-download-at-apply:x86_64:v2.5.2'
             return 0
             ;;
         linuxqq-appimage)
-            fedora_rpm_file 'linuxqq*.rpm' >/dev/null && return 1
+            for pattern in 'QQ_*.rpm' 'linuxqq*.rpm'; do
+                fedora_rpm_file "$pattern" >/dev/null && return 1
+            done
+            FEDORA_APPLICATION_PENDING_REASON='official-download-at-apply:x86_64:QQ_3.2.32_260812_x86_64_01.rpm'
             return 0
             ;;
         wechat-appimage)
+            if ! fedora_installer_sha256_valid FEDORA_WECHAT_SHA256; then
+                FEDORA_APPLICATION_PENDING_REASON='official-rpm-sha256-required:label=WeChat Linux:env=FEDORA_WECHAT_SHA256:sidecar=ignored'
+                return 0
+            fi
             fedora_rpm_file 'WeChatLinux*.rpm' >/dev/null && return 1
+            FEDORA_APPLICATION_PENDING_REASON='official-rpm-missing:pattern=WeChatLinux*.rpm:search=FEDORA_RPM_DIR,SHORIN_ARTIFACT_DIR,target-Downloads,target-下载,/tmp'
             return 0
             ;;
         lsfg-vk-bin)
             fedora_rpm_file 'lsfg-vk*.rpm' >/dev/null && return 1
+            FEDORA_APPLICATION_PENDING_REASON='official-download-at-apply:x86_64:v1.0.0:qt6-qtdeclarative+qt6-qtbase'
             return 0
             ;;
         thorium-browser-bin)
+            if ! fedora_installer_sha256_valid FEDORA_THORIUM_SHA256; then
+                FEDORA_APPLICATION_PENDING_REASON='official-rpm-sha256-required:label=Thorium Browser:env=FEDORA_THORIUM_SHA256:sidecar=ignored'
+                return 0
+            fi
             fedora_rpm_file 'thorium-browser*.rpm' >/dev/null && return 1
+            FEDORA_APPLICATION_PENDING_REASON='official-rpm-missing:pattern=thorium-browser*.rpm:search=FEDORA_RPM_DIR,SHORIN_ARTIFACT_DIR,target-Downloads,target-下载,/tmp'
             return 0
             ;;
         mark-shot)
             fedora_rpm_file 'mark-shot-*.rpm' >/dev/null && return 1
+            FEDORA_APPLICATION_PENDING_REASON='official-download-at-apply:x86_64:v0.1.48'
             return 0
             ;;
         vicinae-bin|vicinae)
@@ -210,14 +188,17 @@ fedora_application_target_pending() {
             fi
             fedora_rpm_file '*vicinae*.AppImage' >/dev/null && return 1
             [ -f "$(fedora_user_bin vicinae.AppImage "$home")" ] && return 1
+            FEDORA_APPLICATION_PENDING_REASON='official-download-at-apply:x86_64:v0.26.0:GearLever-target-user-integration'
             return 0
             ;;
         fd-rdd-git)
             [ -n "${FEDORA_FD_RDD_INSTALL_SCRIPT:-}" ] &&
                 [ -r "$FEDORA_FD_RDD_INSTALL_SCRIPT" ] && return 1
+            FEDORA_APPLICATION_PENDING_REASON='official-source-at-apply:git+fixed-commit:44b60573129c67f4471fa70f21b4a0b70bc1fec8:scripts/install.sh'
             return 0
             ;;
         typora-free)
+            FEDORA_APPLICATION_PENDING_REASON='no-declared-official-fedora-source:manual-target-required'
             return 0
             ;;
         *) return 1 ;;
@@ -297,6 +278,22 @@ fedora_lact_target_satisfied() {
     esac
 }
 
+fedora_copr_application_target_satisfied() {
+    local package=$1
+
+    case "$package" in
+        lact)
+            fedora_lact_target_satisfied
+            ;;
+        tsukimi-bin)
+            package_is_installed tsukimi || command -v tsukimi >/dev/null 2>&1
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 fedora_yazi_release_arch() {
     local machine=${FEDORA_YAZI_MACHINE:-$(uname -m)}
 
@@ -359,9 +356,9 @@ fedora_application_target_provider_satisfied() {
     kind=$(fedora_application_provider_kind "$package") || return 1
     provider=$(fedora_application_provider_id "$package") || return 1
     case "$kind" in
-        flatpak) fedora_flatpak_present "$provider" ;;
+        flatpak) fedora_flatpak_present "$provider" "$user" "$home" ;;
         package) fedora_fd_target_satisfied ;;
-        copr) fedora_lact_target_satisfied ;;
+        copr) fedora_copr_application_target_satisfied "$package" ;;
         release) fedora_yazi_target_satisfied "$user" "$home" ;;
         target-user) fedora_starship_target_satisfied "$user" "$home" ;;
         font) fedora_font_target_satisfied "$package" "$user" "$home" ;;
