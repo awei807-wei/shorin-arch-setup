@@ -166,6 +166,50 @@ platform_dnf_install_from_repo() {
         "--enablerepo=$repository" "$@"
 }
 
+# NVIDIA's CUDA repository can publish helper RPMs with the same names and
+# NVRAs as RPM Fusion.  Merely enabling the desired repository does not stop
+# DNF from selecting those dependencies from another already-enabled repo.
+# For a provider-sensitive transaction, keep only Fedora's base/update repos,
+# RPM Fusion's ordinary dependency repos, and the explicitly requested repo.
+# This changes command-line state only; repository configuration on disk is
+# left untouched.
+platform_dnf_install_from_repo_allowlist() {
+    local repository=$1 output status=0 repository_id
+    local -a args configured_repositories
+
+    shift
+    require_writable_mode 2>/dev/null || return
+    command -v dnf >/dev/null 2>&1 || return 1
+    [ -n "$repository" ] || return 1
+    # Preserve the user's enabled/disabled choices for dependency repos.  The
+    # target repository is the sole exception and is enabled explicitly below.
+    output=$(LC_ALL=C dnf repolist --enabled 2>/dev/null) || status=$?
+    if [ "$status" -ne 0 ]; then
+        [ "$status" -gt 1 ] || status=2
+        return "$status"
+    fi
+    mapfile -t configured_repositories < <(
+        awk 'NF && $1 != "repo" { print $1 }' <<< "$output"
+    )
+    args=(install -y --setopt=install_weak_deps=False '--disablerepo=*')
+    for repository_id in "${configured_repositories[@]}"; do
+        case "$repository_id" in
+            fedora|updates|updates-testing|\
+            rpmfusion-free|rpmfusion-free-updates|\
+            rpmfusion-free-updates-testing|\
+            rpmfusion-nonfree|rpmfusion-nonfree-updates|\
+            rpmfusion-nonfree-updates-testing)
+                args+=("--enablerepo=$repository_id")
+                ;;
+        esac
+    done
+    # The caller already established that this exact repo is configured.
+    # Add it last so an RPM Fusion NVIDIA repo remains enabled after the
+    # transaction-wide disable, regardless of its ordinary enabled state.
+    args+=("--enablerepo=$repository")
+    dnf "${args[@]}" "$@"
+}
+
 fedora_package_repository() {
     case "$1" in
         akmod-nvidia|xorg-x11-drv-nvidia-cuda)
@@ -229,7 +273,7 @@ fedora_package_name() {
         xdg-user-dirs|xfsprogs|udftools|breeze-gtk|jetbrains-mono-fonts|fontconfig|\
         glibc-langpack-zh|nfs-utils|tsukimi|\
         qt5ct|qt6ct|qt6-qtbase|qt6-qtdeclarative|\
-        wl-clipboard|cliphist|satty|swayosd)
+        wl-clipboard|cliphist|satty|swayosd|pngquant)
             printf '%s\n' "$package" ;;
         # Common Arch spellings that differ on Fedora.
         alsa-firmware) printf '%s\n' alsa-firmware ;;
@@ -237,6 +281,13 @@ fedora_package_name() {
         noto-fonts) printf '%s\n' google-noto-sans-fonts ;;
         noto-fonts-cjk) printf '%s\n' google-noto-sans-cjk-fonts ;;
         noto-fonts-emoji) printf '%s\n' google-noto-color-emoji-fonts ;;
+        python-opencv) printf '%s\n' python3-opencv ;;
+        python-numpy) printf '%s\n' python3-numpy ;;
+        ffmpeg) printf '%s\n' ffmpeg-free ;;
+        # Arch ships nmtui in networkmanager; Fedora splits the terminal UI
+        # into NetworkManager-tui.  Keep the logical Arch target so base
+        # check/apply/verify share one cross-distro package contract.
+        networkmanager) printf '%s\n' NetworkManager-tui ;;
         pipewire-pulse) printf '%s\n' pipewire-pulseaudio ;;
         # The project wants PipeWire's JACK implementation.  Fedora's
         # pipewire-plugin-jack only connects PipeWire to an external JACK

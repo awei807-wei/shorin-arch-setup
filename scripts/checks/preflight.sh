@@ -109,3 +109,35 @@ run_preflight() {
             ;;
     esac
 }
+
+prepare_install_application_manifest() {
+    local mode=$1 module selected=0 metadata
+    shift
+
+    [ "$mode" = install ] || return 0
+    for module in "$@"; do
+        if [ "$module" = applications ]; then
+            selected=1
+            break
+        fi
+    done
+    [ "$selected" -eq 1 ] || return 0
+
+    APPLICATION_SOURCE_LIST=${APPLICATION_SOURCE_LIST:-$SHORIN_ROOT/common-applist.txt}
+    export APPLICATION_SOURCE_LIST
+    source "$SHORIN_ROOT/scripts/modules/applications/targets.sh"
+    [ ! -e "$APPLICATION_MANIFEST" ] || return 0
+    metadata=$(application_manifest_metadata_path "$APPLICATION_MANIFEST")
+    [ ! -e "$metadata" ] || {
+        error "Application manifest metadata exists without its manifest: $metadata"
+        return 1
+    }
+    if [ -t 0 ]; then
+        write_application_selection_intent \
+            "$APPLICATION_SOURCE_LIST" "$APPLICATION_MANIFEST" pending-selection
+        log "Recorded pending interactive application selection: $(application_selection_intent_path "$APPLICATION_MANIFEST")"
+        return 0
+    fi
+    initialize_default_application_manifest \
+        "$APPLICATION_SOURCE_LIST" "$APPLICATION_MANIFEST"
+}

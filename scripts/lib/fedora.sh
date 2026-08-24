@@ -123,11 +123,20 @@ fedora_install_vicinae() {
     fedora_ensure_flatpak_target it.mijorus.gearlever "$user" "$home"
     destination=$(fedora_user_bin vicinae.AppImage "$home")
     desktop="$home/.local/share/applications/vicinae.desktop"
-    if [ -x "$destination" ] && fedora_vicinae_desktop_satisfied "$home"; then
+    if [ -x "$destination" ] &&
+        fedora_official_asset_file_matches "$destination" "$FEDORA_VICINAE_SHA256" &&
+        fedora_vicinae_desktop_satisfied "$home"; then
         fedora_vicinae_niri_command_contract_apply "$user" "$home" || return
         return 0
     fi
-    if [ -n "${FEDORA_VICINAE_APPIMAGE:-}" ] &&
+    # A verified destination is itself a valid immutable handoff artifact.
+    # Reuse it when only the desktop/Niri integration drifted so an offline
+    # repair does not depend on a cache entry or another network download.
+    if [ -x "$destination" ] &&
+        fedora_official_asset_file_matches \
+            "$destination" "$FEDORA_VICINAE_SHA256"; then
+        file=$destination
+    elif [ -n "${FEDORA_VICINAE_APPIMAGE:-}" ] &&
         [ -f "$FEDORA_VICINAE_APPIMAGE" ]; then
         file=$FEDORA_VICINAE_APPIMAGE
     else
@@ -155,10 +164,8 @@ fedora_install_vicinae() {
         error "Artifact does not look like a Vicinae AppImage: $file"
         return 1
     }
-    if [ "$file" != "$destination" ]; then
-        fedora_verify_official_asset_file "$file" "$FEDORA_VICINAE_SHA256" \
-            'Vicinae' || return 1
-    fi
+    fedora_verify_official_asset_file "$file" "$FEDORA_VICINAE_SHA256" \
+        'Vicinae' || return 1
     group=$(id -gn "$user")
     install -d -o "$user" -g "$group" "$home/.local"
     temporary=$(mktemp "$home/.local/.vicinae.XXXXXX")

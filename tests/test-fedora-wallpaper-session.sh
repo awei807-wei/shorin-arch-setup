@@ -173,12 +173,24 @@ run_session() {
         "$SESSION_SCRIPT"
 }
 
+wait_for_event() {
+    local file=$1 pattern=$2 attempt
+
+    for ((attempt = 0; attempt < 100; attempt++)); do
+        grep -Eq "$pattern" "$file" && return 0
+        sleep 0.02
+    done
+    return 1
+}
+
 # The happy path starts both namespaces once, waits for a ready color, runs
 # Waypaper, then waits for the color-to-image transition before blur scripts.
 happy="$TEST_DIR/happy"
 make_fixture "$happy"
 : > "$happy/log/events"
 run_session "$happy"
+wait_for_event "$happy/log/events" '^auto-blur:$' ||
+    fail 'background blur helpers did not publish their startup events'
 grep -Fqx 'waypaper:--random' "$happy/log/events" ||
     fail 'default readiness must precede Waypaper random selection'
 grep -Eq '^overview-blur:/tmp/wallpaper.png$' "$happy/log/events" ||
@@ -638,6 +650,7 @@ color_output=$(WALLPAPER_TEST_LOG="$color_wrapper/log/events" \
 # The transform owns exactly one startup initializer, rewrites the lockscreen
 # launch and leaves ordinary QuickShell startup/bind shapes intact.
 initializer="$TEST_DIR/home/.local/bin/shorin-fedora-wallpaper-session"
+lockscreen="$TEST_DIR/home/.config/quickshell/scripts/lockscreen.sh"
 mkdir -p "$(dirname "$initializer")"
 cat > "$TEST_DIR/config.kdl" <<AWEOF
 spawn-at-startup "awww-daemon"
@@ -651,10 +664,12 @@ binds {
     Mod+Alt+L { spawn-sh "/usr/bin/quickshell -p ~/.config/quickshell/lockscreen/shell.qml"; }
 }
 AWEOF
-awk -v initializer="$initializer" -v wallpaper_startup=1 \
+awk -v initializer="$initializer" -v lockscreen="$lockscreen" \
+    -v wallpaper_startup=1 \
     -f "$ROOT_DIR/scripts/modules/desktop-niri/fedora-config-compatibility.awk" \
     "$TEST_DIR/config.kdl" > "$TEST_DIR/config.out"
-awk -v initializer="$initializer" -v wallpaper_startup=0 \
+awk -v initializer="$initializer" -v lockscreen="$lockscreen" \
+    -v wallpaper_startup=0 \
     -f "$ROOT_DIR/scripts/modules/desktop-niri/fedora-config-compatibility.awk" \
     "$TEST_DIR/binds.kdl" > "$TEST_DIR/binds.out"
 [ "$(grep -Fc "$initializer" "$TEST_DIR/config.out")" -eq 1 ] ||
@@ -663,10 +678,10 @@ if grep -Eq 'awww-daemon|waypaper|niri_set_overview_blur_dark_bg' \
     "$TEST_DIR/config.out"; then
     fail 'Fedora startup transform must remove the old parallel wallpaper chain'
 fi
-grep -Fq 'spawn-at-startup "lockscreen.sh"' "$TEST_DIR/config.out" ||
-    fail 'Fedora startup transform must route lockscreen through its wrapper'
-grep -Fq 'spawn-sh "lockscreen.sh"' "$TEST_DIR/binds.out" ||
-    fail 'Mod+Alt+L must route through the lockscreen wrapper'
+grep -Fq "spawn-at-startup \"$lockscreen\"" "$TEST_DIR/config.out" ||
+    fail 'Fedora startup transform must use the absolute lockscreen wrapper'
+grep -Fq "spawn \"$lockscreen\"" "$TEST_DIR/binds.out" ||
+    fail 'Mod+Alt+L must use the absolute lockscreen wrapper'
 
 # Fedora-only transform is a no-op on Arch.
 printf '%s\n' 'spawn-at-startup "swww-daemon"' > "$TEST_DIR/arch.kdl"

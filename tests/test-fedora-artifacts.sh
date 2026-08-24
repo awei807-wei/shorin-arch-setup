@@ -34,6 +34,15 @@ set -Eeuo pipefail
 case "${1:-}" in
     -q)
         if [ "${2:-}" = --qf ]; then
+            if [[ "${3:-}" == *'%{ARCH}'* ]] &&
+                [ -s "${FEDORA_TEST_INSTALLED_FILE:-}" ]; then
+                case "${@: -1}" in
+                    linuxqq)
+                        printf 'linuxqq\t0\t3.2.32_52194\t1\tx86_64\t49348e2684d7d182fd27e7f1a0820833236cd690d760e3588f841ec5ef7c5366\ta2848e7397185a317ffd35ba5659396ab3ae17705d2fb7b2124507027d7046cc\n'
+                        exit 0
+                        ;;
+                esac
+            fi
             case "${@: -1}" in
                 qt6-qtdeclarative|qt6-qtbase) printf '1-1\n'; exit 0 ;;
                 *) exit 1 ;;
@@ -76,7 +85,7 @@ fedora_verify_official_asset_file() {
         *) return 1 ;;
     esac
 }
-fedora_verify_official_rpm_identity() { :; }
+fedora_official_rpm_identity_for_target() { :; }
 
 rpm_file="$RPM_DIR/QQ_3.2.32_260812_x86_64_01.rpm"
 : > "$rpm_file"
@@ -137,6 +146,14 @@ fedora_application_target_pending typora-free "$HOME_DIR" || status=$?
     'no-declared-official-fedora-source:manual-target-required' ] ||
     fail 'Typora pending reason must remain unchanged'
 status=0
+fedora_install_application_target typora-free "$TARGET_USER" "$HOME_DIR" ||
+    status=$?
+[ "$status" -eq "$RC_SKIPPED" ] ||
+    fail 'Typora apply must remain a pending skip'
+[ "$FEDORA_APPLICATION_PENDING_REASON" = \
+    'no-declared-official-fedora-source:manual-target-required' ] ||
+    fail 'Typora apply must preserve the precise pending report reason'
+status=0
 fedora_install_application_target wechat-appimage "$TARGET_USER" "$HOME_DIR" ||
     status=$?
 [ "$status" -eq "$RC_SKIPPED" ] ||
@@ -155,8 +172,9 @@ fedora_install_application_target thorium-browser-bin "$TARGET_USER" "$HOME_DIR"
 
 gearlever_dir="$HOME_DIR/.local/share/applications"
 mkdir -p "$HOME_DIR/.local/bin" "$gearlever_dir"
-touch "$HOME_DIR/.local/bin/vicinae.AppImage"
+printf '#!/usr/bin/env bash\n' > "$HOME_DIR/.local/bin/vicinae.AppImage"
 chmod 755 "$HOME_DIR/.local/bin/vicinae.AppImage"
+FEDORA_VICINAE_SHA256=$(sha256sum "$HOME_DIR/.local/bin/vicinae.AppImage" | awk '{print $1}')
 cat > "$gearlever_dir/vicinae.desktop" <<EOF
 [Desktop Entry]
 Name=Vicinae
@@ -169,6 +187,10 @@ sed -i "s#^Exec=.*#Exec=\"$HOME_DIR/.local/bin/vicinae.AppImage\"#" \
     "$gearlever_dir/vicinae.desktop"
 fedora_application_target_satisfied vicinae-bin "$TARGET_USER" "$HOME_DIR" ||
     fail 'Vicinae integration must require Gear Lever, executable AppImage, and managed desktop entry'
+printf '# tampered\n' >> "$HOME_DIR/.local/bin/vicinae.AppImage"
+if fedora_application_target_satisfied vicinae-bin "$TARGET_USER" "$HOME_DIR"; then
+    fail 'Vicinae verification must reject an AppImage that no longer matches its pinned hash'
+fi
 
 # Missing handoff artifacts are drift during check, but an explicit pending
 # state during verify/apply. They must not be reported as successfully

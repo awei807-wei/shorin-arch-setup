@@ -19,6 +19,137 @@ fedora_fd_rdd_binary_path() {
     printf '%s\n' "$home/.vcp/bin/fd-rdd"
 }
 
+fedora_fd_rdd_provenance_path() {
+    local home=${1:-${HOME_DIR:-}}
+
+    printf '%s\n' "$home/.vcp/bin/fd-rdd.shorin-provenance"
+}
+
+fedora_fd_rdd_stored_installer_path() {
+    local home=${1:-${HOME_DIR:-}}
+
+    printf '%s\n' "$home/.local/share/shorin-arch-setup/fd-rdd/local-installer.sh"
+}
+
+fedora_fd_rdd_provenance_value() {
+    local key=$1 file=$2
+
+    awk -F= -v wanted="$key" '
+        $1 == wanted { print substr($0, index($0, "=") + 1); found=1; exit }
+        END { exit(found ? 0 : 1) }
+    ' "$file"
+}
+
+fedora_fd_rdd_stored_installer_satisfied() {
+    local user=$1 home=$2 installer provenance group recorded actual
+
+    installer=$(fedora_fd_rdd_stored_installer_path "$home")
+    provenance=$(fedora_fd_rdd_provenance_path "$home")
+    [ -f "$installer" ] && [ ! -L "$installer" ] && [ -x "$installer" ] ||
+        return 1
+    [ -f "$provenance" ] && [ ! -L "$provenance" ] || return 1
+    group=$(id -gn "$user" 2>/dev/null) || return 2
+    [ "$(stat -c '%U:%G' "$installer" 2>/dev/null)" = "$user:$group" ] ||
+        return 1
+    [ "$(stat -c '%a' "$installer" 2>/dev/null)" = 700 ] || return 1
+    recorded=$(fedora_fd_rdd_provenance_value \
+        installer_sha256 "$provenance" 2>/dev/null) || return 1
+    actual=$(sha256sum "$installer" 2>/dev/null | awk '{ print $1 }') ||
+        return 2
+    [ "$recorded" = "$actual" ]
+}
+
+fedora_fd_rdd_checkout_satisfied() {
+    local user=$1 home=$2 source_dir remote head status
+
+    source_dir=$(fedora_fd_rdd_source_dir "$home")
+    [ -d "$source_dir/.git" ] || return 1
+    remote=$(fedora_fd_rdd_as_user "$user" "$home" \
+        git -C "$source_dir" remote get-url origin 2>/dev/null) || return 2
+    case "$remote" in
+        "$FEDORA_FD_RDD_REPO_URL"|https://github.com/awei807-wei/vcp-fd-rdd) ;;
+        *) return 1 ;;
+    esac
+    head=$(fedora_fd_rdd_as_user "$user" "$home" \
+        git -C "$source_dir" rev-parse HEAD 2>/dev/null) || return 2
+    [ "$head" = "$FEDORA_FD_RDD_COMMIT" ] || return 1
+    status=$(fedora_fd_rdd_as_user "$user" "$home" \
+        git -C "$source_dir" status --porcelain 2>/dev/null) || return 2
+    [ -z "$status" ]
+}
+
+fedora_fd_rdd_binary_provenance_satisfied() {
+    local user=$1 home=$2 binary provenance group recorded actual source
+
+    binary=$(fedora_fd_rdd_binary_path "$home")
+    provenance=$(fedora_fd_rdd_provenance_path "$home")
+    [ -x "$binary" ] && [ ! -L "$binary" ] || return 1
+    [ -f "$provenance" ] && [ ! -L "$provenance" ] || return 1
+    group=$(id -gn "$user" 2>/dev/null) || return 2
+    [ "$(stat -c '%U:%G' "$binary" 2>/dev/null)" = "$user:$group" ] || return 1
+    [ "$(stat -c '%U:%G' "$provenance" 2>/dev/null)" = "$user:$group" ] || return 1
+    [ "$(fedora_fd_rdd_provenance_value schema "$provenance" 2>/dev/null || true)" = 1 ] || return 1
+    recorded=$(fedora_fd_rdd_provenance_value sha256 "$provenance" 2>/dev/null) || return 1
+    actual=$(sha256sum "$binary" 2>/dev/null | awk '{ print $1 }') || return 2
+    [ "$recorded" = "$actual" ] || return 1
+    source=$(fedora_fd_rdd_provenance_value source "$provenance" 2>/dev/null) || return 1
+    case "$source" in
+        git)
+            [ "$(fedora_fd_rdd_provenance_value repo "$provenance" 2>/dev/null || true)" = \
+                "$FEDORA_FD_RDD_REPO_URL" ] || return 1
+            [ "$(fedora_fd_rdd_provenance_value commit "$provenance" 2>/dev/null || true)" = \
+                "$FEDORA_FD_RDD_COMMIT" ] || return 1
+            fedora_fd_rdd_checkout_satisfied "$user" "$home"
+            ;;
+        local-installer)
+            fedora_fd_rdd_stored_installer_satisfied "$user" "$home"
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+fedora_fd_rdd_write_provenance() {
+    local user=$1 home=$2 source=$3 binary provenance group temporary sha
+    local installer installer_sha
+
+    require_writable_mode || return
+    binary=$(fedora_fd_rdd_binary_path "$home")
+    provenance=$(fedora_fd_rdd_provenance_path "$home")
+    [ -x "$binary" ] && [ ! -L "$binary" ] || return 1
+    group=$(id -gn "$user" 2>/dev/null) || return 1
+    sha=$(sha256sum "$binary" | awk '{ print $1 }') || return 1
+    case "$source" in
+        git) ;;
+        local-installer)
+            installer=$(fedora_fd_rdd_stored_installer_path "$home")
+            [ -f "$installer" ] && [ ! -L "$installer" ] &&
+                [ -r "$installer" ] || return 1
+            installer_sha=$(sha256sum "$installer" |
+                awk '{ print $1 }') || return 1
+            ;;
+        *) return 1 ;;
+    esac
+    temporary=$(mktemp)
+    {
+        printf 'schema=1\nsource=%s\nsha256=%s\n' "$source" "$sha"
+        case "$source" in
+            git)
+                printf 'repo=%s\ncommit=%s\n' \
+                    "$FEDORA_FD_RDD_REPO_URL" "$FEDORA_FD_RDD_COMMIT"
+                ;;
+            local-installer)
+                printf 'installer_sha256=%s\n' "$installer_sha"
+                ;;
+        esac
+    } > "$temporary"
+    if ! install_if_changed "$temporary" "$provenance" 600; then
+        rm -f -- "$temporary"
+        return 1
+    fi
+    rm -f -- "$temporary"
+    chown "$user:$group" "$provenance"
+}
+
 fedora_fd_rdd_local_bin_dir() {
     local home=${1:-${HOME_DIR:-}}
 
@@ -131,7 +262,8 @@ fedora_fd_rdd_binary_satisfied() {
     # The official installer writes ~/.vcp/bin.  The managed ~/.local/bin
     # symlink is the stable Bash/Fish entry point and is part of the target
     # contract; an unrelated PATH command must never satisfy this target.
-    fedora_fd_rdd_link_satisfied "$user" "$home"
+    fedora_fd_rdd_link_satisfied "$user" "$home" &&
+        fedora_fd_rdd_binary_provenance_satisfied "$user" "$home"
 }
 
 fedora_fd_rdd_target_path() {
@@ -147,6 +279,55 @@ fedora_fd_rdd_as_user() {
     shift 2
     runuser -u "$user" -- env HOME="$home" \
         PATH="$(fedora_fd_rdd_target_path "$home")" "$@"
+}
+
+fedora_fd_rdd_store_local_installer() {
+    local user=$1 home=$2 source=$3 destination directory group temporary
+    local source_sha stored_sha parent
+
+    require_writable_mode || return
+    [ -f "$source" ] && [ ! -L "$source" ] && [ -r "$source" ] || {
+        error "Refusing an unreadable or symlinked fd-rdd installer: $source"
+        return 1
+    }
+    grep -q '^#!' "$source" || {
+        error 'Local fd-rdd installer did not contain a shebang.'
+        return 1
+    }
+    destination=$(fedora_fd_rdd_stored_installer_path "$home")
+    directory=$(dirname "$destination")
+    for parent in "$home/.local" "$home/.local/share" \
+        "$home/.local/share/shorin-arch-setup" "$directory"; do
+        [ ! -L "$parent" ] || {
+            error "Refusing fd-rdd installer storage through a symlink: $parent"
+            return 1
+        }
+    done
+    [ ! -L "$destination" ] || {
+        error "Refusing a symlinked fd-rdd installer destination: $destination"
+        return 1
+    }
+    group=$(id -gn "$user" 2>/dev/null) || return 1
+    install -d -m 700 -o "$user" -g "$group" "$directory" || return 1
+    temporary=$(mktemp "$directory/.local-installer.XXXXXX") || return 1
+    if ! install -m 700 -o "$user" -g "$group" "$source" "$temporary"; then
+        rm -f -- "$temporary"
+        return 1
+    fi
+    source_sha=$(sha256sum "$source" | awk '{ print $1 }') || {
+        rm -f -- "$temporary"
+        return 1
+    }
+    stored_sha=$(sha256sum "$temporary" | awk '{ print $1 }') || {
+        rm -f -- "$temporary"
+        return 1
+    }
+    [ "$source_sha" = "$stored_sha" ] || {
+        rm -f -- "$temporary"
+        error 'The fd-rdd local installer changed while it was being staged.'
+        return 1
+    }
+    mv -f -- "$temporary" "$destination"
 }
 
 fedora_fd_rdd_run_official_installer() {
@@ -174,30 +355,32 @@ fedora_fd_rdd_cargo_available() {
 }
 
 fedora_install_fd_rdd() {
-    local user=$1 home=$2 script source_dir current_head
+    local user=$1 home=$2 script='' source_dir current_head stored_installer
     local staging_root='' staged_checkout remote previous_dir
     local parent_dir
 
     require_writable_mode || return
-    # A previous official install only needs the compatibility entry point
-    # converged; do not reclone or rerun the upstream installer.
-    if [ -x "$(fedora_fd_rdd_binary_path "$home")" ] &&
-        [ ! -L "$(fedora_fd_rdd_binary_path "$home")" ]; then
+    # Reuse only a payload whose hash and pinned source provenance still match.
+    # An older unrecorded binary is reinstalled from the fixed source below.
+    if fedora_fd_rdd_binary_provenance_satisfied "$user" "$home"; then
         fedora_fd_rdd_ensure_local_link "$user" "$home" || return
         fedora_application_target_satisfied fd-rdd-git "$user" "$home"
         return
     fi
-    if [ -n "${FEDORA_FD_RDD_INSTALL_SCRIPT:-}" ] &&
-        [ -r "$FEDORA_FD_RDD_INSTALL_SCRIPT" ]; then
-        script=$FEDORA_FD_RDD_INSTALL_SCRIPT
-        grep -q '^#!' "$script" || {
-            error 'Local fd-rdd installer did not contain a shebang.'
-            return 1
-        }
+    stored_installer=$(fedora_fd_rdd_stored_installer_path "$home")
+    if [ -n "${FEDORA_FD_RDD_INSTALL_SCRIPT:-}" ]; then
+        fedora_fd_rdd_store_local_installer \
+            "$user" "$home" "$FEDORA_FD_RDD_INSTALL_SCRIPT" || return
+        script=$stored_installer
+    elif fedora_fd_rdd_stored_installer_satisfied "$user" "$home"; then
+        script=$stored_installer
+    fi
+    if [ -n "$script" ]; then
         if ! fedora_fd_rdd_as_user "$user" "$home" bash "$script"; then
             error 'The official fd-rdd install.sh failed for the target user.'
             return 1
         fi
+        fedora_fd_rdd_write_provenance "$user" "$home" local-installer || return
         fedora_fd_rdd_ensure_local_link "$user" "$home" || return
         fedora_application_target_satisfied fd-rdd-git "$user" "$home"
         return
@@ -301,6 +484,7 @@ fedora_install_fd_rdd() {
         error 'Pinned fd-rdd scripts/install.sh failed for the target user.'
         return 1
     fi
+    fedora_fd_rdd_write_provenance "$user" "$home" git || return
     fedora_fd_rdd_ensure_local_link "$user" "$home" || return
     fedora_application_target_satisfied fd-rdd-git "$user" "$home"
 }

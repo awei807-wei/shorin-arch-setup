@@ -30,6 +30,16 @@ base_expect() {
     fi
 }
 
+base_required_commands_inspect() {
+    local phase=$1 required_command
+
+    while IFS= read -r required_command; do
+        [ -n "$required_command" ] || continue
+        base_expect "$phase" "command:$required_command" \
+            base_required_command_present "$required_command"
+    done < <(base_required_commands)
+}
+
 base_power_profile_inspect() {
     local phase=$1 provider provider_status=0 unit package_label enabled_label active_label
 
@@ -94,6 +104,7 @@ base_inspect() {
     for package in "${BASE_PACKAGES[@]}"; do
         base_expect "$phase" "package:$package" state_package_present "$package"
     done
+    base_required_commands_inspect "$phase"
     base_power_profile_inspect "$phase"
     while IFS= read -r unit; do
         base_expect "$phase" "global-unit:$unit" \
@@ -164,10 +175,38 @@ base_inspect() {
         fi
         return
     fi
+    if platform_is_fedora && base_gpu_has_vendor NVIDIA "$gpu_info"; then
+        local provider_status=0
+        base_fedora_nvidia_provider_compatible || provider_status=$?
+        case "$provider_status" in
+            0) ;;
+            1)
+                # Provider migration is intentionally not an automatic
+                # convergence action.  Mark it as action-required during
+                # check so apply cannot run the general Fedora upgrade first.
+                if [ "$phase" = check ]; then
+                    module_inspection_failed \
+                        gpu-provider:nvidia-rpmfusion-exclusive:action-required
+                else
+                    module_verify_failed \
+                        gpu-provider:nvidia-rpmfusion-exclusive
+                fi
+                ;;
+            *)
+                if [ "$phase" = check ]; then
+                    module_inspection_failed \
+                        "gpu-provider:nvidia-rpmfusion-exclusive:inspection-error:$provider_status"
+                else
+                    module_verify_failed \
+                        "gpu-provider:nvidia-rpmfusion-exclusive:inspection-error:$provider_status"
+                fi
+                ;;
+        esac
+    fi
     mapfile -t gpu_packages < <(base_gpu_target_packages "$gpu_info")
     for package in "${gpu_packages[@]}"; do
         base_expect "$phase" "gpu-package:$package" \
-            declared_package_target_satisfied "$package"
+            base_gpu_package_target_satisfied "$package"
     done
     if [ "$(base_gpu_count "$gpu_info")" -ge 2 ] &&
         base_gpu_has_vendor NVIDIA "$gpu_info"; then

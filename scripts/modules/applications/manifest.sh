@@ -146,6 +146,137 @@ application_manifest_has_entries() {
     [ -n "$entries" ]
 }
 
+application_selection_intent_path() {
+    printf '%s\n' "${1:-$APPLICATION_MANIFEST}.intent"
+}
+
+application_selection_intent_value() {
+    local key=$1 manifest=${2:-$APPLICATION_MANIFEST} intent
+
+    intent=$(application_selection_intent_path "$manifest")
+    [ -f "$intent" ] || return 1
+    awk -F= -v wanted="$key" '
+        $1 == wanted { print substr($0, index($0, "=") + 1); found=1; exit }
+        END { exit(found ? 0 : 1) }
+    ' "$intent"
+}
+
+application_selection_intent_state() {
+    local manifest=${1:-$APPLICATION_MANIFEST} source=${2:-$APPLICATION_SOURCE_LIST}
+    local intent schema state recorded_source recorded_hash actual_hash provider
+
+    intent=$(application_selection_intent_path "$manifest")
+    [ -e "$intent" ] || return 1
+    [ -f "$intent" ] && [ ! -L "$intent" ] && [ -r "$intent" ] || return 2
+    schema=$(application_selection_intent_value schema "$manifest" || true)
+    state=$(application_selection_intent_value state "$manifest" || true)
+    recorded_source=$(application_selection_intent_value source "$manifest" || true)
+    recorded_hash=$(application_selection_intent_value source_sha256 "$manifest" || true)
+    provider=$(application_selection_intent_value provider_revision "$manifest" || true)
+    [ "$schema" = 1 ] || return 2
+    case "$state" in pending-selection|selected-all|declined) ;; *) return 2 ;; esac
+    [ "$recorded_source" = "$source" ] && [ -n "$recorded_hash" ] || return 2
+    actual_hash=$(application_source_hash "$source" 2>/dev/null) || return 2
+    [ "$recorded_hash" = "$actual_hash" ] || return 2
+    [ "$provider" = "$APPLICATION_PROVIDER_REVISION" ] || return 2
+    printf '%s\n' "$state"
+}
+
+write_application_selection_intent() {
+    local source_file=$1 destination=${2:-$APPLICATION_MANIFEST}
+    local state=${3:-pending-selection} intent directory temporary source_hash
+
+    require_writable_mode || return
+    case "$state" in pending-selection|selected-all|declined) ;; *) return 2 ;; esac
+    [ -f "$source_file" ] && [ -r "$source_file" ] || return 1
+    source_hash=$(application_source_hash "$source_file") || return 1
+    intent=$(application_selection_intent_path "$destination")
+    directory=$(dirname "$intent")
+    install -d -m 755 "$directory"
+    temporary=$(mktemp "$directory/.applications.intent.XXXXXX") || return 1
+    cat > "$temporary" <<EOF
+schema=1
+source=$source_file
+source_sha256=$source_hash
+provider_revision=$APPLICATION_PROVIDER_REVISION
+state=$state
+EOF
+    if ! install_if_changed "$temporary" "$intent" 644; then
+        rm -f -- "$temporary"
+        return 1
+    fi
+    rm -f -- "$temporary"
+}
+
+clear_application_selection_intent() {
+    local intent
+
+    require_writable_mode || return
+    intent=$(application_selection_intent_path "${1:-$APPLICATION_MANIFEST}")
+    rm -f -- "$intent"
+}
+
+initialize_default_application_manifest() {
+    local source_file=$1 destination=${2:-$APPLICATION_MANIFEST}
+    local destination_dir staged_manifest metadata entry entries
+    local intent_state intent_status=0
+
+    require_writable_mode || return
+    # Never replace a declaration that predates this run.  The sole exception
+    # is an authenticated selected-all transaction that was interrupted before
+    # its manifest+metadata commit completed.
+    if [ -e "$destination" ]; then
+        intent_state=$(application_selection_intent_state \
+            "$destination" "$source_file") || intent_status=$?
+        [ "$intent_status" -eq 0 ] && [ "$intent_state" = selected-all ] ||
+            return 0
+    else
+        write_application_selection_intent \
+            "$source_file" "$destination" selected-all || return
+    fi
+    [ -f "$source_file" ] && [ -r "$source_file" ] || {
+        error "Application source list is not readable: $source_file"
+        return 1
+    }
+    metadata=$(application_manifest_metadata_path "$destination")
+    [ ! -e "$metadata" ] || {
+        error "Application manifest metadata exists without its manifest: $metadata"
+        return 1
+    }
+    if ! entries=$(application_entries_from_file "$source_file"); then
+        error "Application source list is not readable: $source_file"
+        return 1
+    fi
+    [ -n "$entries" ] || {
+        error "Application source list has no selectable targets: $source_file"
+        return 1
+    }
+    while IFS= read -r entry; do
+        [ -n "$entry" ] || continue
+        application_entry_is_valid "$entry" || {
+            error "Invalid application entry in $source_file: $entry"
+            return 1
+        }
+    done <<< "$entries"
+
+    destination_dir=$(dirname "$destination")
+    install -d -m 755 "$destination_dir"
+    staged_manifest=$(mktemp "$destination_dir/.applications.list.intent.XXXXXX")
+    printf '%s\n' "$entries" | sort -u > "$staged_manifest"
+    if ! install_if_changed "$staged_manifest" "$destination" 644; then
+        rm -f -- "$staged_manifest"
+        return 1
+    fi
+    rm -f -- "$staged_manifest"
+    if ! write_application_manifest_metadata "$destination" "$source_file" selected; then
+        rm -f -- "$destination" "$metadata"
+        error "Unable to record the default application selection: $destination"
+        return 1
+    fi
+    clear_application_selection_intent "$destination" || return 1
+    log "Declared the default application selection before module convergence: $destination"
+}
+
 collect_legacy_application_targets() {
     local source_file=$1 entry
 

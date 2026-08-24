@@ -31,6 +31,10 @@ ensure_packages "${RIME_REQUIRED_PACKAGES[@]}"
 install -d "$NAS_LOCAL_PATH"
 ensure_fstab_entry "$NAS_IP:$NAS_REMOTE_PATH" "$NAS_LOCAL_PATH" nfs \
     defaults,_netdev,nofail 0 0 "${FSTAB_FILE:-/etc/fstab}"
+nas_rime_reload_systemd_for_fstab "${FSTAB_FILE:-/etc/fstab}" || {
+    error 'Failed to reload systemd after updating /etc/fstab.'
+    exit 1
+}
 
 if mountpoint -q "$NAS_LOCAL_PATH"; then
     if ! timeout 2 ls "$NAS_LOCAL_PATH" >/dev/null 2>&1; then

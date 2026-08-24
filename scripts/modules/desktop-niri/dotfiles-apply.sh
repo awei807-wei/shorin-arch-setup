@@ -557,6 +557,8 @@ main() {
         dotfiles_cleanup_ephemeral_source || status=1
         return "$status"
     fi
+    ensure_niri_longshot_runtime "$TARGET_USER" || return
+    ensure_niri_fedora_recorder "$TARGET_USER" || return
     configure_desktop_theme
 }
 

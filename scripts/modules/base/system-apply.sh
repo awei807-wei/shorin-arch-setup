@@ -17,6 +17,13 @@ check_root
 log "Starting Phase 1: Base System Configuration..."
 
 if platform_is_fedora; then
+    # Do not let the general Fedora upgrade mutate an external or mixed
+    # NVIDIA driver family.  The GPU apply path repeats this immediately
+    # before its own transaction as a defence-in-depth check.
+    base_fedora_nvidia_provider_preflight ||
+        die 'Fedora NVIDIA provider preflight failed before the system upgrade.'
+    platform_fedora_system_upgrade ||
+        die 'Fedora system upgrade failed before base package installation.'
     mapfile -t FEDORA_BASE_PACKAGES < <(base_declared_packages)
     section "Fedora" "Base System Packages"
     # Fedora intentionally has no pacman.conf/multilib/ArchLinuxCN mutation.

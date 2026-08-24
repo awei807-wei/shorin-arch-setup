@@ -96,8 +96,20 @@ done
 
 source "$ROOT_DIR/scripts/modules/virtualization/contract.sh"
 source "$ROOT_DIR/scripts/modules/nas-rime/contract.sh"
+[ "${VIRTUALIZATION_PROVIDER:-}" = auto ] ||
+    fail 'Fedora virtualization provider policy must default to auto'
 [ "${VIRTUALIZATION_SERVICE:-}" = libvirtd.service ] ||
-    fail 'Fedora virtualization contract must declare libvirtd.service'
+    fail 'Fedora virtualization compatibility alias must retain libvirtd.service'
+[ "${VIRTUALIZATION_MONOLITHIC_SOCKET:-}" = libvirtd.socket ] ||
+    fail 'Fedora virtualization contract must declare the monolithic socket'
+for unit in virtqemud.socket virtproxyd.socket virtnetworkd.socket; do
+    found=0
+    for actual in "${VIRTUALIZATION_MODULAR_REQUIRED_UNITS[@]}"; do
+        [ "$actual" = "$unit" ] && found=1
+    done
+    [ "$found" -eq 1 ] ||
+        fail "Fedora modular virtualization contract is missing unit: $unit"
+done
 grep -Fqx virsh <<< "${VIRTUALIZATION_COMMANDS[*]}" ||
     fail 'Fedora virtualization contract must declare virsh'
 for group in libvirt kvm input; do
@@ -149,6 +161,10 @@ CALLS="$TEST_DIR/calls.log"
 : > "$CALLS"
 require_writable_mode() { return 0; }
 ensure_flatpak() { printf 'flatpak:%s\n' "$1" >> "$CALLS"; }
+# Keep Flatpak satisfaction entirely inside the fixture.  Otherwise a system
+# Flatpak installed on the host can make the provider skip ensure_flatpak and
+# turn this routing contract into a host-inventory test.
+fedora_flatpak_present() { return 1; }
 ensure_packages() { printf 'packages:%s\n' "$*" >> "$CALLS"; }
 ensure_package() { printf 'package:%s\n' "$1" >> "$CALLS"; }
 dnf() { printf 'dnf:%s\n' "$*" >> "$CALLS"; return 0; }
@@ -156,6 +172,10 @@ curl() { return 1; }
 fedora_install_local_rpm() { printf 'rpm:%s:%s\n' "$1" "$2" >> "$CALLS"; return 0; }
 fedora_install_fd_rdd() { printf 'fd-rdd:%s\n' "$1" >> "$CALLS"; return 0; }
 fedora_install_vicinae() { printf 'vicinae:%s\n' "$1" >> "$CALLS"; return 0; }
+# Exact RPM provenance has its own artifact test.  This routing fixture mocks
+# the post-install proof so it can focus on provider selection without reading
+# the host rpmdb.
+fedora_require_fixed_official_rpm_target() { return 0; }
 declare -A FEDORA_SATISFACTION_CHECKS=()
 fedora_application_target_satisfied() {
     case "$1" in

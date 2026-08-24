@@ -7,6 +7,7 @@ trap 'printf "ERROR: %s:%s: %s\n" "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" 
 
 fedora_font_source_contract_valid() {
     local target=$1 version url digest expected_version expected_url expected_digest
+    local size='' expected_size='' ttf_count='' expected_ttf_count=''
 
     case "$target" in
         ttf-jetbrains-mono-nerd)
@@ -24,6 +25,10 @@ fedora_font_source_contract_valid() {
             expected_version=$FEDORA_JETBRAINS_MAPLE_VERSION_PINNED
             expected_url=$FEDORA_JETBRAINS_MAPLE_URL_PINNED
             expected_digest=$FEDORA_JETBRAINS_MAPLE_SHA256_PINNED
+            size=$FEDORA_JETBRAINS_MAPLE_SIZE
+            expected_size=$FEDORA_JETBRAINS_MAPLE_SIZE_PINNED
+            ttf_count=$FEDORA_JETBRAINS_MAPLE_TTF_COUNT
+            expected_ttf_count=$FEDORA_JETBRAINS_MAPLE_TTF_COUNT_PINNED
             ;;
         material-design-icons)
             version=$FEDORA_MATERIAL_DESIGN_ICONS_VERSION
@@ -47,12 +52,21 @@ fedora_font_source_contract_valid() {
         error "Unpinned SHA-256 for Fedora font target: $target"
         return 1
     }
+    [ -z "$expected_size" ] || [ "$size" = "$expected_size" ] || {
+        error "Unpinned byte size for Fedora font target: $target"
+        return 1
+    }
+    [ -z "$expected_ttf_count" ] ||
+        [ "$ttf_count" = "$expected_ttf_count" ] || {
+            error "Unpinned TTF count for Fedora font target: $target"
+            return 1
+        }
 }
 
 fedora_target_user_provider_prerequisites_satisfied() {
     local user=${1:-${TARGET_USER:-}} home=${2:-${HOME_DIR:-}} command_name
 
-    for command_name in curl sha256sum unzip xz tar flock fc-cache fc-match fc-query fc-scan; do
+    for command_name in curl sha256sum stat unzip xz tar flock fc-cache fc-match fc-query fc-scan; do
         fedora_target_user_command_path "$user" "$home" "$command_name" \
             >/dev/null || return $?
     done

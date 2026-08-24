@@ -40,9 +40,14 @@ tar -czf "$ASSET_DIR/starship.tar.gz" -C "$ASSET_DIR/starship-root" starship
 printf 'nerd\n' > "$ASSET_DIR/nerd/JetBrainsMonoNerdFont-Regular.ttf"
 tar -cJf "$ASSET_DIR/nerd.tar.xz" -C "$ASSET_DIR/nerd" \
     JetBrainsMonoNerdFont-Regular.ttf
-printf 'maple\n' > "$ASSET_DIR/maple/JetBrainsMapleMono-NF-Regular.ttf"
+for maple_style in Bold BoldItalic ExtraBold ExtraBoldItalic ExtraLight \
+    ExtraLightItalic Italic Light LightItalic Medium MediumItalic Regular \
+    SemiBold SemiBoldItalic Thin ThinItalic; do
+    printf 'maple %s\n' "$maple_style" > \
+        "$ASSET_DIR/maple/JetBrainsMapleMono-NF-$maple_style.ttf"
+done
 (cd "$ASSET_DIR/maple" && zip -q "$ASSET_DIR/maple.zip" \
-    JetBrainsMapleMono-NF-Regular.ttf)
+    JetBrainsMapleMono-NF-*.ttf)
 printf 'mdi\n' > "$ASSET_DIR/mdi.ttf"
 
 STARSHIP_SHA=$(sha256sum "$ASSET_DIR/starship.tar.gz" | awk '{print $1}')
@@ -55,6 +60,29 @@ export SHORIN_DISTRO=fedora SHORIN_MODE=repair SHORIN_READ_ONLY=0
 export TARGET_USER=$(id -un) HOME_DIR
 source "$ROOT_DIR/scripts/lib/core.sh"
 PATH="$BIN_DIR"; export PATH
+rm -f "$BIN_DIR/stat"
+cat > "$BIN_DIR/stat" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = -c ] && [ "${2:-}" = %s ] &&
+    [[ "${3:-}" == */JetBrainsMapleMono.zip ]]; then
+    printf '%s\n' "${MAPLE_REPORTED_SIZE:-159715777}"
+    exit 0
+fi
+exec /usr/bin/stat "$@"
+EOF
+chmod 755 "$BIN_DIR/stat"
+export MAPLE_REPORTED_SIZE=159715777
+
+[ "$FEDORA_JETBRAINS_MAPLE_URL_PINNED" = \
+    https://github.com/SpaceTimee/Fusion-JetBrainsMapleMono/releases/download/1.2304.79/JetBrainsMapleMono-NF-XX-XX-XX.zip ] ||
+    fail 'Maple provider URL pin does not identify the verified release asset'
+[ "$FEDORA_JETBRAINS_MAPLE_SHA256_PINNED" = \
+    3a7ed5e50f6831dc1414a4ad96b1e03c13cbc67ca32bc1bb7e9d90c56b903358 ] ||
+    fail 'Maple provider SHA-256 pin does not identify the verified release asset'
+[ "$FEDORA_JETBRAINS_MAPLE_SIZE_PINNED" -eq 159715777 ] ||
+    fail 'Maple provider byte-size pin is incorrect'
+[ "$FEDORA_JETBRAINS_MAPLE_TTF_COUNT_PINNED" -eq 16 ] ||
+    fail 'Maple provider TTF-count pin is incorrect'
 
 if ! env \
     FEDORA_STARSHIP_URL=https://evil.example/starship.tar.gz \
@@ -264,19 +292,30 @@ fedora_install_desktop_font_provider "$TARGET_USER" "$HOME_DIR" ||
 # Maple is conditional on the active Kitty configuration.  Removing the
 # active reference must skip both its download and its acceptance contract.
 printf 'font_family JetBrains Mono\n' > "$HOME_DIR/.config/kitty/kitty.conf"
-rm -f "$HOME_DIR/.local/share/fonts/shorin/JetBrainsMapleMono-NF-Regular.ttf"
+find "$HOME_DIR/.local/share/fonts/shorin" -type f \
+    -name 'JetBrainsMapleMono*.ttf' -delete
 before_no_maple_calls=$(wc -l < "$CALLS")
 fedora_install_desktop_font_provider "$TARGET_USER" "$HOME_DIR" ||
     fail 'font provider without active Maple config did not converge'
 [ "$(wc -l < "$CALLS")" -eq "$before_no_maple_calls" ] ||
     fail 'inactive Maple config still triggered a download'
-[ ! -e "$HOME_DIR/.local/share/fonts/shorin/JetBrainsMapleMono-NF-Regular.ttf" ] ||
+[ -z "$(find "$HOME_DIR/.local/share/fonts/shorin" -type f \
+    -name 'JetBrainsMapleMono*.ttf' -print -quit)" ] ||
     fail 'inactive Maple config still installed Maple fonts'
 if fedora_font_target_satisfied ttf-jetbrains-maple-mono-nf-xx-xx \
     "$TARGET_USER" "$HOME_DIR"; then
     fail 'explicit Maple target was incorrectly treated as optional'
 fi
 printf 'font_family JetBrains Maple Mono\n' > "$HOME_DIR/.config/kitty/kitty.conf"
+MAPLE_REPORTED_SIZE=1
+status=0
+fedora_install_font_provider_target ttf-jetbrains-maple-mono-nf-xx-xx \
+    "$TARGET_USER" "$HOME_DIR" || status=$?
+[ "$status" -ne 0 ] || fail 'Maple byte-size mismatch must fail closed'
+[ -z "$(find "$HOME_DIR/.local/share/fonts/shorin" -type f \
+    -name 'JetBrainsMapleMono*.ttf' -print -quit)" ] ||
+    fail 'Maple byte-size mismatch left partially installed fonts'
+MAPLE_REPORTED_SIZE=159715777
 fedora_install_font_provider_target ttf-jetbrains-maple-mono-nf-xx-xx \
     "$TARGET_USER" "$HOME_DIR" || fail 'active Maple config did not restore its provider'
 
@@ -347,7 +386,8 @@ if fedora_arch_target_name ttf-jetbrains-mono-nerd >/dev/null 2>&1; then
     fail 'Fedora Nerd Font target still has a fake DNF mapping'
 fi
 printf 'font_family JetBrains Mono\n' > "$HOME_DIR/.config/kitty/kitty.conf"
-rm -f "$HOME_DIR/.local/share/fonts/shorin/JetBrainsMapleMono-NF-Regular.ttf"
+find "$HOME_DIR/.local/share/fonts/shorin" -type f \
+    -name 'JetBrainsMapleMono*.ttf' -delete
 if niri_package_target_satisfied AUR:ttf-jetbrains-maple-mono-nf-xx-xx; then
     fail 'manifest-declared Fedora Maple target was incorrectly skipped'
 fi

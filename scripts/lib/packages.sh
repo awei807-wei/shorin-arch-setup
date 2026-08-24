@@ -205,6 +205,24 @@ run_with_pacman_recovery() {
     done
 }
 
+platform_fedora_system_upgrade() {
+    require_writable_mode || return
+    platform_is_fedora || return 0
+
+    # A Fedora image and its enabled repositories must move forward as one
+    # package set before individual targets are installed.  Otherwise an old
+    # KDE/Qt stack can leave files owned by packages which were renamed or
+    # split in the current repository (for example kmime -> kf6-kmime).
+    # Keep this transaction fail-closed: it may only upgrade the existing
+    # vendor's packages, and may not erase, downgrade, or silently skip any
+    # part of the installed system.
+    dnf upgrade --refresh -y --best \
+        --setopt=allow_vendor_change=False \
+        --setopt=allow_downgrade=False \
+        --setopt=install_weak_deps=False || return
+    dnf check
+}
+
 ensure_package() {
     require_writable_mode || return
     local package=$1
@@ -246,7 +264,16 @@ ensure_package() {
                         fi
                         return "$((repository_status > 1 ? repository_status : 1))"
                     fi
-                    platform_dnf_install_from_repo "$repository" "$mapped" || return
+                    case "$mapped" in
+                        akmod-nvidia|xorg-x11-drv-nvidia-cuda)
+                            platform_dnf_install_from_repo_allowlist \
+                                "$repository" "$mapped" || return
+                            ;;
+                        *)
+                            platform_dnf_install_from_repo \
+                                "$repository" "$mapped" || return
+                            ;;
+                    esac
                 else
                     repository_status=$?
                     [ "$repository_status" -eq 1 ] || return "$repository_status"

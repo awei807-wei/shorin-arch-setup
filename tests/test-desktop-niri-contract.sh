@@ -13,7 +13,9 @@ HOME_DIR=$TEST_DIR/home
 SHORIN_ROOT=$ROOT_DIR
 SHORIN_MODE=repair
 SHORIN_READ_ONLY=0
-export TARGET_USER HOME_DIR SHORIN_ROOT SHORIN_MODE SHORIN_READ_ONLY
+NIRI_DESKTOP_TXN_ROOT=$TEST_DIR/desktop-transactions
+export TARGET_USER HOME_DIR SHORIN_ROOT SHORIN_MODE SHORIN_READ_ONLY \
+    NIRI_DESKTOP_TXN_ROOT
 
 cleanup() {
     find "$TEST_DIR" -depth -delete
@@ -55,6 +57,26 @@ if [ "${1:-}" = --user ] && [ "${2:-}" = reset-failed ] &&
     fi
     exit "$reset_failed_status"
 fi
+if [ "${1:-}" = --user ] && [ "${2:-}" = stop ] &&
+    [ "${3:-}" = "${NIRI_FEDORA_NVIDIA_SETTINGS_UNIT:?}" ]; then
+    stop_status=${NVIDIA_SETTINGS_STOP_STATUS:-0}
+    if [ "$stop_status" -ne 0 ]; then
+        printf '%s\n' "${NVIDIA_SETTINGS_STOP_OUTPUT:-}" >&2
+        exit "$stop_status"
+    fi
+    printf '%s\n' inactive > "${NVIDIA_SETTINGS_STATE:?}"
+    exit 0
+fi
+if [ "${1:-}" = --user ] && [ "${2:-}" = reset-failed ] &&
+    [ "${3:-}" = "${NIRI_FEDORA_NVIDIA_SETTINGS_UNIT:?}" ]; then
+    reset_status=${NVIDIA_SETTINGS_RESET_FAILED_STATUS:-0}
+    if [ "$reset_status" -ne 0 ]; then
+        printf '%s\n' "${NVIDIA_SETTINGS_RESET_FAILED_OUTPUT:-}" >&2
+        exit "$reset_status"
+    fi
+    printf '%s\n' clean > "${NVIDIA_SETTINGS_FAILED_STATE:?}"
+    exit 0
+fi
 if [ "${1:-}" = --user ] && [ "${2:-}" = show-environment ]; then
     printf '%s\n' 'DISABLE_LSFG=1'
     exit 0
@@ -94,6 +116,18 @@ if [ "${1:-}" = --user ] && [ "${2:-}" = is-active ] &&
     [ "$(< "${VIDEOBRIDGE_STATE:?}")" = active ]
     exit $?
 fi
+if [ "${1:-}" = --user ] && [ "${2:-}" = is-active ] &&
+    [ "${3:-}" = --quiet ] &&
+    [ "${4:-}" = "${NIRI_FEDORA_NVIDIA_SETTINGS_UNIT:?}" ]; then
+    [ "$(< "${NVIDIA_SETTINGS_STATE:?}")" = active ]
+    if [ "$?" -eq 0 ]; then exit 0; else exit 3; fi
+fi
+if [ "${1:-}" = --user ] && [ "${2:-}" = is-failed ] &&
+    [ "${3:-}" = --quiet ] &&
+    [ "${4:-}" = "${NIRI_FEDORA_NVIDIA_SETTINGS_UNIT:?}" ]; then
+    [ "$(< "${NVIDIA_SETTINGS_FAILED_STATE:?}")" = failed ]
+    if [ "$?" -eq 0 ]; then exit 0; else exit 1; fi
+fi
 if [ "${1:-}" = --user ] && [ "${2:-}" = show ] &&
     [ "${3:-}" = -p ] && [ "${4:-}" = MainPID ] &&
     [ "${5:-}" = --value ] &&
@@ -122,6 +156,9 @@ EOF
 
 source "$ROOT_DIR/scripts/modules/desktop-niri/targets.sh"
 source "$ROOT_DIR/scripts/modules/desktop-niri/dotfiles-apply.sh"
+
+printf '%s\n' "$(niri_required_package_targets)" | grep -Fqx jq ||
+    fail 'Niri required targets must install jq for the runtime smoke contract'
 
 assert_equal '/tmp/fixture-wallpaper.png' \
     "$(printf '%s\n' ': eDP-1: 1920x1080, currently displaying: image: /tmp/fixture-wallpaper.png' |
@@ -986,6 +1023,17 @@ lspci() {
 }
 export -f lspci
 
+niri_pywalfox_provider_supported ||
+    fail 'Arch must retain the paired Pywalfox native-host provider'
+[ "$(niri_package_target_canonical AUR:python-pywalfox)" = \
+    AUR:python-pywalfox ] ||
+    fail 'Arch Pywalfox target must remain paired with its Firefox policy'
+printf '%s\n' "$(niri_firefox_policy_contract)" |
+    grep -Fq 'pywalfox/latest.xpi' ||
+    fail 'Arch Firefox policy must retain Pywalfox while its provider is declared'
+[ "$(niri_portal_config_contract)" = $'[preferred]\ndefault=gtk' ] ||
+    fail 'the Fedora portal provider change must not alter the Arch contract'
+
 niri_firefox_policy_contract > "$NIRI_FIREFOX_POLICY_FILE"
 niri_nautilus_override_contract > "$NIRI_NAUTILUS_OVERRIDE_FILE"
 ln -s "$NIRI_GNOME_TERMINAL_TARGET" "$NIRI_GNOME_TERMINAL_LINK"
@@ -1271,6 +1319,8 @@ test_fedora_niri_session_compatibility() (
     local videobridge_systemctl_log="$TEST_DIR/fedora-videobridge-systemctl.log"
     local videobridge_state="$TEST_DIR/fedora-videobridge-state"
     local videobridge_pid="$TEST_DIR/fedora-videobridge-pid"
+    local nvidia_settings_state="$TEST_DIR/fedora-nvidia-settings-state"
+    local nvidia_settings_failed_state="$TEST_DIR/fedora-nvidia-settings-failed-state"
 
     export SHORIN_DISTRO=fedora HOME_DIR="$fedora_home"
     unset NIRI_CONFIG_FILE NIRI_BINDS_FILE NIRI_LOCAL_BIN
@@ -1278,6 +1328,7 @@ test_fedora_niri_session_compatibility() (
     desktop_niri_contract_init
     export NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT \
         NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE
+    export NIRI_FEDORA_NVIDIA_SETTINGS_UNIT
     mkdir -p "$HOME_DIR/.config/niri" "$HOME_DIR/.config/quickshell/scripts" \
         "$HOME_DIR/.local/bin" \
         "$fedora_bin" "$empty_path"
@@ -1285,13 +1336,43 @@ test_fedora_niri_session_compatibility() (
     export VIDEOBRIDGE_SYSTEMCTL_LOG="$videobridge_systemctl_log"
     export VIDEOBRIDGE_STATE="$videobridge_state"
     export VIDEOBRIDGE_PID="$videobridge_pid"
+    export NVIDIA_SETTINGS_STATE="$nvidia_settings_state"
+    export NVIDIA_SETTINGS_FAILED_STATE="$nvidia_settings_failed_state"
     unset VIDEOBRIDGE_RESET_FAILED_STATUS VIDEOBRIDGE_RESET_FAILED_OUTPUT
     printf '%s\n' inactive > "$VIDEOBRIDGE_STATE"
     printf '%s\n' 0 > "$VIDEOBRIDGE_PID"
+    printf '%s\n' active > "$NVIDIA_SETTINGS_STATE"
+    printf '%s\n' failed > "$NVIDIA_SETTINGS_FAILED_STATE"
     export PATH="$fedora_bin:$PATH"
     niri_user_bus_is_available() { return 0; }
     printf '#!/usr/bin/env bash\n' > "$NIRI_LOCKSCREEN_SCRIPT_FILE"
     chmod 755 "$NIRI_LOCKSCREEN_SCRIPT_FILE"
+    if niri_pywalfox_provider_supported; then
+        fail 'Fedora must not declare a Pywalfox provider without its native host'
+    fi
+    [ "$(niri_firefox_policy_contract)" = '{ "policies": {} }' ] ||
+        fail 'Fedora Firefox policy must not force the orphaned Pywalfox extension'
+    [ "$(niri_portal_config_contract)" = \
+        $'[preferred]\ndefault=gnome;gtk;\norg.freedesktop.impl.portal.Access=gtk;\norg.freedesktop.impl.portal.Notification=gtk;\norg.freedesktop.impl.portal.Secret=gnome-keyring;' ] ||
+        fail 'Fedora Niri portal policy must match the vendor provider contract'
+    mkdir -p "$(dirname "$NIRI_FISH_CONFIG_FILE")"
+    cat > "$NIRI_FISH_CONFIG_FILE" <<'EOF'
+# >>> shorin fish init >>>
+if status is-interactive
+    if command -q thefuck
+        set -l thefuck_alias (thefuck --alias 2>/dev/null)
+        if test $status -eq 0; and test (count $thefuck_alias) -gt 0
+            printf '%s\n' $thefuck_alias | source
+        end
+    end
+end
+# <<< shorin fish init <<<
+EOF
+    ensure_niri_fish_config "$TARGET_USER" ||
+        fail 'Fedora Fish contract must remove the incompatible managed alias'
+    if grep -Fq thefuck "$NIRI_FISH_CONFIG_FILE"; then
+        fail 'Fedora managed Fish startup must never execute thefuck'
+    fi
     printf '%s\n' active > "$VIDEOBRIDGE_STATE"
     cat > "$NIRI_CONFIG_FILE" <<'EOF'
 environment {
@@ -1367,6 +1448,125 @@ EOF
         fail 'Fedora Niri compatibility migration must converge'
     niri_fedora_session_compatibility_satisfied ||
         fail 'Fedora Niri compatibility contract must accept guarded commands'
+    niri_fedora_nvidia_settings_autostart_satisfied "$TARGET_USER" ||
+        fail 'Fedora Niri compatibility must disable NVIDIA XDG autostart'
+    cmp -s "$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE" \
+        <(niri_fedora_nvidia_settings_autostart_contract) ||
+        fail 'NVIDIA settings user override must contain only the exact Hidden contract'
+    [ "$(stat -c '%a' "$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE")" = 644 ] ||
+        fail 'NVIDIA settings user override must use mode 0644'
+    [ "$(stat -c '%U' "$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE")" = \
+        "$TARGET_USER" ] || fail 'NVIDIA settings user override must belong to the target user'
+    grep -Fqx -- \
+        "--user stop $NIRI_FEDORA_NVIDIA_SETTINGS_UNIT" \
+        "$VIDEOBRIDGE_SYSTEMCTL_LOG" ||
+        fail 'Fedora compatibility must stop the generated NVIDIA settings unit'
+    grep -Fqx -- \
+        "--user reset-failed $NIRI_FEDORA_NVIDIA_SETTINGS_UNIT" \
+        "$VIDEOBRIDGE_SYSTEMCTL_LOG" ||
+        fail 'Fedora compatibility must clear the generated NVIDIA settings failure'
+    [ "$(< "$NVIDIA_SETTINGS_STATE")" = inactive ] ||
+        fail 'Fedora compatibility must leave the NVIDIA settings unit inactive'
+    [ "$(< "$NVIDIA_SETTINGS_FAILED_STATE")" = clean ] ||
+        fail 'Fedora compatibility must clear the NVIDIA settings failed state'
+    [ "$NIRI_FEDORA_NVIDIA_SETTINGS_UNIT" = \
+        'app-nvidia\x2dsettings\x2duser@autostart.service' ] ||
+        fail 'NVIDIA settings generated unit name must preserve systemd escapes'
+    nvidia_reload_line=$(grep -n -F -- '--user daemon-reload' \
+        "$VIDEOBRIDGE_SYSTEMCTL_LOG" | tail -1 | cut -d: -f1)
+    nvidia_stop_line=$(grep -n -F -- \
+        "--user stop $NIRI_FEDORA_NVIDIA_SETTINGS_UNIT" \
+        "$VIDEOBRIDGE_SYSTEMCTL_LOG" | tail -1 | cut -d: -f1)
+    nvidia_reset_line=$(grep -n -F -- \
+        "--user reset-failed $NIRI_FEDORA_NVIDIA_SETTINGS_UNIT" \
+        "$VIDEOBRIDGE_SYSTEMCTL_LOG" | tail -1 | cut -d: -f1)
+    [ -n "$nvidia_reload_line" ] && [ -n "$nvidia_stop_line" ] &&
+        [ -n "$nvidia_reset_line" ] &&
+        [ "$nvidia_reload_line" -lt "$nvidia_stop_line" ] &&
+        [ "$nvidia_stop_line" -lt "$nvidia_reset_line" ] ||
+        fail 'NVIDIA settings apply must reload, stop, then reset-failed in order'
+
+    nvidia_override_identity=$(stat -c '%i:%Y' \
+        "$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE")
+    ensure_niri_fedora_nvidia_settings_autostart "$TARGET_USER" ||
+        fail 'an idempotent NVIDIA settings override run must succeed'
+    [ "$(stat -c '%i:%Y' "$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE")" = \
+        "$nvidia_override_identity" ] ||
+        fail 'an unchanged NVIDIA settings override must not be atomically replaced'
+    chmod 600 "$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE"
+    if niri_fedora_nvidia_settings_autostart_satisfied "$TARGET_USER"; then
+        fail 'NVIDIA settings override contract must reject the wrong mode'
+    fi
+    ensure_niri_fedora_nvidia_settings_autostart "$TARGET_USER" ||
+        fail 'NVIDIA settings apply must repair override metadata'
+    [ "$(stat -c '%a' "$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE")" = 644 ] ||
+        fail 'NVIDIA settings apply must restore mode 0644'
+    stale_nvidia_inode=$(stat -c '%i' \
+        "$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE")
+    printf '%s\n' '[Desktop Entry]' 'Hidden=false' \
+        > "$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE"
+    ensure_niri_fedora_nvidia_settings_autostart "$TARGET_USER" ||
+        fail 'NVIDIA settings apply must atomically replace stale content'
+    [ "$(stat -c '%i' "$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE")" != \
+        "$stale_nvidia_inode" ] ||
+        fail 'stale NVIDIA settings content must be replaced by atomic rename'
+    cmp -s "$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE" \
+        <(niri_fedora_nvidia_settings_autostart_contract) ||
+        fail 'atomic NVIDIA settings replacement must install the exact contract'
+    if find "$(dirname "$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE")" \
+        -maxdepth 1 -name '.nvidia-settings-user.desktop.*' -print -quit |
+        grep -q .; then
+        fail 'atomic NVIDIA settings replacement must not leave staged files'
+    fi
+
+    nvidia_symlink_target="$TEST_DIR/nvidia-settings-user-owned-target"
+    printf '%s\n' 'preserve me' > "$nvidia_symlink_target"
+    rm -f "$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE"
+    ln -s "$nvidia_symlink_target" \
+        "$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE"
+    if ensure_niri_fedora_nvidia_settings_autostart "$TARGET_USER"; then
+        fail 'NVIDIA settings apply must reject a destination symlink'
+    fi
+    grep -Fqx 'preserve me' "$nvidia_symlink_target" ||
+        fail 'NVIDIA settings symlink rejection must not modify its target'
+    rm -f "$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE"
+    ensure_niri_fedora_nvidia_settings_autostart "$TARGET_USER" ||
+        fail 'NVIDIA settings override must recover after removing an unsafe symlink'
+
+    printf '%s\n' inactive > "$NVIDIA_SETTINGS_STATE"
+    printf '%s\n' clean > "$NVIDIA_SETTINGS_FAILED_STATE"
+    export NVIDIA_SETTINGS_STOP_STATUS=5
+    export NVIDIA_SETTINGS_STOP_OUTPUT="Failed to stop $NIRI_FEDORA_NVIDIA_SETTINGS_UNIT: Unit $NIRI_FEDORA_NVIDIA_SETTINGS_UNIT not loaded."
+    export NVIDIA_SETTINGS_RESET_FAILED_STATUS=5
+    export NVIDIA_SETTINGS_RESET_FAILED_OUTPUT="Failed to reset failed state of unit $NIRI_FEDORA_NVIDIA_SETTINGS_UNIT: Unit $NIRI_FEDORA_NVIDIA_SETTINGS_UNIT not loaded."
+    ensure_niri_fedora_nvidia_settings_autostart "$TARGET_USER" ||
+        fail 'NVIDIA settings apply must accept an explicitly not-loaded generated unit'
+    unset NVIDIA_SETTINGS_STOP_STATUS NVIDIA_SETTINGS_STOP_OUTPUT
+    unset NVIDIA_SETTINGS_RESET_FAILED_STATUS NVIDIA_SETTINGS_RESET_FAILED_OUTPUT
+
+    printf '%s\n' active > "$NVIDIA_SETTINGS_STATE"
+    if niri_fedora_nvidia_settings_autostart_satisfied "$TARGET_USER"; then
+        fail 'an active NVIDIA settings generated unit must remain drift'
+    fi
+    printf '%s\n' inactive > "$NVIDIA_SETTINGS_STATE"
+    printf '%s\n' failed > "$NVIDIA_SETTINGS_FAILED_STATE"
+    if niri_fedora_nvidia_settings_autostart_satisfied "$TARGET_USER"; then
+        fail 'a failed NVIDIA settings generated unit must remain drift'
+    fi
+    ensure_niri_fedora_nvidia_settings_autostart "$TARGET_USER" ||
+        fail 'NVIDIA settings apply must clear active/failed runtime drift'
+
+    systemctl_lines_before_no_bus=$(wc -l < "$VIDEOBRIDGE_SYSTEMCTL_LOG")
+    rm -f "$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE"
+    niri_user_bus_is_available() { return 1; }
+    ensure_niri_fedora_nvidia_settings_autostart "$TARGET_USER" ||
+        fail 'NVIDIA settings override must persist before the first login'
+    niri_fedora_nvidia_settings_autostart_satisfied "$TARGET_USER" ||
+        fail 'persistent NVIDIA settings override must satisfy without a user bus'
+    [ "$(wc -l < "$VIDEOBRIDGE_SYSTEMCTL_LOG")" -eq \
+        "$systemctl_lines_before_no_bus" ] ||
+        fail 'no-bus NVIDIA settings convergence must not call systemctl --user'
+    niri_user_bus_is_available() { return 0; }
     lockscreen_binds_copy="$TEST_DIR/fedora-lockscreen-binds-copy.kdl"
     cp "$NIRI_BINDS_FILE" "$lockscreen_binds_copy"
     awk 'tolower($0) !~ /^[[:space:]]*mod[+]alt[+]l([[:space:]]|[{])/' \
@@ -1376,13 +1576,21 @@ EOF
         fail 'Fedora lockscreen contract must reject a missing Mod+Alt+L binding'
     fi
     cp "$lockscreen_binds_copy" "$NIRI_BINDS_FILE"
-    sed 's#spawn-sh "lockscreen[.]sh"#spawn-sh "quickshell -p ~/.config/quickshell/lockscreen/shell.qml"#' \
+    sed "s#spawn \"$NIRI_LOCKSCREEN_SCRIPT_FILE\"#spawn-sh \"quickshell -p ~/.config/quickshell/lockscreen/shell.qml\"#" \
         "$NIRI_BINDS_FILE" > "$NIRI_BINDS_FILE.bypass"
     mv "$NIRI_BINDS_FILE.bypass" "$NIRI_BINDS_FILE"
     if niri_fedora_lockscreen_contract_satisfied; then
         fail 'Fedora lockscreen contract must reject a Mod+Alt+L wrapper bypass'
     fi
     cp "$lockscreen_binds_copy" "$NIRI_BINDS_FILE"
+    sed "s#$NIRI_LOCKSCREEN_SCRIPT_FILE#lockscreen.sh#" \
+        "$NIRI_CONFIG_FILE" > "$NIRI_CONFIG_FILE.bare"
+    mv "$NIRI_CONFIG_FILE.bare" "$NIRI_CONFIG_FILE"
+    if niri_fedora_lockscreen_contract_satisfied; then
+        fail 'Fedora lockscreen contract must reject a bare startup command'
+    fi
+    ensure_niri_fedora_config_file_compatibility "$NIRI_CONFIG_FILE" \
+        "$TARGET_USER" || fail 'Fedora lockscreen startup must repair to an absolute path'
     grep -Fq 'spawn-sh-at-startup "command -v' "$NIRI_CONFIG_FILE" ||
         fail 'Fedora startup commands must use shell guards'
     grep -Fq 'command -v waybar >/dev/null 2>&1' "$NIRI_CONFIG_FILE" ||
@@ -1402,8 +1610,9 @@ EOF
     if grep -Eq 'spawn-sh[^\n]*"sh" "-c"' "$NIRI_CONFIG_FILE" "$NIRI_BINDS_FILE"; then
         fail 'Fedora shell spawns must not emit extra KDL arguments'
     fi
-    grep -Fq 'spawn-at-startup "lockscreen.sh"' "$NIRI_CONFIG_FILE" ||
-        fail 'Fedora lockscreen startup must use lockscreen.sh'
+    grep -Fq "spawn-at-startup \"$NIRI_LOCKSCREEN_SCRIPT_FILE\"" \
+        "$NIRI_CONFIG_FILE" ||
+        fail 'Fedora lockscreen startup must use the absolute managed script'
     grep -Fq '/usr/libexec/kf6/polkit-kde-authentication-agent-1' \
         "$NIRI_CONFIG_FILE" ||
         fail 'Fedora polkit startup must use the KDE authentication agent'
@@ -1458,6 +1667,7 @@ EOF
     printf '%s\n' 'arch legacy configuration' > "$NIRI_CONFIG_FILE"
     printf '%s\n' 'arch legacy bindings' > "$NIRI_BINDS_FILE"
     rm -f "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE"
+    rm -f "$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE"
     arch_copy="$TEST_DIR/arch-config-before-noop.kdl"
     cp "$NIRI_CONFIG_FILE" "$arch_copy"
     export SHORIN_DISTRO=arch
@@ -1467,6 +1677,8 @@ EOF
         fail 'Arch config must remain unchanged by Fedora migration'
     [ ! -e "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE" ] ||
         fail 'Arch compatibility must not create the Fedora Xwayland bridge override'
+    [ ! -e "$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE" ] ||
+        fail 'Arch compatibility must not create the Fedora NVIDIA settings override'
 
     export SHORIN_DISTRO=fedora
     cat > "$NIRI_CONFIG_FILE" <<'EOF'
@@ -1506,6 +1718,8 @@ test_fedora_wallpaper_backend_integration() (
     local videobridge_systemctl_log="$TEST_DIR/fedora-wallpaper-videobridge-systemctl.log"
     local videobridge_state="$TEST_DIR/fedora-wallpaper-videobridge-state"
     local videobridge_pid="$TEST_DIR/fedora-wallpaper-videobridge-pid"
+    local nvidia_settings_state="$TEST_DIR/fedora-wallpaper-nvidia-settings-state"
+    local nvidia_settings_failed_state="$TEST_DIR/fedora-wallpaper-nvidia-settings-failed-state"
 
     export SHORIN_DISTRO=fedora HOME_DIR="$fedora_home"
     unset NIRI_CONFIG_FILE NIRI_BINDS_FILE NIRI_LOCAL_BIN \
@@ -1514,17 +1728,23 @@ test_fedora_wallpaper_backend_integration() (
         NIRI_WAYPAPER_CONFIG_FILE NIRI_FEDORA_WALLPAPER_SESSION_FILE \
         NIRI_FEDORA_AWWW_QUERY_WRAPPER_FILE \
         NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE \
-        NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE
+        NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE \
+        NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE
     desktop_niri_contract_init
     export NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT \
         NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE
+    export NIRI_FEDORA_NVIDIA_SETTINGS_UNIT
     mkdir -p "$videobridge_bin"
     write_fedora_videobridge_systemctl_mock "$videobridge_bin"
     export VIDEOBRIDGE_SYSTEMCTL_LOG="$videobridge_systemctl_log"
     export VIDEOBRIDGE_STATE="$videobridge_state"
     export VIDEOBRIDGE_PID="$videobridge_pid"
+    export NVIDIA_SETTINGS_STATE="$nvidia_settings_state"
+    export NVIDIA_SETTINGS_FAILED_STATE="$nvidia_settings_failed_state"
     printf '%s\n' inactive > "$VIDEOBRIDGE_STATE"
     printf '%s\n' 0 > "$VIDEOBRIDGE_PID"
+    printf '%s\n' active > "$NVIDIA_SETTINGS_STATE"
+    printf '%s\n' failed > "$NVIDIA_SETTINGS_FAILED_STATE"
     export PATH="$videobridge_bin:$PATH"
     niri_user_bus_is_available() { return 0; }
     printf '%s\n' active > "$VIDEOBRIDGE_STATE"
@@ -1732,8 +1952,9 @@ EOF
         "$NIRI_CONFIG_FILE"; then
         fail 'managed Fedora session must remove the old parallel wallpaper startup chain'
     fi
-    grep -Fq 'spawn-sh "lockscreen.sh"' "$NIRI_BINDS_FILE" ||
-        fail 'managed Fedora session must retain the lockscreen wrapper binding'
+    grep -Fq "spawn \"$NIRI_LOCKSCREEN_SCRIPT_FILE\"" \
+        "$NIRI_BINDS_FILE" ||
+        fail 'managed Fedora session must retain the absolute lockscreen binding'
     grep -Fqx '    Mod+Return { spawn "kitty"; }' "$NIRI_BINDS_FILE" ||
         fail 'managed Fedora session must preserve the user binding'
     niri_fedora_session_compatibility_satisfied ||
@@ -1803,6 +2024,16 @@ EOF
     grep -Fq 'config:fedora-xwaylandvideobridge-autostart' <<< "$output" ||
         fail 'desktop verify must report an active generated Xwayland bridge unit'
     printf '%s\n' inactive > "$VIDEOBRIDGE_STATE"
+
+    rm -f "$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE"
+    run_desktop_niri_check
+    grep -Fq 'config:fedora-nvidia-settings-autostart' <<< "$output" ||
+        fail 'desktop check must report a missing NVIDIA settings override independently'
+    run_desktop_niri_verify
+    grep -Fq 'config:fedora-nvidia-settings-autostart' <<< "$output" ||
+        fail 'desktop verify must report a missing NVIDIA settings override independently'
+    ensure_niri_fedora_nvidia_settings_autostart "$TARGET_USER" ||
+        fail 'NVIDIA settings override must be restorable after check/verify drift'
 
     state_copy="$TEST_DIR/fedora-wallpaper-check-state-copy"
     cp "$NIRI_QUICKSHELL_SOURCE_STATE_FILE" "$state_copy"
@@ -2069,6 +2300,14 @@ BIN_DIR="$TEST_DIR/mock-bin"
 PACKAGE_SOURCES="$TEST_DIR/package-sources"
 mkdir -p "$PROFILE_DIR" "$BIN_DIR" "$PACKAGE_SOURCES"
 mkdir -p "$HOME_DIR/Pictures/Wallpapers" "$HOME_DIR/Templates"
+mkdir -p "$NIRI_LONGSHOT_VENV_DIR/bin"
+printf 'include-system-site-packages = true\n' \
+    > "$NIRI_LONGSHOT_VENV_DIR/pyvenv.cfg"
+cat > "$NIRI_LONGSHOT_VENV_DIR/bin/python" <<'EOF'
+#!/usr/bin/env bash
+[ "${1:-}" = -I ] && [ "${2:-}" = -c ]
+EOF
+chmod 755 "$NIRI_LONGSHOT_VENV_DIR/bin/python"
 printf 'wallpaper\n' > "$NIRI_DEFAULT_WALLPAPER_FILE"
 touch "$HOME_DIR/Templates/new"
 printf '#!/usr/bin/env bash\n' > "$HOME_DIR/Templates/new.sh"
@@ -2122,6 +2361,23 @@ cmp -s "$CHECK_NO_SIDE_EFFECT_COPY/waypaper" "$NIRI_WAYPAPER_CONFIG_FILE" ||
 cmp -s "$CHECK_NO_SIDE_EFFECT_COPY/quickshell-state" \
     "$NIRI_QUICKSHELL_SOURCE_STATE_FILE" ||
     fail 'desktop check must not rewrite QuickShell source state'
+
+mv "$NIRI_LONGSHOT_VENV_DIR" "$NIRI_LONGSHOT_VENV_DIR.missing"
+status=0
+output=$(PATH="$BIN_DIR:$PATH" SHORIN_PROFILE_DIR="$PROFILE_DIR" \
+    PACKAGE_SOURCE_DIR="$PACKAGE_SOURCES" \
+    bash "$ROOT_DIR/scripts/modules/desktop-niri.sh" check 2>&1) || status=$?
+[ "$status" -eq 10 ] || fail 'a missing longshot runtime must report desktop drift'
+grep -Fq 'runtime:longshot-python' <<< "$output" ||
+    fail 'desktop check must identify longshot Python runtime drift'
+status=0
+output=$(PATH="$BIN_DIR:$PATH" SHORIN_PROFILE_DIR="$PROFILE_DIR" \
+    PACKAGE_SOURCE_DIR="$PACKAGE_SOURCES" \
+    bash "$ROOT_DIR/scripts/modules/desktop-niri.sh" verify 2>&1) || status=$?
+[ "$status" -eq 1 ] || fail 'a missing longshot runtime must fail desktop verify'
+grep -Fq 'runtime:longshot-python' <<< "$output" ||
+    fail 'desktop verify must identify longshot Python runtime failure'
+mv "$NIRI_LONGSHOT_VENV_DIR.missing" "$NIRI_LONGSHOT_VENV_DIR"
 
 mv "$NIRI_STARSHIP_CONFIG_FILE" "$NIRI_STARSHIP_CONFIG_FILE.missing"
 status=0

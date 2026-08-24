@@ -78,6 +78,33 @@ cat > "$BIN_DIR/systemctl" <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 printf 'systemctl:%s\n' "$*" >> "${FEDORA_EDGE_CALLS:?}"
+action=${1:-}
+unit=${!#}
+case "$action" in
+    show)
+        case "$unit" in
+            libvirtd*.socket|libvirtd.service|virt*.socket|virt*.service)
+                printf 'loaded\n'
+                ;;
+        esac
+        ;;
+    is-enabled)
+        case "$unit" in
+            virt*.socket) printf 'enabled\n' ;;
+            libvirtd*.socket|libvirtd.service|virt*.service)
+                printf 'disabled\n'
+                exit 1
+                ;;
+            *) printf 'enabled\n' ;;
+        esac
+        ;;
+    is-active)
+        case "$unit" in
+            virt*.socket) exit 0 ;;
+            libvirtd*.socket|libvirtd.service|virt*.service) exit 3 ;;
+        esac
+        ;;
+esac
 exit 0
 EOF
 cat > "$BIN_DIR/rime_dict_manager" <<'EOF'
@@ -114,11 +141,19 @@ if [ "${1:-}" = -c ]; then
     [ "${2:-}" = qemu:///system ] || exit 3
     shift 2
 fi
-if [ "${1:-}" = net-info ] && [ "${2:-}" = default ]; then
-    printf 'Name: default\nActive: yes\nAutostart: yes\n'
-    exit 0
-fi
-exit 0
+case "${1:-}" in
+    uri)
+        printf 'qemu:///system\n'
+        ;;
+    list)
+        [ "${2:-}" = --all ] && [ "${3:-}" = --name ] || exit 3
+        ;;
+    net-info)
+        [ "${2:-}" = default ] || exit 3
+        printf 'Name: default\nActive: yes\nAutostart: yes\n'
+        ;;
+    *) exit 3 ;;
+esac
 EOF
 cat > "$BIN_DIR/dbus-run-session" <<'EOF'
 #!/usr/bin/env bash
@@ -219,6 +254,9 @@ FEDORA_CONTRACT=$(env SHORIN_ROOT="$ROOT_DIR" SHORIN_DISTRO=fedora \
         printf "virt:%s\n" "${VIRTUALIZATION_PACKAGES[*]}"; \
         printf "rime:%s\n" "${RIME_REQUIRED_PACKAGES[*]}"; \
         printf "cmd:%s\n" "${VIRTUALIZATION_COMMANDS[*]}"; \
+        printf "provider:%s\n" "$VIRTUALIZATION_PROVIDER"; \
+        printf "modular:%s\n" "${VIRTUALIZATION_MODULAR_REQUIRED_UNITS[*]}"; \
+        printf "monolithic:%s\n" "${VIRTUALIZATION_MONOLITHIC_REQUIRED_UNITS[*]}"; \
         printf "service:%s\n" "$VIRTUALIZATION_SERVICE"; \
         printf "network:%s\n" "$VIRTUALIZATION_DEFAULT_NETWORK_XML"')
 grep -Fq 'libvirt-daemon libvirt-daemon-kvm libvirt-client libvirt-daemon-config-network' \
@@ -228,8 +266,16 @@ grep -Fqx 'rime:librime-tools' <<< "$FEDORA_CONTRACT" ||
     fail 'Fedora Rime contract must declare librime-tools'
 grep -Fqx 'cmd:virsh' <<< "$FEDORA_CONTRACT" ||
     fail 'Virtualization contract must declare virsh as a prerequisite'
+grep -Fqx 'provider:auto' <<< "$FEDORA_CONTRACT" ||
+    fail 'Virtualization contract must default to automatic provider selection'
+grep -Fqx \
+    'modular:virtqemud.socket virtproxyd.socket virtnetworkd.socket virtinterfaced.socket virtnodedevd.socket virtnwfilterd.socket virtsecretd.socket virtstoraged.socket' \
+    <<< "$FEDORA_CONTRACT" ||
+    fail 'Fedora virtualization contract must declare complete modular sockets'
+grep -Fqx 'monolithic:libvirtd.socket' <<< "$FEDORA_CONTRACT" ||
+    fail 'Virtualization contract must retain a complete monolithic fallback'
 grep -Fqx 'service:libvirtd.service' <<< "$FEDORA_CONTRACT" ||
-    fail 'Virtualization contract must declare libvirtd.service'
+    fail 'Virtualization compatibility alias must retain libvirtd.service'
 grep -Fqx 'network:/usr/share/libvirt/networks/default.xml' <<< "$FEDORA_CONTRACT" ||
     fail 'Virtualization contract must declare the default network artifact'
 ! grep -Fq bridge-utils <<< "$FEDORA_CONTRACT" ||

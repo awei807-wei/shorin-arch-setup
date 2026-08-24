@@ -89,17 +89,31 @@ fedora_zip_archive_types_safe() {
 
 fedora_download_verified_asset() {
     local url=$1 digest=$2 output=$3 user=${4:-${TARGET_USER:-}}
-    local home=${5:-${HOME_DIR:-}}
+    local home=${5:-${HOME_DIR:-}} expected_size=${6:-} actual_size
 
     if [ -n "$user" ] && [ -n "$home" ] && id -u "$user" >/dev/null 2>&1; then
         fedora_target_user_exec "$user" "$home" \
             curl --fail --location --retry 3 --proto '=https' --tlsv1.2 \
             "$url" -o "$output" || return 1
-        fedora_target_user_exec "$user" "$home" sha256sum -c - \
-            <<< "${digest}  ${output}" >/dev/null 2>&1
+        if [ -n "$expected_size" ]; then
+            actual_size=$(fedora_target_user_exec "$user" "$home" \
+                stat -c '%s' "$output") || return 1
+        fi
     else
         curl --fail --location --retry 3 --proto '=https' --tlsv1.2 \
             "$url" -o "$output" || return 1
+        if [ -n "$expected_size" ]; then
+            actual_size=$(stat -c '%s' "$output") || return 1
+        fi
+    fi
+    if [ -n "$expected_size" ] && [ "$actual_size" != "$expected_size" ]; then
+        error "Downloaded asset has size $actual_size bytes; expected $expected_size: $url"
+        return 1
+    fi
+    if [ -n "$user" ] && [ -n "$home" ] && id -u "$user" >/dev/null 2>&1; then
+        fedora_target_user_exec "$user" "$home" sha256sum -c - \
+            <<< "${digest}  ${output}" >/dev/null 2>&1
+    else
         printf '%s  %s\n' "$digest" "$output" |
             sha256sum -c - >/dev/null 2>&1
     fi
@@ -133,6 +147,7 @@ fedora_mdi_font_file_name_allowed() {
 fedora_collect_font_sources() {
     local target=$1 work=$2 output=$3 user=${4:-${TARGET_USER:-}}
     local home=${5:-${HOME_DIR:-}} archive extract path source
+    local maple_ttf_count=0
 
     fedora_font_source_contract_valid "$target" || return 1
     case "$target" in
@@ -167,7 +182,8 @@ fedora_collect_font_sources() {
             fedora_target_user_exec "$user" "$home" mkdir -p "$extract" ||
                 return 1
             fedora_download_verified_asset "$FEDORA_JETBRAINS_MAPLE_URL" \
-                "$FEDORA_JETBRAINS_MAPLE_SHA256" "$archive" "$user" "$home" || return 1
+                "$FEDORA_JETBRAINS_MAPLE_SHA256" "$archive" "$user" "$home" \
+                "$FEDORA_JETBRAINS_MAPLE_SIZE" || return 1
             fedora_font_archive_entries_safe "$archive" maple "$user" "$home" || return 1
             fedora_zip_archive_types_safe "$archive" "$user" "$home" || return 1
             fedora_target_user_exec "$user" "$home" \
@@ -178,8 +194,12 @@ fedora_collect_font_sources() {
             while IFS= read -r -d '' path; do
                 fedora_maple_font_file_name_allowed "$path" || return 1
                 printf '%s\n' "$path" >> "$output"
+                maple_ttf_count=$((maple_ttf_count + 1))
             done < <(find "$extract" -type f -name '*.ttf' -print0)
-            [ -s "$output" ] || return 1
+            [ "$maple_ttf_count" -eq "$FEDORA_JETBRAINS_MAPLE_TTF_COUNT" ] || {
+                error "Fusion Maple archive contains $maple_ttf_count TTF files; expected $FEDORA_JETBRAINS_MAPLE_TTF_COUNT."
+                return 1
+            }
             ;;
         material-design-icons)
             source="$work/materialdesignicons-webfont.ttf"

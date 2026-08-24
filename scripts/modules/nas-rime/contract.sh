@@ -132,19 +132,46 @@ rime_installation_matches() {
     local file=${1:-$RIME_INSTALLATION_FILE}
 
     [ -r "$file" ] || return 1
-    awk -v installation_id="\"$RIME_INSTALLATION_ID\"" \
-        -v sync_dir="\"$RIME_SYNC_DIR\"" '
+    awk -v installation_id="$RIME_INSTALLATION_ID" \
+        -v sync_dir="$RIME_SYNC_DIR" '
+        function trim(value) {
+            sub(/^[[:space:]]+/, "", value)
+            sub(/[[:space:]]+$/, "", value)
+            return value
+        }
+        function scalar_matches(value, expected, quoted, rest) {
+            value=trim(value)
+
+            # Rime may serialize the same YAML string as a quoted or plain
+            # scalar.  Accept both canonical spellings while rejecting any
+            # trailing non-comment content.
+            quoted="\"" expected "\""
+            if (index(value, quoted) == 1) {
+                rest=substr(value, length(quoted) + 1)
+                return rest ~ /^[[:space:]]*$/ ||
+                    rest ~ /^[[:space:]]+#/
+            }
+            quoted="\047" expected "\047"
+            if (index(value, quoted) == 1) {
+                rest=substr(value, length(quoted) + 1)
+                return rest ~ /^[[:space:]]*$/ ||
+                    rest ~ /^[[:space:]]+#/
+            }
+
+            sub(/[[:space:]]+#.*$/, "", value)
+            return trim(value) == expected
+        }
         /^[[:space:]]*installation_id[[:space:]]*:/ {
             value=$0
             sub(/^[[:space:]]*installation_id[[:space:]]*:[[:space:]]*/, "", value)
             installation_count++
-            if (value == installation_id) installation_matches++
+            if (scalar_matches(value, installation_id)) installation_matches++
         }
         /^[[:space:]]*sync_dir[[:space:]]*:/ {
             value=$0
             sub(/^[[:space:]]*sync_dir[[:space:]]*:[[:space:]]*/, "", value)
             sync_count++
-            if (value == sync_dir) sync_matches++
+            if (scalar_matches(value, sync_dir)) sync_matches++
         }
         END {
             exit !(installation_count == 1 && installation_matches == 1 &&
@@ -194,4 +221,12 @@ nas_rime_online() {
     command -v timeout >/dev/null 2>&1 || return 2
     mountpoint -q "$NAS_LOCAL_PATH" || return 1
     timeout 3 ls "$NAS_LOCAL_PATH" >/dev/null 2>&1
+}
+
+nas_rime_reload_systemd_for_fstab() {
+    local fstab=${1:-/etc/fstab}
+
+    [ "$fstab" = /etc/fstab ] || return 0
+    command -v systemctl >/dev/null 2>&1 || return 2
+    systemctl daemon-reload
 }

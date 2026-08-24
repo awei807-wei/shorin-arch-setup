@@ -18,13 +18,14 @@ for command in "${VIRTUALIZATION_COMMANDS[@]}"; do
         die "Required virtualization command is unavailable: $command"
 done
 usermod -a -G libvirt,kvm,input "$TARGET_USER"
-ensure_service_started "$VIRTUALIZATION_SERVICE"
+ensure_virtualization_provider
+ensure_virtualization_default_network
 
 glib-compile-schemas /usr/share/glib-2.0/schemas/
 ensure_virtualization_gsetting "$TARGET_USER" "$HOME_DIR" \
     uris "['qemu:///system']"
 ensure_virtualization_gsetting "$TARGET_USER" "$HOME_DIR" \
     autoconnect "['qemu:///system']"
-ensure_virtualization_default_network
+virtualization_provider_ready
 
 success 'Virtualization target converged.'

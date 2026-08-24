@@ -59,10 +59,16 @@ niri_path_tree_has_external_symlink() {
 }
 
 niri_safe_install_directory() {
-    local owner=$1 group=$2 path=$3 current=/ component
+    local owner=$1 group=$2 path=$3 current=/ component home owner_uid
+    local metadata uid gid mode
     local -a components=()
 
     niri_path_is_safe_no_symlink "$path" || return
+    home=${HOME_DIR:-}
+    [ "$home" = / ] || home=${home%/}
+    if [ -n "$home" ]; then
+        owner_uid=$(id -u "$owner") || return 2
+    fi
     IFS=/ read -r -a components <<< "${path#/}"
     for component in "${components[@]}"; do
         [ -n "$component" ] || continue
@@ -77,10 +83,54 @@ niri_safe_install_directory() {
         }
         if [ -e "$current" ]; then
             [ -d "$current" ] || return 1
+            if [ -n "$home" ]; then
+                case "$current" in
+                    "$home"/*)
+                        metadata=$(stat -c '%u:%g:%a' -- "$current") || return 1
+                        IFS=: read -r uid gid mode <<< "$metadata"
+                        if [ "$uid" = "$owner_uid" ]; then
+                            # A target-user directory is outside the migration
+                            # boundary, including its existing mode and group.
+                            continue
+                        fi
+                        if [ "$uid:$gid:$mode" = 0:0:755 ]; then
+                            # Older installer revisions created intermediate
+                            # home directories as root:root 0755.  This exact
+                            # legacy footprint is safe to migrate; no broader
+                            # ownership repair is attempted.
+                            chown "$owner:$group" "$current" || return 1
+                            continue
+                        fi
+                        if [ "$uid:$gid" = 0:0 ]; then
+                            NIRI_PATH_SAFETY_REASON="unsafe-mode:$current:$mode"
+                        else
+                            NIRI_PATH_SAFETY_REASON="foreign-owner:$current:$uid:$gid"
+                        fi
+                        return 1
+                        ;;
+                esac
+            fi
         else
             mkdir -m 755 -- "$current" || return 1
+            # mkdir runs in the privileged installer context.  When it has
+            # to create an intermediate directory below the target home (for
+            # example ~/Pictures before ~/Pictures/Wallpapers), claim only
+            # that newly created directory.  Existing user directories are
+            # deliberately left untouched.
+            if [ -n "$home" ]; then
+                case "$current" in
+                    "$home"|"$home"/*)
+                        chown "$owner:$group" "$current" || return 1
+                        ;;
+                esac
+            fi
         fi
     done
+    if [ -n "$home" ]; then
+        case "$path" in
+            "$home"|"$home"/*) return 0 ;;
+        esac
+    fi
     chown "$owner:$group" "$path"
 }
 

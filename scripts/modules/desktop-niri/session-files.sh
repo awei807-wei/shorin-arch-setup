@@ -84,6 +84,25 @@ niri_fish_fd_rdd_satisfied() {
 }
 
 niri_fish_config_contract() {
+    if platform_is_fedora; then
+        # Fedora 44 ships thefuck 3.32 on Python 3.14, where importing
+        # distutils fails and ABRT records every attempted alias generation.
+        # A stderr redirect cannot prevent that report, so the managed Fish
+        # block must not execute the incompatible provider at all.
+        cat <<'EOF'
+# >>> shorin fish init >>>
+if status is-interactive
+    if command -q starship
+        starship init fish | source
+    end
+    if command -q zoxide
+        zoxide init fish --cmd cd | source
+    end
+end
+# <<< shorin fish init <<<
+EOF
+        return
+    fi
     cat <<'EOF'
 # >>> shorin fish init >>>
 if status is-interactive

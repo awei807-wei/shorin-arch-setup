@@ -17,22 +17,26 @@ FEDORA_CLASH_VERGE_VERSION_PINNED=2.5.2
 FEDORA_CLASH_VERGE_ASSET_PINNED=Clash.Verge-2.5.2-1.x86_64.rpm
 FEDORA_CLASH_VERGE_URL_PINNED=https://github.com/clash-verge-rev/clash-verge-rev/releases/download/v2.5.2/Clash.Verge-2.5.2-1.x86_64.rpm
 FEDORA_CLASH_VERGE_SHA256_PINNED=5b8edb94cd270b1d4655217378aeddf37a735151574ddb8853128bdd1ca86454
+FEDORA_CLASH_VERGE_RPM_PROVENANCE_PINNED=$'clash-verge\t0\t2.5.2\t1\tx86_64\tc3a9c3e9ad8e91e8db3820783f9915efef17c7e8050b9332929563e4af779835\t11e4561d4191c541a7750aab8ddc459e3704f97e5154a6125dec51cf3cc700f7'
 
 FEDORA_LSFG_VK_VERSION_PINNED=1.0.0
 FEDORA_LSFG_VK_ASSET_PINNED=lsfg-vk-1.0.0.x86_64.rpm
 FEDORA_LSFG_VK_URL_PINNED=https://github.com/PancakeTAS/lsfg-vk/releases/download/v1.0.0/lsfg-vk-1.0.0.x86_64.rpm
 FEDORA_LSFG_VK_SHA256_PINNED=77749bbd5bddd19ea38b090e0cec8912e9285a92b9345429df924dc33cc47786
+FEDORA_LSFG_VK_RPM_PROVENANCE_PINNED=$'lsfg-vk\t0\t1.0.0\t1\tx86_64\t46267aa17d5e27f7b1aca09e0b9322f1ec05429ba9ee2fa074000417dffe1d75\tc7f13d7db5f61512a6ca0c483ef09f54ec3abfdae78ae034149a4c5f6b396b8d'
 
 FEDORA_MARK_SHOT_VERSION_PINNED=0.1.48
 FEDORA_MARK_SHOT_ASSET_PINNED=mark-shot_0.1.48_fedora_x86_64.rpm
 FEDORA_MARK_SHOT_URL_PINNED=https://github.com/jswysnemc/mark-shot/releases/download/v0.1.48/mark-shot_0.1.48_fedora_x86_64.rpm
 FEDORA_MARK_SHOT_SHA256_PINNED=a037e2733480cf0bb3e671472c6fe9d33b8189ff174c1f13972d1a0cfaa4d1e2
+FEDORA_MARK_SHOT_RPM_PROVENANCE_PINNED=$'mark-shot\t0\t0.1.48\t1.fc44\tx86_64\tb3a40a565810570fc14404be7fe832cddc05e56c9f442ab0d418c5e1b523858e\t1b9e7172b68aaa67680b935917831b9b3c12c67029625d930f2f336c0da790f8'
 
 FEDORA_LINUXQQ_VERSION_PINNED=3.2.32
 FEDORA_LINUXQQ_ASSET_PINNED=QQ_3.2.32_260812_x86_64_01.rpm
 FEDORA_LINUXQQ_URL_PINNED=https://qqdl.gtimg.cn/qqfile/QQNT/9.9.33/release/3f89efc5/QQ_3.2.32_260812_x86_64_01.rpm
 FEDORA_LINUXQQ_SIZE_PINNED=187341996
 FEDORA_LINUXQQ_SHA256_PINNED=6ce82940f7f94d18d003ed93cb3ab7feaa44a160fbdc45f8f01b4cf08bf34ddf
+FEDORA_LINUXQQ_RPM_PROVENANCE_PINNED=$'linuxqq\t0\t3.2.32_52194\t1\tx86_64\t49348e2684d7d182fd27e7f1a0820833236cd690d760e3588f841ec5ef7c5366\ta2848e7397185a317ffd35ba5659396ab3ae17705d2fb7b2124507027d7046cc'
 
 FEDORA_WECHAT_VERSION_PINNED=4.1.1.8
 FEDORA_WECHAT_RPM_RELEASE_PINNED=1
@@ -40,6 +44,7 @@ FEDORA_WECHAT_ASSET_PINNED=WeChatLinux_x86_64.rpm
 FEDORA_WECHAT_URL_PINNED=https://dldir1v6.qq.com/weixin/Universal/Linux/WeChatLinux_x86_64.rpm
 FEDORA_WECHAT_SIZE_PINNED=321286358
 FEDORA_WECHAT_SHA256_PINNED=4aec761edac4604b0b301f9ac0385b8a9c46452e8a5783485eb3905ecdd22e8c
+FEDORA_WECHAT_RPM_PROVENANCE_PINNED=$'wechat\t0\t4.1.1.8\t1\tx86_64\t60f4e07a36ef192efb835643d06a5e4b822e5d50c65299d3792bf5d03ad96821\t05c14cf51fcdde80280426c72a2b0bc9f51b56b30d73d7a9c410e04a52a22704'
 
 FEDORA_THORIUM_TAG_PINNED=M151.0.7922.72
 FEDORA_THORIUM_VERSION_PINNED=151.0.7922.72
@@ -47,6 +52,7 @@ FEDORA_THORIUM_ASSET_PINNED=thorium-browser_151.0.7922.72_SSE3.rpm
 FEDORA_THORIUM_URL_PINNED=https://github.com/gz83/thorium/releases/download/M151.0.7922.72/thorium-browser_151.0.7922.72_SSE3.rpm
 FEDORA_THORIUM_SIZE_PINNED=228988770
 FEDORA_THORIUM_SHA256_PINNED=6cd793ac245ff7f0e7b76a1dc9b2c694d996b3eefb4a9ee40e39dc5e0ae11f45
+FEDORA_THORIUM_RPM_PROVENANCE_PINNED=$'thorium-browser\t0\t151.0.7922.72\t1\tx86_64\t078e6b719a2319fbd55b85d76d0cbf2ac13de8f70c63719be4ab2b0ae376e389\tcd1f8cde6a1c67f0b7cfe3eaf99b51c8939147c1b86959399f3b8bbed687c760'
 
 FEDORA_VICINAE_VERSION=$FEDORA_VICINAE_VERSION_PINNED
 FEDORA_VICINAE_ASSET=$FEDORA_VICINAE_ASSET_PINNED
@@ -87,6 +93,56 @@ FEDORA_THORIUM_SHA256=$FEDORA_THORIUM_SHA256_PINNED
 # 通过全局变量暴露，避免命令替换在子 shell 中执行函数并丢失
 # FEDORA_APPLICATION_PENDING_REASON。
 FEDORA_OFFICIAL_DOWNLOAD_RESULT=''
+FEDORA_OFFICIAL_RPM_PROVENANCE_QUERY='%{NAME}\t%{EPOCHNUM}\t%{VERSION}\t%{RELEASE}\t%{ARCH}\t%{SHA256HEADER}\t%{PAYLOADSHA256}\n'
+
+fedora_fixed_official_rpm_provenance() {
+    case "$1" in
+        clash-verge-rev)
+            printf '%s\n' "$FEDORA_CLASH_VERGE_RPM_PROVENANCE_PINNED" ;;
+        linuxqq-appimage)
+            printf '%s\n' "$FEDORA_LINUXQQ_RPM_PROVENANCE_PINNED" ;;
+        wechat-appimage)
+            printf '%s\n' "$FEDORA_WECHAT_RPM_PROVENANCE_PINNED" ;;
+        lsfg-vk-bin)
+            printf '%s\n' "$FEDORA_LSFG_VK_RPM_PROVENANCE_PINNED" ;;
+        thorium-browser-bin)
+            printf '%s\n' "$FEDORA_THORIUM_RPM_PROVENANCE_PINNED" ;;
+        mark-shot)
+            printf '%s\n' "$FEDORA_MARK_SHOT_RPM_PROVENANCE_PINNED" ;;
+        *) return 2 ;;
+    esac
+}
+
+fedora_fixed_official_rpm_target_satisfied() {
+    local target=$1 expected package metadata status=0
+
+    expected=$(fedora_fixed_official_rpm_provenance "$target") || return
+    IFS=$'\t' read -r package _ <<< "$expected"
+    command -v rpm >/dev/null 2>&1 || return 2
+    metadata=$(rpm -q --qf "$FEDORA_OFFICIAL_RPM_PROVENANCE_QUERY" \
+        "$package" 2>/dev/null) ||
+        status=$?
+    case "$status" in
+        0) ;;
+        1) return 1 ;;
+        *) return 2 ;;
+    esac
+    grep -Fqx "$expected" <<< "$metadata"
+}
+
+fedora_require_fixed_official_rpm_target() {
+    local target=$1 label=$2 expected package status=0 display
+
+    fedora_fixed_official_rpm_target_satisfied "$target" || status=$?
+    [ "$status" -eq 0 ] && return 0
+    expected=$(fedora_fixed_official_rpm_provenance "$target") || return
+    IFS=$'\t' read -r package _ <<< "$expected"
+    display=${expected//$'\t'/,}
+    error "$label did not converge to the pinned installed RPM provenance: $display"
+    error "Inspect the installed build with: rpm -q --qf '$FEDORA_OFFICIAL_RPM_PROVENANCE_QUERY' $package"
+    error 'No automatic downgrade, package erasure, or provider replacement was attempted.'
+    return "$status"
+}
 
 FEDORA_OFFICIAL_CACHE_LIB_DIR=${SHORIN_LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}
 source "$FEDORA_OFFICIAL_CACHE_LIB_DIR/fedora-official-cache.sh"
@@ -123,6 +179,14 @@ fedora_verify_official_asset_file() {
     }
 }
 
+fedora_official_asset_file_matches() {
+    local file=$1 expected=$2
+
+    [ -f "$file" ] && [ ! -L "$file" ] && [ -s "$file" ] || return 1
+    printf '%s  %s\n' "$expected" "$file" |
+        sha256sum -c - >/dev/null 2>&1
+}
+
 fedora_download_verified_official_asset() {
     local url=$1 asset=$2 expected=$3 cache_dir=$4 expected_size=${5:-}
     local target_user=${6:-${TARGET_USER:-}} home=${7:-${HOME_DIR:-}}
@@ -145,14 +209,17 @@ fedora_download_verified_official_asset() {
     }
     fedora_prepare_official_cache_dir "$cache_dir" "$target_user" "$home" || return 1
     destination="$cache_dir/$asset"
-    if fedora_verify_official_asset_file "$destination" "$expected" "$asset" &&
-        { [ -z "$expected_size" ] || [ "$(stat -c '%s' "$destination")" = "$expected_size" ]; }; then
-        fedora_official_repair_managed_artifact_metadata "$destination" || return 1
-        FEDORA_OFFICIAL_DOWNLOAD_RESULT=$destination
-        printf '%s\n' "$destination"
-        return 0
+    if [ -e "$destination" ] || [ -L "$destination" ]; then
+        if fedora_official_asset_file_matches "$destination" "$expected" &&
+            { [ -z "$expected_size" ] || [ "$(stat -c '%s' "$destination")" = "$expected_size" ]; }; then
+            fedora_official_repair_managed_artifact_metadata "$destination" || return 1
+            FEDORA_OFFICIAL_DOWNLOAD_RESULT=$destination
+            printf '%s\n' "$destination"
+            return 0
+        fi
+        warn "Cached Fedora official asset is invalid; downloading a clean copy: $destination"
+        rm -f -- "$destination"
     fi
-    rm -f -- "$destination"
     temporary=$(mktemp "$cache_dir/.${asset}.XXXXXX")
     if ! curl --fail --location --retry 3 --proto '=https' --tlsv1.2 \
         "$url" -o "$temporary"; then
@@ -209,7 +276,7 @@ fedora_install_official_rpm_target() {
         # none exists.
         fedora_install_local_rpm "$label" "$pattern" || status=$?
         if [ "$status" -eq 0 ]; then
-            fedora_application_target_satisfied "$package" "$user" "$home"
+            fedora_require_fixed_official_rpm_target "$package" "$label"
             return
         fi
         [ "$status" -eq "$RC_SKIPPED" ] || [ "$status" -eq 1 ] || return "$status"
@@ -228,62 +295,42 @@ fedora_install_official_rpm_target() {
     fi
     dnf install -y "$downloaded" || {
         error "Failed to install verified Fedora official RPM: $downloaded"
+        error 'DNF may have retained a newer or conflicting EVR; no automatic downgrade or package erasure was attempted.'
         return 1
     }
-    fedora_application_target_satisfied "$package" "$user" "$home"
+    fedora_require_fixed_official_rpm_target "$package" "$label"
 }
 
 fedora_install_verified_official_rpm_file() {
     local package=$1 user=$2 home=$3 label=$4 file=$5 expected=$6
-    local identity_pattern=${7:-}
 
     fedora_verify_official_asset_file "$file" "$expected" "$label" || return
-    if [ -n "$identity_pattern" ]; then
-        fedora_verify_official_rpm_identity \
-            "$file" "$label" "$identity_pattern" || return
-    else
-        fedora_official_rpm_identity_for_target \
-            "$package" "$file" "$label" || return
-    fi
+    fedora_official_rpm_identity_for_target \
+        "$package" "$file" "$label" || return
     dnf install -y "$file" || {
         error "Failed to install verified Fedora official RPM: $file"
+        error 'DNF may have retained a newer or conflicting EVR; no automatic downgrade or package erasure was attempted.'
         return 1
     }
-    fedora_application_target_satisfied "$package" "$user" "$home"
+    fedora_require_fixed_official_rpm_target "$package" "$label"
 }
 
 fedora_official_rpm_identity_for_target() {
-    local package=$1 file=$2 label=$3 pattern
+    local target=$1 file=$2 label=$3 expected metadata display
 
-    case "$package" in
-        clash-verge-rev) pattern='([Cc]lash|[Vv]erge)' ;;
-        lsfg-vk-bin) pattern='lsfg[-_]?vk' ;;
-        mark-shot) pattern='[Mm]ark[-_]?shot' ;;
-        wechat-appimage) pattern='^wechat$' ;;
-        thorium-browser-bin) pattern='^thorium-browser$' ;;
-        *) return 0 ;;
-    esac
-    fedora_verify_official_rpm_identity "$file" "$label" "$pattern"
-}
-
-fedora_verify_official_rpm_identity() {
-    local file=$1 label=$2 expected_pattern=$3 metadata package architecture
-
+    expected=$(fedora_fixed_official_rpm_provenance "$target") || return
     command -v rpm >/dev/null 2>&1 || {
         error "rpm is required to inspect the $label package identity."
         return 1
     }
-    metadata=$(rpm -qp --qf '%{NAME} %{ARCH}\n' "$file" 2>/dev/null) || {
+    metadata=$(rpm -qp --qf "$FEDORA_OFFICIAL_RPM_PROVENANCE_QUERY" \
+        "$file" 2>/dev/null) || {
         error "Unable to inspect RPM metadata for $label: $file"
         return 1
     }
-    read -r package architecture <<< "$metadata"
-    [ "$architecture" = x86_64 ] || {
-        error "$label RPM is not an x86_64 package: $architecture"
-        return 1
-    }
-    [[ "$package" =~ $expected_pattern ]] || {
-        error "$label RPM has an unexpected package name: $package"
+    [ "$metadata" = "$expected" ] || {
+        display=${metadata//$'\t'/,}
+        error "$label RPM provenance does not match the pinned asset: $display"
         return 1
     }
 }
@@ -303,7 +350,7 @@ fedora_install_official_linuxqq() {
     # Keep compatibility with explicit local-artifact test/provider hooks.
     fedora_install_local_rpm 'Linux QQ' "$pattern" || status=$?
     if [ "$status" -eq 0 ]; then
-        fedora_application_target_satisfied "$package" "$user" "$home"
+        fedora_require_fixed_official_rpm_target "$package" 'Linux QQ'
         return
     fi
     [ "$status" -eq "$RC_SKIPPED" ] || [ "$status" -eq 1 ] || return "$status"
@@ -315,11 +362,12 @@ fedora_install_official_linuxqq() {
         "$FEDORA_LINUXQQ_SHA256" "$cache_dir" "$FEDORA_LINUXQQ_SIZE" \
         "$user" "$home" >/dev/null || return
     downloaded=$FEDORA_OFFICIAL_DOWNLOAD_RESULT
-    fedora_verify_official_rpm_identity "$downloaded" 'Linux QQ' \
-        '([Qq][Qq]|[Ll]inux[Qq][Qq])' || return
+    fedora_official_rpm_identity_for_target \
+        "$package" "$downloaded" 'Linux QQ' || return
     dnf install -y "$downloaded" || {
         error "Failed to install verified Fedora Linux QQ RPM: $downloaded"
+        error 'DNF may have retained a newer or conflicting EVR; no automatic downgrade or package erasure was attempted.'
         return 1
     }
-    fedora_application_target_satisfied "$package" "$user" "$home"
+    fedora_require_fixed_official_rpm_target "$package" 'Linux QQ'
 }

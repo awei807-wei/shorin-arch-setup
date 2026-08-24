@@ -92,6 +92,12 @@ desktop_niri_inspect() {
         niri_starship_config_deployed
     desktop_niri_expect "$phase" config:quickshell-tree \
         niri_quickshell_deployment_state_satisfied
+    desktop_niri_expect "$phase" runtime:longshot-python \
+        niri_longshot_runtime_satisfied "$TARGET_USER"
+    if platform_is_fedora; then
+        desktop_niri_expect "$phase" runtime:vicinae-gif-recorder \
+            niri_fedora_recorder_satisfied "$TARGET_USER"
+    fi
     desktop_niri_expect "$phase" config:wallpaper-scripts \
         niri_wallpaper_scripts_satisfied
     desktop_niri_expect "$phase" config:matugen-starship-output \
@@ -131,6 +137,8 @@ desktop_niri_inspect() {
     if platform_is_fedora; then
         desktop_niri_expect "$phase" config:fedora-xwaylandvideobridge-autostart \
             niri_fedora_xwayland_videobridge_autostart_satisfied
+        desktop_niri_expect "$phase" config:fedora-nvidia-settings-autostart \
+            niri_fedora_nvidia_settings_autostart_satisfied "$TARGET_USER"
         desktop_niri_expect "$phase" config:fedora-drkonqi \
             niri_fedora_drkonqi_satisfied "$TARGET_USER"
         desktop_niri_expect "$phase" config:fedora-mako-notification-conflict \

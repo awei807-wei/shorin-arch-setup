@@ -21,11 +21,14 @@ source "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-lsfg-contract.sh"
 source "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-drkonqi-contract.sh"
 source "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-mako-contract.sh"
 source "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-runtime-contract.sh"
+source "$SHORIN_ROOT/scripts/modules/desktop-niri/longshot-runtime-contract.sh"
+source "$SHORIN_ROOT/scripts/modules/desktop-niri/fedora-recorder-contract.sh"
 
 # Required desktop targets are independent of the user's optional package
 # selection. Keep their source prefix so check, apply, and verify agree.
 NIRI_REQUIRED_PACKAGE_TARGETS=(
     niri
+    jq
     xdg-desktop-portal-gnome
     xdg-desktop-portal-gtk
     fuzzel
@@ -51,6 +54,14 @@ NIRI_REQUIRED_PACKAGE_TARGETS=(
     awww
     swayidle
     AUR:swaylock-effects
+    grim
+    slurp
+    wf-recorder
+    wl-clipboard
+    python-opencv
+    python-numpy
+    pngquant
+    ffmpeg
 )
 
 if platform_is_fedora; then
@@ -59,12 +70,13 @@ if platform_is_fedora; then
     # not a Niri session dependency, so it is intentionally not required on
     # Fedora.  swaylock-effects is represented by Fedora's swaylock package.
     NIRI_REQUIRED_PACKAGE_TARGETS=(
-        niri xdg-desktop-portal-gnome xdg-desktop-portal-gtk fuzzel kitty
+        niri jq xdg-desktop-portal-gnome xdg-desktop-portal-gtk fuzzel kitty
         firefox libnotify mako polkit-kde ffmpegthumbnailer gvfs-smb
         file-roller gnome-keyring
         gst-plugins-base gst-plugins-good gst-libav nautilus quickshell
         qt6-wayland qt6-multimedia bluez-utils matugen awww swayidle swaylock
-        kscreenlocker kwin
+        kscreenlocker kwin grim slurp wf-recorder wl-clipboard python-opencv
+        python-numpy pngquant ffmpeg
     )
 fi
 
@@ -75,9 +87,9 @@ niri_required_package_targets() {
 niri_package_target_is_required() {
     local target=$1 required
 
-    while IFS= read -r required; do
+    for required in "${NIRI_REQUIRED_PACKAGE_TARGETS[@]}"; do
         [ "$required" = "$target" ] && return 0
-    done < <(niri_required_package_targets)
+    done
     return 1
 }
 
@@ -94,6 +106,12 @@ niri_fedora_optional_target_is_skipped() {
         # missing name to dnf and turning an optional feature into a module
         # failure.
         bluetui|hyprpicker|nwg-look|satty|swayosd)
+            return 0
+            ;;
+        # Fedora 44's thefuck package imports distutils under Python 3.14 and
+        # raises an ABRT report on every Fish startup.  Do not install or
+        # inspect a provider that cannot initialize on this platform.
+        thefuck)
             return 0
             ;;
         *) return 1 ;;
@@ -147,7 +165,15 @@ niri_package_target_canonical() {
                 printf '%s\n' "$1"
             fi
             ;;
-        AUR:clipse|AUR:clipse-gui|AUR:python-pywalfox|AUR:waypaper|\
+        AUR:python-pywalfox)
+            if niri_pywalfox_provider_supported; then
+                printf '%s\n' "$1"
+            else
+                warn "Skipping Pywalfox because no trusted native-host provider is declared: $1"
+                return 1
+            fi
+            ;;
+        AUR:clipse|AUR:clipse-gui|AUR:waypaper|\
         AUR:niriswitcher|AUR:nautilus-open-any-terminal|\
         AUR:ttf-lxgw-wenkai-screen)
             if platform_is_fedora; then
@@ -187,7 +213,7 @@ niri_all_package_targets() {
             continue
         fi
         if niri_fedora_optional_target_is_skipped "$target"; then
-            warn "Skipping Fedora optional desktop target without a reliable package source: $target"
+            warn "Skipping Fedora optional desktop target without a usable provider: $target"
             continue
         fi
         niri_package_target_is_obsolete "$target" && continue

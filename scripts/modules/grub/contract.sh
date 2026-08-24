@@ -7,14 +7,11 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 grub_contract_init() {
     GRUB_DEFAULT_FILE=${GRUB_DEFAULT_FILE:-/etc/default/grub}
     if platform_is_fedora; then
-        if [ -z "${GRUB_CONFIG_FILE:-}" ]; then
-            if [ -f /boot/efi/EFI/fedora/grub.cfg ] ||
-                [ -d /sys/firmware/efi ]; then
-                GRUB_CONFIG_FILE=/boot/efi/EFI/fedora/grub.cfg
-            else
-                GRUB_CONFIG_FILE=/boot/grub2/grub.cfg
-            fi
-        fi
+        # Fedora 34+ uses one generated configuration for both BIOS and UEFI.
+        # The EFI-side grub.cfg is a small vendor stub that chains to this
+        # file; generating directly into the stub can make the system
+        # unbootable.
+        GRUB_CONFIG_FILE=${GRUB_CONFIG_FILE:-/boot/grub2/grub.cfg}
         GRUB_CUSTOM_FILE=${GRUB_CUSTOM_FILE:-/etc/grub.d/99_custom}
         GRUB_MKINITCPIO_FILE=${GRUB_MKINITCPIO_FILE:-/etc/default/grub}
     else

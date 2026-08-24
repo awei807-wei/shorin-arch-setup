@@ -66,7 +66,8 @@ if ! grep -q -vE "^\s*#|^\s*$" "$LIST_FILE"; then
 fi
 
 SELECTED_RAW=""
-if [ "${SHORIN_MODE:-install}" = repair ]; then
+if [ "${SHORIN_MODE:-install}" = repair ] &&
+    [ "${SHORIN_APPLICATION_SELECTION_REQUIRED:-0}" != 1 ]; then
     [ -s "$APPLICATION_MANIFEST" ] ||
         die "Repair requires a declared application manifest."
     if ! SELECTED_RAW=$(application_manifest_entries); then
@@ -79,6 +80,9 @@ else
     else
         read -r -t 60 -p "Install common applications? [Y/n]: " choice || choice=Y
         if [[ "${choice:-Y}" =~ ^[Nn]$ ]]; then
+            write_application_selection_intent \
+                "$APPLICATION_SOURCE_LIST" "$APPLICATION_MANIFEST" declined ||
+                die 'Unable to record the declined application selection.'
             warn "User skipped application installation."
             exit 20
         fi
@@ -105,6 +109,8 @@ else
     write_application_manifest_metadata \
         "$APPLICATION_MANIFEST" "$APPLICATION_SOURCE_LIST" selected ||
         die "Unable to record application manifest metadata: $APPLICATION_MANIFEST"
+    clear_application_selection_intent "$APPLICATION_MANIFEST" ||
+        die 'Unable to clear the completed application selection intent.'
     if ! SELECTED_RAW=$(application_manifest_entries); then
         die "Application manifest is not readable: $APPLICATION_MANIFEST"
     fi

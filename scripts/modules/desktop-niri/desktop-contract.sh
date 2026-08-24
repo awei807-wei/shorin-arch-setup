@@ -30,8 +30,10 @@ desktop_niri_contract_init() {
             NIRI_FEDORA_LSFG_ENV_FILE NIRI_FEDORA_LSFG_WRAPPER_FILE \
             NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE \
             NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE \
+            NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE \
             NIRI_FEDORA_DRKONQI_MASK_FILE \
             NIRI_FEDORA_MAKO_MASK_FILE \
+            NIRI_LONGSHOT_VENV_DIR \
             NIRI_WAYLAND_SESSION_FILE \
             NIRI_STATE_HOME NIRI_SHORIN_STATE_DIR; do
             value=${!variable:-}
@@ -57,6 +59,7 @@ desktop_niri_contract_init() {
     NIRI_MATUGEN_STARSHIP_TEMPLATE_FILE=${NIRI_MATUGEN_STARSHIP_TEMPLATE_FILE:-$HOME_DIR/.config/matugen/templates/starship-colors.toml}
     NIRI_WAYPAPER_CONFIG_FILE=${NIRI_WAYPAPER_CONFIG_FILE:-$HOME_DIR/.config/waypaper/config.ini}
     NIRI_TEMPLATES_DIR=${NIRI_TEMPLATES_DIR:-$HOME_DIR/Templates}
+    NIRI_LONGSHOT_VENV_DIR=${NIRI_LONGSHOT_VENV_DIR:-$HOME_DIR/.config/waybar/scripts/longshot-sh/venv}
     NIRI_AUTOLOGIN_FILE=${NIRI_AUTOLOGIN_FILE:-/etc/systemd/system/getty@tty1.service.d/autologin.conf}
     NIRI_WAYLAND_SESSION_FILE=${NIRI_WAYLAND_SESSION_FILE:-/usr/share/wayland-sessions/niri.desktop}
     NIRI_DISPLAY_MANAGER_UNIT=${NIRI_DISPLAY_MANAGER_UNIT:-display-manager.service}
@@ -168,11 +171,38 @@ ensure_niri_autologin_state() {
     niri_autologin_matches_target
 }
 
+niri_pywalfox_provider_supported() {
+    # Fedora 44 has no declared trusted provider for the native messaging
+    # host.  Installing the browser extension without that half of the
+    # integration leaves every managed Firefox profile with a permanent
+    # connection error.  Keep this gate shared with target enumeration so the
+    # package and browser policy cannot disagree again.
+    ! platform_is_fedora
+}
+
 niri_firefox_policy_contract() {
-    printf '%s\n' '{ "policies": { "Extensions": { "Install": ["https://addons.mozilla.org/firefox/downloads/latest/pywalfox/latest.xpi"] } } }'
+    if niri_pywalfox_provider_supported; then
+        printf '%s\n' '{ "policies": { "Extensions": { "Install": ["https://addons.mozilla.org/firefox/downloads/latest/pywalfox/latest.xpi"] } } }'
+    else
+        printf '%s\n' '{ "policies": {} }'
+    fi
 }
 
 niri_portal_config_contract() {
+    if platform_is_fedora; then
+        # Match Fedora's niri-portals.conf instead of overriding every
+        # interface with GTK.  GNOME supplies ScreenCast, Screenshot and
+        # RemoteDesktop; the explicit exceptions retain Fedora's chooser,
+        # notification and secret providers.
+        cat <<'EOF'
+[preferred]
+default=gnome;gtk;
+org.freedesktop.impl.portal.Access=gtk;
+org.freedesktop.impl.portal.Notification=gtk;
+org.freedesktop.impl.portal.Secret=gnome-keyring;
+EOF
+        return
+    fi
     printf '[preferred]\ndefault=gtk\n'
 }
 

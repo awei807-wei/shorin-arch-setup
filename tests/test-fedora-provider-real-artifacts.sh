@@ -34,7 +34,7 @@ export HOME_DIR="$TEST_DIR/home"
 
 source "$ROOT_DIR/scripts/lib/core.sh"
 
-for command_name in curl sha256sum tar unzip xz fc-query fc-scan; do
+for command_name in curl sha256sum stat tar unzip xz fc-query fc-scan; do
     command -v "$command_name" >/dev/null 2>&1 ||
         fail "required real-artifact command is missing: $command_name"
 done
@@ -154,6 +154,8 @@ maple_archive="$work/JetBrainsMapleMono.zip"
 download_verified "$FEDORA_JETBRAINS_MAPLE_URL" \
     "$FEDORA_JETBRAINS_MAPLE_SHA256" "$maple_archive" ||
     fail 'Fusion Maple download or SHA-256 verification failed'
+[ "$(stat -c '%s' "$maple_archive")" = "$FEDORA_JETBRAINS_MAPLE_SIZE" ] ||
+    fail 'Fusion Maple fixed byte-size verification failed'
 fedora_font_archive_entries_safe "$maple_archive" maple ||
     fail 'Fusion Maple archive path safety contract rejected the official archive'
 fedora_zip_archive_types_safe "$maple_archive" ||
@@ -164,12 +166,23 @@ unzip -q "$maple_archive" -d "$maple_extract"
 if find "$maple_extract" -type l -print -quit | grep -q .; then
     fail 'Fusion Maple archive extracted a symlink'
 fi
-maple_file=$(find "$maple_extract" -type f -name '*.ttf' -print -quit)
-[ -n "$maple_file" ] || fail 'Fusion Maple archive has no TTF'
-fedora_maple_font_file_name_allowed "$maple_file" ||
-    fail 'Fusion Maple TTF is outside the whitelist'
-verify_family "$maple_file" "$FEDORA_MAPLE_FONT_FAMILY" ||
-    fail 'Fusion Maple exact family verification failed'
+mapfile -d '' -t maple_files < <(
+    find "$maple_extract" -type f -name '*.ttf' -print0 | sort -z
+)
+[ "${#maple_files[@]}" -eq "$FEDORA_JETBRAINS_MAPLE_TTF_COUNT" ] ||
+    fail "Fusion Maple TTF count is ${#maple_files[@]} (expected $FEDORA_JETBRAINS_MAPLE_TTF_COUNT)"
+for maple_file in "${maple_files[@]}"; do
+    fedora_maple_font_file_name_allowed "$maple_file" ||
+        fail "Fusion Maple TTF is outside the whitelist: $maple_file"
+    verify_family "$maple_file" "$FEDORA_MAPLE_FONT_FAMILY" ||
+        fail "Fusion Maple exact family verification failed: $maple_file"
+    maple_charset=$(fc-query -f '%{charset}\n' "$maple_file") ||
+        fail "Fusion Maple charset query failed: $maple_file"
+    for glyph in e0b0 f015; do
+        fedora_font_charset_contains "$maple_charset" "$glyph" ||
+            fail "Fusion Maple Nerd glyph U+${glyph^^} is missing: $maple_file"
+    done
+done
 
 mdi_file="$work/materialdesignicons-webfont.ttf"
 download_verified "$FEDORA_MATERIAL_DESIGN_ICONS_URL" \

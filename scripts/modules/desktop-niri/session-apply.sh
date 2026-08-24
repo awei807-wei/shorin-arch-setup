@@ -150,6 +150,8 @@ ensure_niri_session_config() {
         niri_desktop_txn_snapshot \
             "$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE" || status=1
         niri_desktop_txn_snapshot \
+            "$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE" || status=1
+        niri_desktop_txn_snapshot \
             "$NIRI_FEDORA_DRKONQI_MASK_FILE" || status=1
         niri_desktop_txn_snapshot \
             "$NIRI_FEDORA_MAKO_MASK_FILE" || status=1
@@ -187,6 +189,17 @@ ensure_niri_session_config() {
         niri_desktop_txn_finish 1
         niri_fedora_xwayland_videobridge_reload_user_manager "$user" ||
             error 'Unable to reload the target user manager after Xwayland Video Bridge rollback.'
+        ensure_niri_shorin_state_ownership "$user" ||
+            error 'Unable to restore Shorin state ownership after session rollback.'
+        return 1
+    fi
+    if platform_is_fedora &&
+        ! niri_session_step 'NVIDIA settings autostart shutdown' \
+            ensure_niri_fedora_nvidia_settings_autostart "$user"; then
+        error 'NVIDIA settings autostart shutdown failed; restoring the session transaction.'
+        niri_desktop_txn_finish 1
+        niri_fedora_nvidia_settings_reload_user_manager "$user" ||
+            error 'Unable to reload the target user manager after NVIDIA settings rollback.'
         ensure_niri_shorin_state_ownership "$user" ||
             error 'Unable to restore Shorin state ownership after session rollback.'
         return 1

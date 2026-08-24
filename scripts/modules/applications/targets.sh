@@ -12,6 +12,7 @@ if [ -z "${APPLICATION_MANIFEST:-}" ]; then
 fi
 LAZYVIM_PACKAGES=(neovim ripgrep fd ttf-jetbrains-mono-nerd git)
 WINE_CONFIG_PACKAGES=(wine wine-gecko wine-mono)
+WINE_PREFIX_COMPLETION_MARKER=.shorin-wine-prefix-v1
 LUTRIS_CONFIG_PACKAGES=(
     alsa-plugins giflib glfw gst-plugins-base-libs lib32-alsa-plugins
     lib32-giflib lib32-gst-plugins-base-libs lib32-gtk3
@@ -67,11 +68,40 @@ application_packages_present() {
     done
 }
 
+wine_prefix_payload_satisfied() {
+    local wine_prefix="$HOME_DIR/.wine" registry
+
+    [ -d "$wine_prefix" ] && [ ! -L "$wine_prefix" ] || return 1
+    for registry in system.reg user.reg userdef.reg; do
+        [ -f "$wine_prefix/$registry" ] &&
+            [ ! -L "$wine_prefix/$registry" ] &&
+            [ -s "$wine_prefix/$registry" ] || return 1
+    done
+    [ -d "$wine_prefix/drive_c" ] && [ ! -L "$wine_prefix/drive_c" ] &&
+        [ -d "$wine_prefix/drive_c/windows" ] &&
+        [ ! -L "$wine_prefix/drive_c/windows" ] &&
+        [ -d "$wine_prefix/drive_c/windows/system32" ] &&
+        [ ! -L "$wine_prefix/drive_c/windows/system32" ] &&
+        [ -f "$wine_prefix/drive_c/windows/system32/cmd.exe" ] &&
+        [ -s "$wine_prefix/drive_c/windows/system32/cmd.exe" ] &&
+        [ ! -L "$wine_prefix/drive_c/windows/system32/cmd.exe" ]
+}
+
+wine_prefix_core_satisfied() {
+    local wine_prefix="$HOME_DIR/.wine"
+
+    wine_prefix_payload_satisfied || return
+    [ -f "$wine_prefix/$WINE_PREFIX_COMPLETION_MARKER" ] &&
+        [ ! -L "$wine_prefix/$WINE_PREFIX_COMPLETION_MARKER" ] &&
+        [ -s "$wine_prefix/$WINE_PREFIX_COMPLETION_MARKER" ] &&
+        grep -Fqx 'schema=1' "$wine_prefix/$WINE_PREFIX_COMPLETION_MARKER"
+}
+
 wine_config_satisfied() {
     local font
 
     application_packages_present "${WINE_CONFIG_PACKAGES[@]}" || return
-    [ -d "$HOME_DIR/.wine" ] || return 1
+    wine_prefix_core_satisfied || return
     [ -d "$WINDOWS_FONT_SOURCE" ] || return 0
     while IFS= read -r -d '' font; do
         [ -f "$HOME_DIR/.wine/drive_c/windows/Fonts/$(basename "$font")" ] ||

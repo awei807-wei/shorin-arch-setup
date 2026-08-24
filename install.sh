@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-trap 'printf "ERROR: %s:%s: %s\n" \
-  "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
+trap 'printf "ERROR: %s:%s: %s\n" "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 SHORIN_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 export SHORIN_RUN_TOKEN=${SHORIN_RUN_TOKEN:-$(cat /proc/sys/kernel/random/uuid)}
 source "$SHORIN_ROOT/scripts/lib/core.sh"
@@ -134,6 +133,7 @@ main() {
         return 0
     }
     run_preflight "$MODE" "${TARGET_USER:-}"
+    prepare_install_application_manifest "$MODE" "${SELECTED_MODULES[@]}"
     case "$MODE" in
         install|repair) run_modules "$MODE" "${SELECTED_MODULES[@]}" || true ;;
         audit) audit_modules report "${SELECTED_MODULES[@]}" || true ;;

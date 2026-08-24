@@ -27,6 +27,8 @@ niri_session_contract_init() {
     NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE=${NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_AUTOSTART_FILE:-$HOME_DIR/.config/autostart/org.kde.xwaylandvideobridge.desktop}
     NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT=${NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT:-app-org.kde.xwaylandvideobridge@autostart.service}
     NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE=${NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_MASK_FILE:-$HOME_DIR/.config/systemd/user/$NIRI_FEDORA_XWAYLAND_VIDEOBRIDGE_UNIT}
+    NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE=${NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE:-$HOME_DIR/.config/autostart/nvidia-settings-user.desktop}
+    NIRI_FEDORA_NVIDIA_SETTINGS_UNIT=${NIRI_FEDORA_NVIDIA_SETTINGS_UNIT:-app-nvidia\\x2dsettings\\x2duser@autostart.service}
     NIRI_FEDORA_DRKONQI_UNIT=${NIRI_FEDORA_DRKONQI_UNIT:-drkonqi-coredump-launcher.socket}
     NIRI_FEDORA_DRKONQI_MASK_FILE=${NIRI_FEDORA_DRKONQI_MASK_FILE:-$HOME_DIR/.config/systemd/user/$NIRI_FEDORA_DRKONQI_UNIT}
     NIRI_FEDORA_MAKO_UNIT=${NIRI_FEDORA_MAKO_UNIT:-mako.service}
@@ -189,6 +191,13 @@ niri_fedora_xwayland_videobridge_autostart_contract() {
     printf '[Desktop Entry]\nHidden=true\n'
 }
 
+niri_fedora_nvidia_settings_autostart_contract() {
+    # This user override only disables the RPM-provided XDG autostart entry in
+    # Fedora Niri.  It deliberately leaves /usr/bin/nvidia-settings and the
+    # system desktop file available for explicit, manual use.
+    printf '[Desktop Entry]\nHidden=true\n'
+}
+
 niri_fedora_xwayland_videobridge_mask_satisfied() {
     local user=${1:-$TARGET_USER}
 
@@ -315,6 +324,119 @@ niri_fedora_xwayland_videobridge_autostart_satisfied() {
     niri_fedora_xwayland_videobridge_service_satisfied "$user"
 }
 
+niri_fedora_nvidia_settings_user_systemctl() {
+    niri_fedora_user_systemctl "$@"
+}
+
+niri_fedora_nvidia_settings_reload_user_manager() {
+    local user=$1 status=0
+
+    if niri_user_bus_is_available "$user"; then
+        niri_fedora_nvidia_settings_user_systemctl "$user" daemon-reload
+    else
+        status=$?
+        [ "$status" -eq 1 ] || return "$status"
+    fi
+}
+
+niri_fedora_nvidia_settings_stop() {
+    local user=$1 output status
+
+    if output=$(niri_fedora_nvidia_settings_user_systemctl "$user" \
+        stop "$NIRI_FEDORA_NVIDIA_SETTINGS_UNIT" 2>&1); then
+        return 0
+    else
+        status=$?
+    fi
+    case "$status" in
+        1|3|4|5)
+            printf '%s\n' "$output" |
+                grep -Eiq '(not loaded|not running|inactive|could not be found|does not exist)' &&
+                return 0
+            ;;
+    esac
+    return "$status"
+}
+
+niri_fedora_nvidia_settings_reset_failed() {
+    local user=$1 output status
+
+    if output=$(niri_fedora_nvidia_settings_user_systemctl "$user" \
+        reset-failed "$NIRI_FEDORA_NVIDIA_SETTINGS_UNIT" 2>&1); then
+        return 0
+    else
+        status=$?
+    fi
+    case "$status" in
+        1|5)
+            printf '%s\n' "$output" |
+                grep -Eiq '(^|[[:space:]])Unit[[:space:]]+[^[:space:]]+[[:space:]]+not loaded([.:]|$)' &&
+                return 0
+            ;;
+    esac
+    return "$status"
+}
+
+niri_fedora_nvidia_settings_unit_inactive() {
+    local user=$1 status=0
+
+    if niri_fedora_nvidia_settings_user_systemctl "$user" \
+        is-active --quiet "$NIRI_FEDORA_NVIDIA_SETTINGS_UNIT"; then
+        return 1
+    else
+        status=$?
+    fi
+    case "$status" in
+        1|3|4) return 0 ;;
+        *) return "$status" ;;
+    esac
+}
+
+niri_fedora_nvidia_settings_unit_not_failed() {
+    local user=$1 status=0
+
+    if niri_fedora_nvidia_settings_user_systemctl "$user" \
+        is-failed --quiet "$NIRI_FEDORA_NVIDIA_SETTINGS_UNIT"; then
+        return 1
+    else
+        status=$?
+    fi
+    case "$status" in
+        1|3|4) return 0 ;;
+        *) return "$status" ;;
+    esac
+}
+
+niri_fedora_nvidia_settings_runtime_satisfied() {
+    local user=${1:-$TARGET_USER} status=0
+
+    if niri_user_bus_is_available "$user"; then
+        :
+    else
+        status=$?
+        [ "$status" -eq 1 ] || return "$status"
+        return 0
+    fi
+    niri_fedora_nvidia_settings_unit_inactive "$user" || return
+    niri_fedora_nvidia_settings_unit_not_failed "$user"
+}
+
+niri_fedora_nvidia_settings_autostart_satisfied() {
+    local user=${1:-$TARGET_USER} uid gid file
+
+    platform_is_fedora || return 0
+    file=$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE
+    niri_path_is_safe_no_symlink "$file" || return 1
+    [ -f "$file" ] && [ ! -L "$file" ] || return 1
+    uid=$(id -u "$user") || return 2
+    gid=$(id -g "$user") || return 2
+    [ "$(stat -c '%u' "$file")" -eq "$uid" ] || return 1
+    [ "$(stat -c '%g' "$file")" -eq "$gid" ] || return 1
+    [ "$(stat -c '%a' "$file")" = 644 ] || return 1
+    cmp -s "$file" <(niri_fedora_nvidia_settings_autostart_contract) || return 1
+    niri_fedora_nvidia_settings_runtime_satisfied "$user"
+}
+
 niri_fedora_install_if_stale_user_file() {
     local source=$1 destination=$2 user=$3 group=$4
 
@@ -329,20 +451,26 @@ niri_fedora_install_if_stale_user_file() {
 niri_fedora_lockscreen_binding_satisfied() {
     platform_is_fedora || return 0
     [ -s "$NIRI_BINDS_FILE" ] || return 1
-    awk '
+    case "$NIRI_LOCKSCREEN_SCRIPT_FILE" in
+        /*) ;;
+        *) return 1 ;;
+    esac
+    awk -v expected="spawn \"$NIRI_LOCKSCREEN_SCRIPT_FILE\";" '
         /^[[:space:]]*(\/\/|#)/ { next }
         {
             candidate=$0
             sub(/^[[:space:]]*/, "", candidate)
             lowered=tolower(candidate)
             if (lowered ~ /^mod[+]alt[+]l([[:space:]]|[{])/) {
-                binding_seen=1
-                if ($0 !~ /spawn(-sh)?[[:space:]]+"([^"]*[/])?lockscreen[.]sh"/) {
-                    invalid=1
-                }
+                binding_seen++
+                action=$0
+                sub(/^[^{]*\{[[:space:]]*/, "", action)
+                sub(/[[:space:]]*\}[[:space:]]*$/, "", action)
+                gsub(/[[:space:]]+/, " ", action)
+                if (action != expected) invalid=1
             }
         }
-        END { exit !(binding_seen && !invalid) }
+        END { exit !(binding_seen == 1 && !invalid) }
     ' "$NIRI_BINDS_FILE"
 }
 
@@ -424,6 +552,54 @@ ensure_niri_fedora_xwayland_videobridge_autostart() {
     niri_fedora_xwayland_videobridge_autostart_satisfied "$user"
 }
 
+ensure_niri_fedora_nvidia_settings_autostart() {
+    local user=$1 group parent temporary status=0 bus_available=0 file
+
+    require_writable_mode || return
+    platform_is_fedora || return 0
+    file=$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE
+    parent=$(dirname "$file")
+    niri_path_is_safe_no_symlink "$file" || return 1
+    group=$(id -gn "$user") || return 1
+    install -d -m 755 -o "$user" -g "$group" "$parent" || return 1
+    if [ -e "$file" ] || [ -L "$file" ]; then
+        [ -f "$file" ] && [ ! -L "$file" ] || return 1
+    fi
+
+    # Stage in the destination directory so the final rename is atomic.  A
+    # random O_EXCL temporary avoids following a pre-created .new symlink.
+    temporary=$(mktemp "$parent/.nvidia-settings-user.desktop.XXXXXX") || return 1
+    if ! niri_fedora_nvidia_settings_autostart_contract > "$temporary" ||
+        ! chmod 644 "$temporary" || ! chown "$user:$group" "$temporary"; then
+        rm -f "$temporary"
+        return 1
+    fi
+    if [ -f "$file" ] && cmp -s "$temporary" "$file"; then
+        rm -f "$temporary"
+        chmod 644 "$file" || return 1
+        chown "$user:$group" "$file" || return 1
+    elif ! mv -fT -- "$temporary" "$file"; then
+        rm -f "$temporary"
+        return 1
+    fi
+
+    if niri_user_bus_is_available "$user"; then
+        bus_available=1
+    else
+        status=$?
+        [ "$status" -eq 1 ] || return "$status"
+    fi
+    if [ "$bus_available" -eq 1 ]; then
+        # daemon-reload reruns the XDG autostart generator against the Hidden
+        # override.  The generated unit may already be absent afterwards, so
+        # stop/reset helpers accept only explicit not-loaded diagnostics.
+        niri_fedora_nvidia_settings_reload_user_manager "$user" || return
+        niri_fedora_nvidia_settings_stop "$user" || return
+        niri_fedora_nvidia_settings_reset_failed "$user" || return
+    fi
+    niri_fedora_nvidia_settings_autostart_satisfied "$user"
+}
+
 ensure_niri_fedora_wallpaper_initializer() {
     ensure_niri_fedora_wallpaper_session "$@"
 }
@@ -433,6 +609,10 @@ niri_fedora_lockscreen_contract_satisfied() {
     local wallpaper_startup=1
 
     platform_is_fedora || return 0
+    case "$NIRI_LOCKSCREEN_SCRIPT_FILE" in
+        /*) ;;
+        *) return 1 ;;
+    esac
     awk -v optional="$optional_commands" \
         -v polkit="$NIRI_FEDORA_POLKIT_AGENT_PATH" \
         -v initializer="$NIRI_FEDORA_WALLPAPER_SESSION_FILE" \
@@ -472,7 +652,8 @@ niri_fedora_session_compatibility_files_satisfied() {
 niri_fedora_session_compatibility_satisfied() {
     platform_is_fedora || return 0
     niri_fedora_session_compatibility_files_satisfied || return 1
-    niri_fedora_xwayland_videobridge_autostart_satisfied
+    niri_fedora_xwayland_videobridge_autostart_satisfied || return 1
+    niri_fedora_nvidia_settings_autostart_satisfied
 }
 
 ensure_niri_fedora_config_file_compatibility() {
@@ -523,6 +704,7 @@ ensure_niri_fedora_session_compatibility() {
     platform_is_fedora || return 0
     ensure_niri_fedora_session_compatibility_files "$user" || return
     ensure_niri_fedora_xwayland_videobridge_autostart "$user" || return
+    ensure_niri_fedora_nvidia_settings_autostart "$user" || return
     niri_fedora_session_compatibility_satisfied
 }
 

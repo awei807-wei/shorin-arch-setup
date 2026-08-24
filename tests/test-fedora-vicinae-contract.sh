@@ -23,6 +23,7 @@ fedora_ensure_flatpak_target() { return 0; }
 fedora_flatpak_present() { return 0; }
 printf '#!/usr/bin/env bash\n' > "$HOME_DIR/.local/bin/vicinae.AppImage"
 chmod 755 "$HOME_DIR/.local/bin/vicinae.AppImage"
+FEDORA_VICINAE_SHA256=$(sha256sum "$HOME_DIR/.local/bin/vicinae.AppImage" | awk '{print $1}')
 cat > "$HOME_DIR/.local/share/applications/vicinae.desktop" <<EOF
 [Desktop Entry]
 Name=Vicinae
@@ -73,6 +74,20 @@ grep -Fqx '# spawn "vicinae" "toggle"' "$HOME_DIR/.config/niri/binds.kdl" || fai
 grep -Fqx '/* spawn-sh "vicinae toggle" */' "$HOME_DIR/.config/niri/binds.kdl" || fail 'block comment was modified'
 grep -Fqx 'Alt+Z { spawn-sh "vicinae toggle"; }' "$HOME_DIR/.config/niri/binds.kdl" || fail 'multiline block comment was modified'
 fedora_application_target_satisfied vicinae-bin "$TARGET_USER" "$HOME_DIR" || fail 'converted Vicinae target must satisfy application verification'
+
+VICINAE_DOWNLOAD_CALLS=0
+fedora_download_verified_official_asset() {
+    VICINAE_DOWNLOAD_CALLS=$((VICINAE_DOWNLOAD_CALLS + 1))
+    return 1
+}
+sed -i 's#^Exec=.*#Exec="/invalid/vicinae.AppImage"#' \
+    "$HOME_DIR/.local/share/applications/vicinae.desktop"
+fedora_install_vicinae "$TARGET_USER" "$HOME_DIR" ||
+    fail 'Vicinae integration-only repair must reuse the verified destination'
+[ "$VICINAE_DOWNLOAD_CALLS" -eq 0 ] ||
+    fail 'Vicinae integration-only repair must not require another download'
+fedora_application_target_satisfied vicinae-bin "$TARGET_USER" "$HOME_DIR" ||
+    fail 'Vicinae integration-only repair did not restore the target contract'
 
 config_digest=$(sha256sum "$HOME_DIR/.config/niri/config.kdl")
 binds_digest=$(sha256sum "$HOME_DIR/.config/niri/binds.kdl")

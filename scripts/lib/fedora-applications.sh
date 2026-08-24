@@ -21,15 +21,15 @@ fedora_application_target_satisfied() {
         upscaler)
             fedora_flatpak_present io.gitlab.theevilskeleton.Upscaler "$user" "$home" ;;
         clash-verge-rev)
-            fedora_rpm_or_command '(^|[-.])clash[-_]?verge' clash-verge ;;
+            fedora_fixed_official_rpm_target_satisfied "$package" ;;
         linuxqq-appimage)
-            fedora_rpm_or_command '(^|[-_.])([Ll]inux)?[Qq][Qq]($|[-_.])' qq ;;
+            fedora_fixed_official_rpm_target_satisfied "$package" ;;
         wechat-appimage)
-            fedora_rpm_or_command '([Ww]e[Cc]hat|[Ww]x|[Cc]om\.[Tt]encent\.[Ww]e[Cc]hat)' wechat ;;
+            fedora_fixed_official_rpm_target_satisfied "$package" ;;
         lsfg-vk-bin)
             package_is_installed qt6-qtdeclarative &&
                 package_is_installed qt6-qtbase &&
-                fedora_rpm_or_command 'lsfg[-_]?vk' lsfg-vk ;;
+                fedora_fixed_official_rpm_target_satisfied "$package" ;;
         mangojuice-bin)
             fedora_flatpak_present io.github.radiolamp.mangojuice "$user" "$home" ;;
         vicinae-bin|vicinae)
@@ -37,6 +37,8 @@ fedora_application_target_satisfied() {
             fedora_flatpak_present it.mijorus.gearlever "$user" "$home" || gearlever=0
             appimage=$(fedora_user_bin vicinae.AppImage "$home")
             [ "$gearlever" -eq 1 ] && [ -x "$appimage" ] &&
+                fedora_official_asset_file_matches \
+                    "$appimage" "$FEDORA_VICINAE_SHA256" &&
                 fedora_vicinae_desktop_satisfied "$home" &&
                 fedora_vicinae_niri_command_contract_satisfied "$home" ;;
         fd-rdd-git)
@@ -44,9 +46,9 @@ fedora_application_target_satisfied() {
         tsukimi-bin)
             fedora_copr_application_target_satisfied tsukimi-bin ;;
         thorium-browser-bin)
-            fedora_rpm_or_command '[Tt]horium([-_]?browser)?' thorium-browser ;;
+            fedora_fixed_official_rpm_target_satisfied "$package" ;;
         mark-shot)
-            fedora_rpm_or_command '(^|[-.])mark[-_]?shot' mark-shot ;;
+            fedora_fixed_official_rpm_target_satisfied "$package" ;;
         typora-free)
             return 1 ;;
         *)
@@ -330,6 +332,7 @@ fedora_install_application_target() {
                 "$FEDORA_MARK_SHOT_URL" "$FEDORA_MARK_SHOT_ASSET" \
                 "$FEDORA_MARK_SHOT_SHA256" ;;
         typora-free)
+            FEDORA_APPLICATION_PENDING_REASON='no-declared-official-fedora-source:manual-target-required'
             warn 'Pending Fedora artifact: typora-free has no declared official Fedora source; install it manually and add a Fedora-specific target.'
             return "$RC_SKIPPED" ;;
         *)

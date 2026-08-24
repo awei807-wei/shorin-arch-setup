@@ -79,6 +79,9 @@ if [ "${1:-}" = -C ]; then
         rev-parse)
             [ -f "$checkout/.checked-out" ] && printf '%s\n' "$commit" || exit 1
             ;;
+        status)
+            exit 0
+            ;;
         *) exit 1 ;;
     esac
     exit 0
@@ -132,6 +135,11 @@ fedora_install_fd_rdd "$TARGET_USER" "$HOME_DIR" ||
     fail 'successful fd-rdd retry must run the installer from the source checkout'
 [ -L "$HOME_DIR/.local/bin/fd-rdd" ] ||
     fail 'successful fd-rdd install must publish the ~/.local/bin compatibility symlink'
+[ -s "$HOME_DIR/.vcp/bin/fd-rdd.shorin-provenance" ] ||
+    fail 'successful fd-rdd install must record binary/source provenance'
+grep -Fqx "commit=$FEDORA_FD_RDD_COMMIT" \
+    "$HOME_DIR/.vcp/bin/fd-rdd.shorin-provenance" ||
+    fail 'fd-rdd provenance must retain the fixed source commit'
 [ "$(readlink "$HOME_DIR/.local/bin/fd-rdd")" = '../../.vcp/bin/fd-rdd' ] ||
     fail 'fd-rdd compatibility symlink must use the stable relative target'
 [ "$(stat -c '%U:%G' "$HOME_DIR/.local/bin")" = \
@@ -186,10 +194,26 @@ fedora_install_fd_rdd "$TARGET_USER" "$HOME_DIR" ||
 [ "$(< "$FEDORA_TEST_LOCAL_INSTALL_PATH")" = \
     "$HOME_DIR/.cargo/bin:/usr/local/bin:/usr/bin:/bin" ] ||
     fail 'local fd-rdd installer must receive the explicit target-user PATH'
+STORED_LOCAL_INSTALLER=$(fedora_fd_rdd_stored_installer_path "$HOME_DIR")
+[ -x "$STORED_LOCAL_INSTALLER" ] && [ ! -L "$STORED_LOCAL_INSTALLER" ] ||
+    fail 'local fd-rdd installer evidence must be persisted as a regular executable'
+[ "$(stat -c '%a' "$STORED_LOCAL_INSTALLER")" = 700 ] ||
+    fail 'persisted fd-rdd installer evidence must not be group/world accessible'
+unset FEDORA_FD_RDD_INSTALL_SCRIPT
+rm -f "$LOCAL_INSTALLER"
+fedora_application_target_satisfied fd-rdd-git "$TARGET_USER" "$HOME_DIR" ||
+    fail 'fd-rdd local provenance must survive removal of the handoff path'
 fedora_install_application_target fd-rdd-git "$TARGET_USER" "$HOME_DIR" ||
     fail 'fd-rdd target must remain successful on an idempotent rerun'
 [ "$(wc -l < "$LOCAL_INSTALL_CALLS")" -eq 1 ] ||
     fail 'fd-rdd target must not rerun a satisfied fake installer'
+printf '# tampered\n' >> "$HOME_DIR/.vcp/bin/fd-rdd"
+fedora_install_application_target fd-rdd-git "$TARGET_USER" "$HOME_DIR" ||
+    fail 'fd-rdd must recover a binary that no longer matches provenance'
+[ "$(wc -l < "$LOCAL_INSTALL_CALLS")" -eq 2 ] ||
+    fail 'fd-rdd must rerun its persisted installer after binary tampering'
+fedora_application_target_satisfied fd-rdd-git "$TARGET_USER" "$HOME_DIR" ||
+    fail 'fd-rdd must refresh provenance after reinstalling a tampered binary'
 rm -f "$HOME_DIR/.local/bin/fd-rdd"
 printf 'user-owned fd-rdd\n' > "$HOME_DIR/.local/bin/fd-rdd"
 status=0

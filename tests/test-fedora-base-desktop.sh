@@ -77,11 +77,16 @@ if [ "${DNF_STATUS:-0}" -ne 0 ]; then
 fi
 case "${1:-}" in
     repolist)
-        printf '%s\n' 'repo id                         repo name' 'fedora Fedora 44'
+        printf '%s\n' \
+            'repo id                         repo name' \
+            'fedora Fedora 44' \
+            'updates Fedora 44 Updates'
         if [ "${DNF_REPOS:-default}" = default ]; then
             printf '%s\n' \
                 'rpmfusion-nonfree-nvidia-driver RPM Fusion NVIDIA' \
-                'rpmfusion-free-updates RPM Fusion Free Updates'
+                'rpmfusion-free-updates RPM Fusion Free Updates' \
+                'cuda-fedora44-x86_64 NVIDIA CUDA' \
+                'nvidia-driver-local-repo-f44 NVIDIA Local Driver'
         fi
         ;;
     repoquery)
@@ -210,10 +215,25 @@ fi
 [ "$status" -eq 9 ] || fail "dnf failure status must be preserved (got $status)"
 DNF_STATUS=0
 ensure_package akmod-nvidia || fail 'NVIDIA package must converge through RPM Fusion mock'
-grep -Fq -- '--enablerepo=rpmfusion-nonfree-nvidia-driver akmod-nvidia' "$DNF_CALLS" ||
-    fail 'NVIDIA dnf calls must enable the configured RPM Fusion repository'
-grep -Fq -- 'dnf:install -y --setopt=install_weak_deps=False --enablerepo=rpmfusion-nonfree-nvidia-driver akmod-nvidia' "$DNF_CALLS" ||
-    fail 'NVIDIA install must use the RPM Fusion repository explicitly'
+nvidia_install=$(grep -F 'dnf:install ' "$DNF_CALLS" | tail -1)
+grep -Fq 'dnf:repolist --enabled' "$DNF_CALLS" ||
+    fail 'NVIDIA allowlist must inspect only currently enabled dependency repositories'
+grep -Fq -- '--disablerepo=*' <<< "$nvidia_install" ||
+    fail 'NVIDIA install must disable all repositories before applying its allowlist'
+grep -Fq -- '--enablerepo=fedora' <<< "$nvidia_install" ||
+    fail 'NVIDIA install must retain Fedora dependency repositories'
+grep -Fq -- '--enablerepo=updates' <<< "$nvidia_install" ||
+    fail 'NVIDIA install must retain Fedora update repositories'
+grep -Fq -- '--enablerepo=rpmfusion-nonfree-nvidia-driver akmod-nvidia' \
+    <<< "$nvidia_install" ||
+    fail 'NVIDIA install must explicitly select the RPM Fusion target repository'
+! grep -Fq -- '--enablerepo=cuda-fedora44-x86_64' <<< "$nvidia_install" ||
+    fail 'NVIDIA install allowlist must exclude an enabled CUDA repository'
+! grep -Fq -- '--enablerepo=nvidia-driver-local-repo-f44' \
+    <<< "$nvidia_install" ||
+    fail 'NVIDIA install allowlist must exclude differently named external repo IDs'
+! grep -Fq -- '--allowerasing' <<< "$nvidia_install" ||
+    fail 'NVIDIA install must not perform automatic provider replacement'
 : > "$DNF_CALLS"
 : > "$RPM_INSTALLED"
 ensure_package mesa-va-drivers-freeworld ||
@@ -245,6 +265,8 @@ source "$ROOT_DIR/scripts/modules/base/targets.sh"
 mapfile -t FEDORA_BASE_PACKAGES < <(base_declared_packages)
 printf '%s\n' "${FEDORA_BASE_PACKAGES[@]}" | grep -Fqx glibc-langpack-zh ||
     fail 'Fedora base check/apply contract must include glibc-langpack-zh'
+printf '%s\n' "${FEDORA_BASE_PACKAGES[@]}" | grep -Fqx git ||
+    fail 'Fedora base contract must install Git before source-backed desktop providers'
 printf '%s\n' "${FEDORA_BASE_PACKAGES[@]}" | grep -Fqx terminus-fonts-console ||
     fail 'Fedora base contract must install terminus-fonts-console'
 
@@ -339,7 +361,7 @@ MANIFEST="$TEST_DIR/niri-packages.list"
 printf '%s\n' awww polkit-gnome AUR:wlogout AUR:clipse AUR:waypaper AUR:ddcutil-service \
     AUR:ttf-jetbrains-maple-mono-nf-xx-xx AUR:swaylock-effects \
     AUR:ttf-lxgw-wenkai-screen AUR:python-pywalfox AUR:niriswitcher \
-    AUR:unknown-aur-target bluetui hyprpicker nwg-look satty starship swayosd \
+    AUR:unknown-aur-target bluetui hyprpicker nwg-look satty starship swayosd thefuck \
     breeze breeze5 breeze-icons imagemagick > "$MANIFEST"
 mapfile -t TARGETS < <(niri_all_package_targets "$MANIFEST" "$LIST_FILE")
 if printf '%s\n' "${TARGETS[@]}" | grep -Eq '^AUR:'; then
@@ -364,7 +386,11 @@ for mapping in \
     'breeze=plasma-breeze' \
     'breeze5=kf5-qqc2-breeze-style' \
     'breeze-icons=breeze-icon-theme' \
-    'imagemagick=ImageMagick'; do
+    'imagemagick=ImageMagick' \
+    'python-opencv=python3-opencv' \
+    'python-numpy=python3-numpy' \
+    'pngquant=pngquant' \
+    'ffmpeg=ffmpeg-free'; do
     logical=${mapping%%=*}
     expected=${mapping#*=}
     actual=$(fedora_arch_target_name "$logical") ||
@@ -384,7 +410,7 @@ for target in python-pywalfox niriswitcher ttf-lxgw-wenkai-screen; do
         fail "unsupported Fedora optional target must be skipped: $target"
     fi
 done
-for target in bluetui hyprpicker nwg-look satty swayosd; do
+for target in bluetui hyprpicker nwg-look satty swayosd thefuck; do
     if printf '%s\n' "${TARGETS[@]}" | grep -Fqx "$target"; then
         fail "unavailable Fedora optional target must be skipped: $target"
     fi
@@ -394,8 +420,18 @@ if printf '%s\n' "$(niri_required_package_targets)" | grep -Eq '^AUR:'; then
 fi
 printf '%s\n' "$(niri_required_package_targets)" | grep -Fqx polkit-kde ||
     fail 'Fedora desktop required set must use polkit-kde'
+printf '%s\n' "$(niri_required_package_targets)" | grep -Fqx jq ||
+    fail 'Fedora desktop required set must install jq for runtime smoke'
 printf '%s\n' "$(niri_required_package_targets)" | grep -Fqx awww ||
     fail 'Fedora desktop required set must keep the upstream awww target'
+for target in grim slurp wl-clipboard python-opencv python-numpy pngquant \
+    ffmpeg; do
+    printf '%s\n' "$(niri_required_package_targets)" | grep -Fqx "$target" ||
+        fail "Fedora desktop required set is missing capture target $target"
+done
+if printf '%s\n' "$(niri_required_package_targets)" | grep -Fqx ydotool; then
+    fail 'manual longshot required set must not require ydotool'
+fi
 if printf '%s\n' "$(niri_required_package_targets)" | grep -Eq '^swww$|^polkit-gnome$'; then
     fail 'Fedora desktop required set must not require legacy swww/polkit-gnome'
 fi
@@ -479,6 +515,13 @@ niri_quickshell_deployment_state_satisfied ||
     fail 'Fedora staged QuickShell conversion must satisfy the deployment state'
 ensure_niri_fedora_session_compatibility "$TARGET_USER" ||
     fail 'Fedora session compatibility must install the initializer before wallpaper convergence'
+niri_fedora_nvidia_settings_autostart_satisfied "$TARGET_USER" ||
+    fail 'Fedora session compatibility must persist the NVIDIA settings override without a user bus'
+cmp -s "$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE" \
+    <(niri_fedora_nvidia_settings_autostart_contract) ||
+    fail 'Fedora NVIDIA settings override must match the exact Hidden contract'
+[ "$(stat -c '%a' "$NIRI_FEDORA_NVIDIA_SETTINGS_AUTOSTART_FILE")" = 644 ] ||
+    fail 'Fedora NVIDIA settings override must use mode 0644'
 ensure_niri_wallpaper_backend "$TARGET_USER" ||
     fail 'Fedora wallpaper apply must accept initializer-managed Niri startup without live QuickShell edits'
 ensure_niri_waypaper_backend "$TARGET_USER" ||
@@ -491,8 +534,8 @@ if grep -Eq 'awww-daemon|waypaper|niri_set_overview_blur_dark_bg|niri_auto_blur_
     "$NIRI_CONFIG_FILE"; then
     fail 'Fedora Niri config must remove the old parallel wallpaper startup chain'
 fi
-grep -Fq 'spawn-sh "lockscreen.sh"' "$NIRI_BINDS_FILE" ||
-    fail 'Fedora lockscreen binding must use the managed wrapper'
+grep -Fq "spawn \"$NIRI_LOCKSCREEN_SCRIPT_FILE\"" "$NIRI_BINDS_FILE" ||
+    fail 'Fedora lockscreen binding must use the absolute managed wrapper'
 grep -Eq 'shorin-fedora-awww-query|awww query' \
     "$NIRI_QUICKSHELL_DIR/lockscreen/shell.qml" ||
     fail 'Fedora staged QuickShell config must use the quiet awww query wrapper'

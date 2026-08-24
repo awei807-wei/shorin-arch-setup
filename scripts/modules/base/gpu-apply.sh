@@ -14,6 +14,11 @@ GPU_INFO=$(base_gpu_info) || die 'Unable to inspect GPU hardware.'
 base_nvidia_model_supported "$GPU_INFO" ||
     die 'The detected NVIDIA GPU has no declared driver target.'
 
+if platform_is_fedora && base_gpu_has_vendor NVIDIA "$GPU_INFO"; then
+    base_fedora_nvidia_provider_preflight ||
+        die 'Fedora NVIDIA provider preflight failed before package installation.'
+fi
+
 if [ "$(base_gpu_count "$GPU_INFO")" -ge 2 ] &&
     base_gpu_has_vendor NVIDIA "$GPU_INFO"; then
     ensure_key_value /etc/environment GSK_RENDERER gl

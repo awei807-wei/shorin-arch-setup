@@ -13,11 +13,63 @@ export APPLICATION_SOURCE_LIST
 
 applications_inspect() {
     local phase=$1 entry manifest_entries pending_status=0
-    local metadata_status=0 pending_reason
+    local metadata_status=0 pending_reason intent_state intent_status=0
 
     if [ -z "${TARGET_USER:-}" ] || [ -z "${HOME_DIR:-}" ]; then
         module_inspection_failed target-user-context
         return
+    fi
+    if application_manifest_metadata_present "$APPLICATION_MANIFEST"; then
+        intent_state=$(application_selection_intent_state \
+            "$APPLICATION_MANIFEST" "$APPLICATION_SOURCE_LIST") ||
+            intent_status=$?
+        if [ "$intent_status" -eq 0 ] && [ "$intent_state" = selected-all ]; then
+            if [ "$phase" = check ]; then
+                module_drift application-selection-intent-commit-cleanup
+            else
+                module_verify_failed application-selection-intent-commit-cleanup
+            fi
+            return 0
+        fi
+        intent_status=0
+        intent_state=''
+    fi
+    if [ ! -s "$APPLICATION_MANIFEST" ] ||
+        ! application_manifest_metadata_present "$APPLICATION_MANIFEST"; then
+        intent_state=$(application_selection_intent_state \
+            "$APPLICATION_MANIFEST" "$APPLICATION_SOURCE_LIST") ||
+            intent_status=$?
+        case "$intent_status:$intent_state" in
+            0:pending-selection)
+                if [ "$phase" = check ]; then
+                    module_drift application-selection-required
+                else
+                    module_skip application-selection-required
+                fi
+                return 0
+                ;;
+            0:selected-all)
+                if [ "$phase" = check ]; then
+                    module_drift application-manifest-commit-required
+                else
+                    module_skip application-manifest-commit-required
+                fi
+                return 0
+                ;;
+            0:declined)
+                module_skip application-selection-declined
+                return 0
+                ;;
+            1:) ;;
+            *)
+                if [ "$phase" = check ]; then
+                    module_inspection_failed application-selection-intent-invalid
+                else
+                    module_verify_failed application-selection-intent-invalid
+                fi
+                return 0
+                ;;
+        esac
     fi
     if [ ! -s "$APPLICATION_MANIFEST" ]; then
         if [ "$phase" = verify ]; then
@@ -64,6 +116,32 @@ applications_inspect() {
             fi
             ;;
     esac
+    # Metadata drift means the manifest is not authoritative yet.  Validate
+    # only its syntax, then stop before probing untrusted/custom targets.  A
+    # state probe can return an inspection error for a legacy custom entry and
+    # would otherwise block the explicitly authorized adoption path.
+    if [ "$metadata_status" -ne 0 ]; then
+        if ! manifest_entries=$(application_manifest_entries); then
+            if [ "$phase" = check ]; then
+                module_inspection_failed application-manifest-unreadable
+            else
+                module_verify_failed application-manifest-unreadable
+            fi
+            return
+        fi
+        while IFS= read -r entry; do
+            [ -n "$entry" ] || continue
+            if ! application_entry_is_valid "$entry"; then
+                if [ "$phase" = check ]; then
+                    module_inspection_failed "application-manifest-invalid:$entry"
+                else
+                    module_verify_failed "application-manifest-invalid:$entry"
+                fi
+                break
+            fi
+        done <<< "$manifest_entries"
+        return 0
+    fi
     if ! manifest_entries=$(application_manifest_entries); then
         if [ "$phase" = check ]; then
             module_inspection_failed application-manifest-unreadable
@@ -134,7 +212,59 @@ applications_inspect() {
 applications_check() { applications_inspect check; }
 
 applications_apply() {
-    local status=0 manifest_entries migrate_status=0
+    local status=0 manifest_entries migrate_status=0 intent_state intent_status=0
+
+    if application_manifest_metadata_present "$APPLICATION_MANIFEST"; then
+        intent_state=$(application_selection_intent_state \
+            "$APPLICATION_MANIFEST" "$APPLICATION_SOURCE_LIST") ||
+            intent_status=$?
+        if [ "$intent_status" -eq 0 ] && [ "$intent_state" = selected-all ]; then
+            clear_application_selection_intent "$APPLICATION_MANIFEST"
+            return
+        fi
+        intent_status=0
+        intent_state=''
+    fi
+
+    if [ "${SHORIN_MODE:-install}" = repair ] &&
+        ! application_manifest_metadata_present "$APPLICATION_MANIFEST"; then
+        intent_state=$(application_selection_intent_state \
+            "$APPLICATION_MANIFEST" "$APPLICATION_SOURCE_LIST") ||
+            intent_status=$?
+        case "$intent_status:$intent_state" in
+            0:pending-selection)
+                if [ ! -t 0 ]; then
+                    warn 'Application selection is still pending; rerun repair from a terminal to choose targets.'
+                    module_skip application-selection-required
+                    return 0
+                fi
+                SHORIN_APPLICATION_SELECTION_REQUIRED=1 \
+                    bash "$SHORIN_ROOT/scripts/modules/applications/apply.sh" ||
+                    status=$?
+                case "$status" in
+                    0) return 0 ;;
+                    "$RC_SKIPPED")
+                        module_skip application-pending
+                        return 0
+                        ;;
+                    *) return "$status" ;;
+                esac
+                ;;
+            0:selected-all)
+                initialize_default_application_manifest \
+                    "$APPLICATION_SOURCE_LIST" "$APPLICATION_MANIFEST" || return
+                ;;
+            0:declined)
+                module_skip application-selection-declined
+                return 0
+                ;;
+            1:) ;;
+            *)
+                error 'Application selection intent is invalid; refusing installed-state migration.'
+                return 1
+                ;;
+        esac
+    fi
 
     if [ "${SHORIN_MODE:-install}" = repair ] &&
         [ -f "$APPLICATION_MANIFEST" ] &&

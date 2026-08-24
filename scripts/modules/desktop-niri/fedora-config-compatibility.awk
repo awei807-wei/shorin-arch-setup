@@ -101,6 +101,22 @@ function is_lockscreen_quickshell_command(text) {
         || text ~ /quickshell[^"']*-[[:space:]]*p[[:space:]]+[^"']*lockscreen/
 }
 
+function is_lockscreen_command(text) {
+    return (lockscreen != "" && contains_command(text, lockscreen)) ||
+        contains_command(text, "lockscreen-wait.sh") ||
+        contains_command(text, "lockscreen.sh") ||
+        is_lockscreen_quickshell_command(text)
+}
+
+function managed_lockscreen_token(token) {
+    if (index(token, "-at-startup") > 0) return "spawn-at-startup"
+    return "spawn"
+}
+
+function managed_lockscreen_invocation(token) {
+    return managed_lockscreen_token(token) " \"" kdl_escape(lockscreen) "\""
+}
+
 function shell_quote(value,    result) {
     result=value
     gsub(/\\/, "\\\\", result)
@@ -118,10 +134,8 @@ function kdl_escape(value,    result) {
 
 function replace_fedora_compatibility(text,    result) {
     result=text
-    gsub(/lockscreen-wait[.]sh/, "lockscreen.sh", result)
     gsub(/\/usr\/lib[^[:space:]" ]*polkit-gnome-authentication-agent-1/, polkit, result)
     gsub(/polkit-gnome-authentication-agent-1/, polkit, result)
-    if (is_lockscreen_quickshell_command(result)) result="lockscreen.sh"
     return result
 }
 
@@ -189,11 +203,28 @@ function replace_fedora_compatibility(text,    result) {
             }
             next
         }
+        if (is_lockscreen_command(original)) {
+            if (lockscreen == "") {
+                invalid=1
+                transform_error=1
+                if (!validate) print line
+                next
+            }
+            if (validate) {
+                # Shell strings, basenames and arbitrary wrapper paths are not
+                # the managed contract.  Apply rewrites all of them to one
+                # direct absolute executable invocation.
+                invalid=1
+                next
+            }
+            replacement=managed_lockscreen_invocation(token)
+            line=substr(line,1,position-1) replacement \
+                substr(rest,consumed)
+            print line
+            next
+        }
         if (validate) {
             if (has_legacy_command(original)) invalid=1
-            if (require_lockscreen && contains_command(original,"lockscreen.sh")) {
-                lockscreen_seen=1
-            }
             for (i=1; i<=count; i++) {
                 command=commands[i]
                 if (contains_command(original,command) &&
@@ -256,11 +287,28 @@ function replace_fedora_compatibility(text,    result) {
         }
         next
     }
+    first_original=values[1]
+    if (is_lockscreen_command(first_original)) {
+        if (lockscreen == "") {
+            invalid=1
+            transform_error=1
+            if (!validate) print line
+            next
+        }
+        if (validate) {
+            if (first_original != lockscreen || n != 1) invalid=1
+            else if (require_lockscreen && token == "spawn-at-startup") {
+                lockscreen_seen++
+            }
+            next
+        }
+        replacement=managed_lockscreen_invocation(token)
+        line=substr(line,1,position-1) replacement substr(rest,consumed)
+        print line
+        next
+    }
     if (validate) {
         if (has_legacy_command(values[1])) invalid=1
-        if (require_lockscreen && contains_command(values[1],"lockscreen.sh")) {
-            lockscreen_seen=1
-        }
         for (i=1; i<=count; i++) {
             command=commands[i]
             if (contains_command(values[1],command)) invalid=1
@@ -268,13 +316,6 @@ function replace_fedora_compatibility(text,    result) {
         next
     }
 
-    first_original=values[1]
-    if (is_lockscreen_quickshell_command(first_original)) {
-        replacement=token " \"lockscreen.sh\""
-        line=substr(line,1,position-1) replacement substr(rest,consumed)
-        print line
-        next
-    }
     first_updated=replace_fedora_compatibility(first_original)
     base=first_updated
     sub(/^.*\//,"",base)
@@ -303,8 +344,9 @@ function replace_fedora_compatibility(text,    result) {
 }
 
 END {
+    if (!validate && transform_error) exit 1
     if (validate && (invalid || wallpaper_invalid ||
-        (require_lockscreen && !lockscreen_seen) ||
+        (require_lockscreen && lockscreen_seen != 1) ||
         (wallpaper_startup && initializer_seen != 1))) exit 1
     if (!validate && wallpaper_startup && !initializer_seen) {
         print "spawn-at-startup \"" (initializer == "" ? \

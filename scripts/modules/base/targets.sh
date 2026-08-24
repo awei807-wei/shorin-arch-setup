@@ -46,7 +46,8 @@ base_declared_packages() {
             alsa-firmware alsa-ucm-conf base-devel fastfetch \
             glibc-langpack-zh fcitx5 fcitx5-chinese-addons \
             fcitx5-configtool fcitx5-gtk fcitx5-mozc fcitx5-qt fcitx5-rime \
-            flatpak fontconfig jetbrains-mono-fonts libva-utils noto-fonts \
+            flatpak fontconfig git jetbrains-mono-fonts libva-utils \
+            networkmanager noto-fonts \
             noto-fonts-cjk noto-fonts-emoji \
             pavucontrol pciutils pipewire pipewire-alsa pipewire-jack \
             pipewire-pulse sof-firmware terminus-fonts-console \
@@ -58,11 +59,23 @@ base_declared_packages() {
         adobe-source-han-sans-cn-fonts adobe-source-han-serif-cn-fonts \
         alsa-firmware alsa-ucm-conf archlinuxcn-keyring base-devel fastfetch \
         fcitx5 fcitx5-chinese-addons fcitx5-configtool fcitx5-gtk \
-        fcitx5-mozc fcitx5-qt fcitx5-rime flatpak libva-utils noto-fonts \
-        noto-fonts-cjk noto-fonts-emoji pavucontrol pciutils pipewire \
+        fcitx5-mozc fcitx5-qt fcitx5-rime flatpak libva-utils \
+        networkmanager noto-fonts noto-fonts-cjk noto-fonts-emoji \
+        pavucontrol pciutils pipewire \
         pipewire-alsa pipewire-jack pipewire-pulse power-profiles-daemon \
         sof-firmware terminus-font ttf-jetbrains-mono-nerd usbutils \
         wireplumber xdg-user-dirs yay
+}
+
+# Arch's networkmanager and Fedora's translated NetworkManager-tui package
+# both own this executable.  Keeping the command beside the package manifest
+# ensures an installed-but-incomplete package cannot satisfy base verify.
+base_required_commands() {
+    printf '%s\n' nmtui
+}
+
+base_required_command_present() {
+    command -v "$1" >/dev/null 2>&1
 }
 
 base_global_service_units() {
@@ -232,6 +245,229 @@ base_gpu_count() {
         info=$(base_gpu_info) || return 2
     fi
     awk 'NF { count++ } END { print count + 0 }' <<< "$info"
+}
+
+# RPM Fusion and NVIDIA's CUDA repository ship mutually incompatible Fedora
+# driver families.  Keep names which are exclusive to the external family
+# explicit so a pre-existing CUDA driver cannot make the package loop install
+# half of the RPM Fusion stack before DNF discovers the conflict.  Some helper
+# RPMs have the same name in both repositories; those are classified from
+# their installed RPM provenance below.  CUDA toolkits without these driver
+# RPMs remain supported.
+base_fedora_nvidia_external_driver_packages() {
+    printf '%s\n' \
+        cuda-drivers \
+        kmod-nvidia-latest-dkms \
+        kmod-nvidia-open-dkms \
+        nvidia-driver \
+        nvidia-driver-common \
+        nvidia-driver-cuda \
+        nvidia-driver-cuda-libs \
+        nvidia-driver-libs \
+        nvidia-driver-selinux \
+        nvidia-kmod-common \
+        nvidia-open \
+        xorg-x11-nvidia
+}
+
+# These package names are used by both NVIDIA's CUDA repository and RPM
+# Fusion.  A name-only check would either miss part of the external driver
+# family or reject a valid RPM Fusion installation, so inspect their RPM
+# metadata before assigning them to a provider.
+base_fedora_nvidia_shared_driver_packages() {
+    printf '%s\n' \
+        nvidia-modprobe \
+        nvidia-persistenced \
+        nvidia-settings \
+        nvidia-xconfig
+}
+
+base_fedora_nvidia_rpmfusion_driver_packages() {
+    printf '%s\n' akmod-nvidia xorg-x11-drv-nvidia-cuda
+}
+
+# Print the provider recorded by an installed RPM.  Vendor, packager,
+# distribution and project URL are stable RPM header fields and jointly avoid
+# trusting the shared package name.  Callers first establish that the package
+# is installed; therefore even rpm's ordinary status 1 is an inspection error
+# here, not a normal absence result.
+base_fedora_nvidia_package_provider() {
+    local package=$1 metadata line vendor packager distribution url
+    local origin_metadata line_provider='' provider='' status=0
+
+    command -v rpm >/dev/null 2>&1 || return 2
+    metadata=$(LC_ALL=C rpm -q --qf \
+        '%{VENDOR}\t%{PACKAGER}\t%{DISTRIBUTION}\t%{URL}\n' \
+        "$package" 2>/dev/null) || status=$?
+    if [ "$status" -ne 0 ]; then
+        [ "$status" -ne 1 ] || status=2
+        return "$status"
+    fi
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        IFS=$'\t' read -r vendor packager distribution url <<< "$line"
+        origin_metadata="$vendor"$'\t'"$packager"$'\t'"$distribution"
+        # An upstream URL commonly mentions NVIDIA even for an RPM Fusion
+        # build.  Accept RPM Fusion only from package-origin header fields,
+        # then use all fields to conservatively identify an external build.
+        if grep -Eqi \
+            '(^|[^[:alnum:]])RPM[[:space:]-]*Fusion([^[:alnum:]]|$)' \
+            <<< "$origin_metadata"; then
+            line_provider=rpmfusion
+        elif grep -Eqi \
+            '(^|[^[:alnum:]])(NVIDIA|CUDA)([^[:alnum:]]|$)' \
+            <<< "$line"; then
+            line_provider=external
+        else
+            # An installed package of unknown provenance must not participate
+            # in a kernel-driver provider transaction.
+            return 3
+        fi
+        if [ -n "$provider" ] && [ "$provider" != "$line_provider" ]; then
+            # Multiple installed instances of the same name must not straddle
+            # providers even if each individual RPM has recognizable origin.
+            return 4
+        fi
+        provider=$line_provider
+    done <<< "$metadata"
+    [ -n "$provider" ] || return 3
+    printf '%s\n' "$provider"
+}
+
+base_fedora_installed_packages_from_list() {
+    local package package_status=0
+
+    while IFS= read -r package; do
+        [ -n "$package" ] || continue
+        if platform_rpm_installed "$package"; then
+            printf '%s\n' "$package"
+        else
+            package_status=$?
+            [ "$package_status" -eq 1 ] || return "$package_status"
+        fi
+    done
+}
+
+base_fedora_nvidia_installed_packages_from_provider() {
+    local expected_provider=$1 package installed_status=0 provider provider_status
+
+    while IFS= read -r package; do
+        [ -n "$package" ] || continue
+        installed_status=0
+        if platform_rpm_installed "$package"; then
+            :
+        else
+            installed_status=$?
+            [ "$installed_status" -eq 1 ] && continue
+            return "$installed_status"
+        fi
+        provider_status=0
+        provider=$(base_fedora_nvidia_package_provider "$package") ||
+            provider_status=$?
+        [ "$provider_status" -eq 0 ] || return "$provider_status"
+        if [ "$provider" = "$expected_provider" ]; then
+            printf '%s\n' "$package"
+        fi
+    done
+}
+
+base_fedora_nvidia_installed_external_driver_packages() {
+    platform_is_fedora || return 0
+    base_fedora_installed_packages_from_list < <(
+        base_fedora_nvidia_external_driver_packages
+    ) || return
+    base_fedora_nvidia_installed_packages_from_provider external < <(
+        base_fedora_nvidia_shared_driver_packages
+    ) || return
+    # The desired target names themselves are only valid when their installed
+    # RPM headers identify RPM Fusion.  Treat an NVIDIA/CUDA build using one
+    # of those names as external as well.
+    base_fedora_nvidia_installed_packages_from_provider external < <(
+        base_fedora_nvidia_rpmfusion_driver_packages
+    )
+}
+
+base_fedora_nvidia_installed_rpmfusion_driver_packages() {
+    platform_is_fedora || return 0
+    base_fedora_nvidia_installed_packages_from_provider rpmfusion < <(
+        base_fedora_nvidia_rpmfusion_driver_packages
+    ) || return
+    base_fedora_nvidia_installed_packages_from_provider rpmfusion < <(
+        base_fedora_nvidia_shared_driver_packages
+    )
+}
+
+base_fedora_nvidia_rpmfusion_package_satisfied() {
+    local package=$1 installed_status=0 provider provider_status=0
+
+    platform_is_fedora || return 1
+    if platform_rpm_installed "$package"; then
+        :
+    else
+        installed_status=$?
+        return "$installed_status"
+    fi
+    provider=$(base_fedora_nvidia_package_provider "$package") ||
+        provider_status=$?
+    [ "$provider_status" -eq 0 ] || return "$provider_status"
+    [ "$provider" = rpmfusion ]
+}
+
+base_gpu_package_target_satisfied() {
+    local target=$1 package
+
+    if platform_is_fedora; then
+        package=$(base_gpu_package_name "$target")
+        case "$package" in
+            akmod-nvidia|xorg-x11-drv-nvidia-cuda)
+                base_fedora_nvidia_rpmfusion_package_satisfied "$package"
+                return
+                ;;
+        esac
+    fi
+    declared_package_target_satisfied "$target"
+}
+
+base_fedora_nvidia_provider_compatible() {
+    local incompatible status=0
+
+    platform_is_fedora || return 0
+    incompatible=$(base_fedora_nvidia_installed_external_driver_packages) ||
+        status=$?
+    [ "$status" -eq 0 ] || return "$status"
+    [ -z "$incompatible" ]
+}
+
+base_fedora_nvidia_provider_preflight() {
+    local incompatible rpmfusion incompatible_inline rpmfusion_inline status=0
+
+    platform_is_fedora || return 0
+    incompatible=$(base_fedora_nvidia_installed_external_driver_packages) ||
+        status=$?
+    if [ "$status" -ne 0 ]; then
+        error 'Unable to inspect installed Fedora NVIDIA provider packages; refusing to start a driver transaction.'
+        return "$status"
+    fi
+    [ -n "$incompatible" ] || return 0
+
+    status=0
+    rpmfusion=$(base_fedora_nvidia_installed_rpmfusion_driver_packages) ||
+        status=$?
+    if [ "$status" -ne 0 ]; then
+        error 'Unable to inspect the installed RPM Fusion NVIDIA provider; refusing to start a driver transaction.'
+        return "$status"
+    fi
+    incompatible_inline=${incompatible//$'\n'/ }
+    rpmfusion_inline=${rpmfusion//$'\n'/ }
+    if [ -n "$rpmfusion" ]; then
+        error "Mixed Fedora NVIDIA providers detected (RPM Fusion: $rpmfusion_inline; external: $incompatible_inline)."
+    else
+        error "An external Fedora NVIDIA driver provider is installed: $incompatible_inline."
+    fi
+    error 'This script converges NVIDIA through RPM Fusion and will not use --allowerasing or perform a partial provider replacement.'
+    error "Review the dependency impact without changing packages: dnf remove --assumeno $incompatible_inline"
+    error "To use the RPM Fusion desired state, migrate the complete external driver family, run 'dnf check', reboot if kernel modules changed, then rerun repair."
+    return 1
 }
 
 base_nvidia_model_supported() {

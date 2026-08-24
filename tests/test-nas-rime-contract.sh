@@ -55,7 +55,66 @@ RIME_INSTALLATION_ID=test-workstation
 export NAS_IP NAS_REMOTE_PATH NAS_LOCAL_PATH RIME_INSTALLATION_ID
 nas_rime_contract_init
 
+SYSTEMCTL_LOG="$TEST_DIR/systemctl.log"
+systemctl() {
+    printf '%s\n' "$*" >> "$SYSTEMCTL_LOG"
+    [ "${SYSTEMCTL_RESULT:-0}" -eq 0 ]
+}
+nas_rime_reload_systemd_for_fstab "$FSTAB_FILE" ||
+    fail 'fixture fstab must skip the production systemd reload'
+[ ! -e "$SYSTEMCTL_LOG" ] ||
+    fail 'fixture fstab must not call systemctl daemon-reload'
+nas_rime_reload_systemd_for_fstab /etc/fstab ||
+    fail 'production fstab must reload systemd successfully'
+[ "$(< "$SYSTEMCTL_LOG")" = 'daemon-reload' ] ||
+    fail 'production fstab must call exactly systemctl daemon-reload'
+SYSTEMCTL_RESULT=1
+if nas_rime_reload_systemd_for_fstab /etc/fstab; then
+    fail 'a failed production daemon-reload must propagate failure'
+fi
+unset SYSTEMCTL_RESULT
+
 mkdir -p "$RIME_DIR" "$RIME_USER_UNIT_DIR/timers.target.wants"
+printf 'installation_id: "%s"\nsync_dir: "%s"\n' \
+    "$RIME_INSTALLATION_ID" "$RIME_SYNC_DIR" > "$RIME_INSTALLATION_FILE"
+rime_installation_matches ||
+    fail 'double-quoted Rime YAML scalars must satisfy the contract'
+
+printf 'installation_id: %s\nsync_dir: "%s"\n' \
+    "$RIME_INSTALLATION_ID" "$RIME_SYNC_DIR" > "$RIME_INSTALLATION_FILE"
+rime_installation_matches ||
+    fail 'Rime may rewrite only the installation ID as a plain scalar'
+
+printf 'installation_id: %s\nsync_dir: %s\n' \
+    "$RIME_INSTALLATION_ID" "$RIME_SYNC_DIR" > "$RIME_INSTALLATION_FILE"
+rime_installation_matches ||
+    fail 'plain Rime YAML scalars must equal their quoted serialization'
+
+printf "installation_id: '%s'\nsync_dir: '%s'\n" \
+    "$RIME_INSTALLATION_ID" "$RIME_SYNC_DIR" > "$RIME_INSTALLATION_FILE"
+rime_installation_matches ||
+    fail 'single-quoted Rime YAML scalars must equal their plain serialization'
+
+printf 'installation_id: wrong\nsync_dir: %s\n' \
+    "$RIME_SYNC_DIR" > "$RIME_INSTALLATION_FILE"
+if rime_installation_matches; then
+    fail 'a wrong Rime installation ID must not satisfy the contract'
+fi
+
+printf 'installation_id: %s\ninstallation_id: %s\nsync_dir: %s\n' \
+    "$RIME_INSTALLATION_ID" "$RIME_INSTALLATION_ID" \
+    "$RIME_SYNC_DIR" > "$RIME_INSTALLATION_FILE"
+if rime_installation_matches; then
+    fail 'duplicate Rime installation ID keys must not satisfy the contract'
+fi
+
+printf 'installation_id: %s\nsync_dir: %s\nsync_dir: %s\n' \
+    "$RIME_INSTALLATION_ID" "$RIME_SYNC_DIR" \
+    "$RIME_SYNC_DIR" > "$RIME_INSTALLATION_FILE"
+if rime_installation_matches; then
+    fail 'duplicate Rime sync directory keys must not satisfy the contract'
+fi
+
 printf 'installation_id: "%s"\nsync_dir: "%s"\n' \
     "$RIME_INSTALLATION_ID" "$RIME_SYNC_DIR" > "$RIME_INSTALLATION_FILE"
 rime_service_contract > "$RIME_SERVICE_FILE"

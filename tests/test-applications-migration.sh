@@ -47,6 +47,7 @@ run_applications_phase() {
 }
 
 source "$ROOT_DIR/scripts/modules/applications/targets.sh"
+source "$ROOT_DIR/scripts/checks/preflight.sh"
 
 CUSTOM_PATH="$TEST_DIR/custom-profile/custom-applications.list"
 RESOLVED_PATH=$(env APPLICATION_MANIFEST="$CUSTOM_PATH" SHORIN_ROOT="$ROOT_DIR" \
@@ -303,6 +304,142 @@ UNMARKED_ROLLBACK_BACKUP=$(find "$(dirname "$UNMARKED_ROLLBACK_MANIFEST")" -maxd
 [ -n "$UNMARKED_ROLLBACK_BACKUP" ] ||
     fail 'unmarked adoption rollback must preserve a unique transaction backup'
 unset SHORIN_ADOPT_LEGACY_APPLICATIONS
+
+# A fresh install must declare its non-interactive default selection before an
+# upstream required module can fail and block Applications.  Repair can then
+# resume the same selected target instead of inferring a smaller legacy set.
+INTENT_SOURCE="$TEST_DIR/intent-source.txt"
+INTENT_MANIFEST="$TEST_DIR/intent-profile/applications.list"
+cat > "$INTENT_SOURCE" <<'EOF'
+wine # default target
+neovim
+wine
+flatpak:it.mijorus.gearlever
+EOF
+(
+    APPLICATION_SOURCE_LIST="$INTENT_SOURCE"
+    APPLICATION_MANIFEST="$INTENT_MANIFEST"
+    export APPLICATION_SOURCE_LIST APPLICATION_MANIFEST
+    prepare_install_application_manifest install storage base applications
+)
+cat > "$TEST_DIR/intent-expected" <<'EOF'
+flatpak:it.mijorus.gearlever
+neovim
+wine
+EOF
+cmp -s "$TEST_DIR/intent-expected" "$INTENT_MANIFEST" ||
+    fail 'fresh install intent must persist the normalized default selection'
+grep -Fqx 'mode=selected' "$INTENT_MANIFEST.meta" ||
+    fail 'fresh install intent must be authoritative selected metadata'
+
+# A terminal-backed install still owns an explicit Y/n + fzf choice.  The
+# preflight recovery declaration must not silently convert that future choice
+# into a full selection when an earlier module fails.
+TTY_INTENT_MANIFEST="$TEST_DIR/tty-intent-profile/applications.list"
+if command -v script >/dev/null 2>&1; then
+    script -q -e -c \
+        "env SHORIN_ROOT='$ROOT_DIR' SHORIN_DISTRO=arch SHORIN_MODE=install SHORIN_READ_ONLY=0 APPLICATION_SOURCE_LIST='$INTENT_SOURCE' APPLICATION_MANIFEST='$TTY_INTENT_MANIFEST' bash -c 'source \"\$SHORIN_ROOT/scripts/modules/applications/targets.sh\"; source \"\$SHORIN_ROOT/scripts/checks/preflight.sh\"; prepare_install_application_manifest install base applications'" \
+        /dev/null >/dev/null 2>&1 ||
+        fail 'TTY application-intent fixture could not run'
+    [ ! -e "$TTY_INTENT_MANIFEST" ] ||
+        fail 'interactive install preflight must not preselect every application'
+    grep -Fqx 'state=pending-selection' "$TTY_INTENT_MANIFEST.intent" ||
+        fail 'interactive install preflight must persist pending selection state'
+else
+    write_application_selection_intent \
+        "$INTENT_SOURCE" "$TTY_INTENT_MANIFEST" pending-selection
+fi
+
+PENDING_REPAIR_MANIFEST="$TEST_DIR/pending-repair/applications.list"
+write_application_selection_intent \
+    "$INTENT_SOURCE" "$PENDING_REPAIR_MANIFEST" pending-selection
+run_applications_phase \
+    "$PENDING_REPAIR_MANIFEST" check repair "$INTENT_SOURCE"
+[ "$PHASE_STATUS" -eq 10 ] ||
+    fail 'repair check must retain a pending interactive selection as drift'
+grep -Fq application-selection-required <<< "$PHASE_OUTPUT" ||
+    fail 'pending selection drift must be explicit'
+run_applications_phase \
+    "$PENDING_REPAIR_MANIFEST" apply repair "$INTENT_SOURCE"
+[ "$PHASE_STATUS" -eq 20 ] ||
+    fail 'non-interactive repair must not guess a pending application selection'
+[ ! -e "$PENDING_REPAIR_MANIFEST" ] ||
+    fail 'non-interactive repair must not create a manifest from installed state'
+
+printf 'partially-written-target\n' > "$PENDING_REPAIR_MANIFEST"
+run_applications_phase \
+    "$PENDING_REPAIR_MANIFEST" check repair "$INTENT_SOURCE"
+grep -Fq application-selection-required <<< "$PHASE_OUTPUT" ||
+    fail 'pending intent must dominate an interrupted manifest transaction'
+
+DECLINED_MANIFEST="$TEST_DIR/declined-profile/applications.list"
+write_application_selection_intent \
+    "$INTENT_SOURCE" "$DECLINED_MANIFEST" declined
+run_applications_phase "$DECLINED_MANIFEST" check repair "$INTENT_SOURCE"
+[ "$PHASE_STATUS" -eq 20 ] ||
+    fail 'a declined application selection must remain an explicit skip'
+grep -Fq application-selection-declined <<< "$PHASE_OUTPUT" ||
+    fail 'declined application selection reason must be preserved'
+
+INTERRUPTED_MANIFEST="$TEST_DIR/interrupted-profile/applications.list"
+# Earlier rollback fixtures temporarily replace and unset the metadata writer;
+# restore the real manifest transaction helpers for commit-recovery coverage.
+source "$ROOT_DIR/scripts/modules/applications/manifest.sh"
+write_application_selection_intent \
+    "$INTENT_SOURCE" "$INTERRUPTED_MANIFEST" selected-all
+printf 'partially-committed-target\n' > "$INTERRUPTED_MANIFEST"
+initialize_default_application_manifest \
+    "$INTENT_SOURCE" "$INTERRUPTED_MANIFEST"
+cmp -s "$TEST_DIR/intent-expected" "$INTERRUPTED_MANIFEST" ||
+    fail 'selected-all intent must recover an interrupted manifest commit'
+grep -Fqx 'mode=selected' "$INTERRUPTED_MANIFEST.meta" ||
+    fail 'interrupted default selection recovery must commit metadata'
+[ ! -e "$INTERRUPTED_MANIFEST.intent" ] ||
+    fail 'completed default selection commit must clear its intent'
+
+write_application_selection_intent \
+    "$INTENT_SOURCE" "$INTERRUPTED_MANIFEST" selected-all
+run_applications_phase \
+    "$INTERRUPTED_MANIFEST" check repair "$INTENT_SOURCE"
+[ "$PHASE_STATUS" -eq 10 ] ||
+    fail 'a stale selected-all commit intent must trigger cleanup'
+run_applications_phase \
+    "$INTERRUPTED_MANIFEST" apply repair "$INTENT_SOURCE"
+[ "$PHASE_STATUS" -eq 0 ] ||
+    fail 'repair must clear a stale completed selected-all intent'
+[ ! -e "$INTERRUPTED_MANIFEST.intent" ] ||
+    fail 'repair did not clear the stale selected-all commit intent'
+
+printf 'existing-user-selection\n' > "$INTENT_MANIFEST"
+INTENT_BEFORE="$TEST_DIR/intent-before"
+cp "$INTENT_MANIFEST" "$INTENT_BEFORE"
+(
+    APPLICATION_SOURCE_LIST="$INTENT_SOURCE"
+    APPLICATION_MANIFEST="$INTENT_MANIFEST"
+    export APPLICATION_SOURCE_LIST APPLICATION_MANIFEST
+    prepare_install_application_manifest install base applications
+)
+cmp -s "$INTENT_BEFORE" "$INTENT_MANIFEST" ||
+    fail 'early install intent must not replace a pre-existing selection'
+
+NO_APPS_INTENT="$TEST_DIR/no-apps-profile/applications.list"
+(
+    APPLICATION_SOURCE_LIST="$INTENT_SOURCE"
+    APPLICATION_MANIFEST="$NO_APPS_INTENT"
+    export APPLICATION_SOURCE_LIST APPLICATION_MANIFEST
+    prepare_install_application_manifest install storage base
+)
+[ ! -e "$NO_APPS_INTENT" ] ||
+    fail 'an install without Applications selected must not create app intent'
+REPAIR_INTENT="$TEST_DIR/repair-intent-profile/applications.list"
+(
+    APPLICATION_SOURCE_LIST="$INTENT_SOURCE"
+    APPLICATION_MANIFEST="$REPAIR_INTENT"
+    export APPLICATION_SOURCE_LIST APPLICATION_MANIFEST
+    prepare_install_application_manifest repair base applications
+)
+[ ! -e "$REPAIR_INTENT" ] ||
+    fail 'repair must not invent a fresh-install application selection'
 
 MISSING_MANIFEST="$TEST_DIR/missing-profile/applications.list"
 run_applications_phase "$MISSING_MANIFEST" check repair

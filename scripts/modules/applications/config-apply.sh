@@ -6,44 +6,22 @@ trap 'printf "ERROR: %s:%s: %s\n" \
 
 # Application-specific convergence. This file is sourced after target parsing.
 
-wine_server_process_status() {
-    local pids status=0
-
-    command -v pgrep >/dev/null 2>&1 || return 2
-    pids=$(pgrep -u "$TARGET_USER" -x wineserver 2>/dev/null) || status=$?
-    case "$status" in
-        0) [ -n "$pids" ] ;;
-        1) return 1 ;;
-        *) return "$status" ;;
-    esac
-}
-
 wine_server_verify_stopped() {
-    local log_no_process=${1:-0} process_status=0
+    local wine_prefix=$1
 
-    wine_server_process_status || process_status=$?
-    case "$process_status" in
-        0)
-            error "wineserver remained running for $TARGET_USER after stop request."
-            return 1
-            ;;
-        1)
-            [ "$log_no_process" -eq 1 ] &&
-                log "No running wineserver remains for $TARGET_USER."
-            return 0
-            ;;
-        *)
-            error "Unable to inspect wineserver state for $TARGET_USER."
-            return "$process_status"
-            ;;
-    esac
+    if as_user env HOME="$HOME_DIR" WINEPREFIX="$wine_prefix" \
+        timeout 30s wineserver -w; then
+        return 0
+    fi
+    error "The managed wineserver did not stop for prefix $wine_prefix."
+    return 1
 }
 
 stop_wine_server() {
     local wine_prefix=$1 stop_status=0
 
     as_user env HOME="$HOME_DIR" WINEPREFIX="$wine_prefix" \
-        wineserver -k || stop_status=$?
+        timeout 30s wineserver -k || stop_status=$?
     # wineserver -k returns non-zero when there is nothing to stop on some
     # Wine builds.  Treat that exact no-process state as idempotent, while
     # preserving command/query failures and a server that remains alive.
@@ -51,21 +29,49 @@ stop_wine_server() {
         error "wineserver -k failed for $TARGET_USER (status $stop_status)."
         return "$stop_status"
     fi
-    if [ "$stop_status" -eq 1 ]; then
-        wine_server_verify_stopped 1
-    else
-        wine_server_verify_stopped 0
-    fi
+    wine_server_verify_stopped "$wine_prefix"
 }
 
 ensure_wine_config() {
     local wine_prefix="$HOME_DIR/.wine" font_source font_destination font
+    local marker marker_tmp
 
     ensure_packages "${WINE_CONFIG_PACKAGES[@]}"
-    if [ ! -d "$wine_prefix" ]; then
-        as_user env HOME="$HOME_DIR" WINEPREFIX="$wine_prefix" \
-            WINEDLLOVERRIDES=mscoree,mshtml= wineboot -u
-        as_user env HOME="$HOME_DIR" WINEPREFIX="$wine_prefix" wineserver -w
+    if ! wine_prefix_core_satisfied; then
+        log "Initializing and validating the Wine prefix for $TARGET_USER..."
+        if ! as_user env HOME="$HOME_DIR" WINEPREFIX="$wine_prefix" \
+            WINEDLLOVERRIDES=mscoree,mshtml= \
+            timeout 180s wineboot -u; then
+            error "wineboot failed to initialize $wine_prefix."
+            stop_wine_server "$wine_prefix" >/dev/null 2>&1 || true
+            return 1
+        fi
+        if ! as_user env HOME="$HOME_DIR" WINEPREFIX="$wine_prefix" \
+            timeout 120s wineserver -w; then
+            error "wineserver did not finish Wine prefix initialization: $wine_prefix"
+            stop_wine_server "$wine_prefix" >/dev/null 2>&1 || true
+            return 1
+        fi
+        if ! wine_prefix_payload_satisfied; then
+            error "wineboot returned success but left an incomplete prefix: $wine_prefix"
+            stop_wine_server "$wine_prefix" >/dev/null 2>&1 || true
+            return 1
+        fi
+        if ! as_user env HOME="$HOME_DIR" WINEPREFIX="$wine_prefix" \
+            WINEDEBUG=-all timeout 120s wine cmd /c ver >/dev/null 2>&1; then
+            error "Wine command smoke test failed for prefix: $wine_prefix"
+            stop_wine_server "$wine_prefix" >/dev/null 2>&1 || true
+            return 1
+        fi
+        marker="$wine_prefix/$WINE_PREFIX_COMPLETION_MARKER"
+        marker_tmp=$(mktemp)
+        printf 'schema=1\n' > "$marker_tmp"
+        if ! install_if_changed "$marker_tmp" "$marker" 644; then
+            rm -f -- "$marker_tmp"
+            return 1
+        fi
+        rm -f -- "$marker_tmp"
+        chown "$TARGET_USER:" "$marker"
     fi
 
     font_source="$WINDOWS_FONT_SOURCE"

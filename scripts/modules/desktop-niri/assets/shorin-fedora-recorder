@@ -1,0 +1,419 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# shorin:fedora-vicinae-rec2gif:v1
+# Backend for the audited Vicinae screen-capture/record.js command.  This file
+# intentionally owns no Niri, QuickShell, Waybar, or Vicinae key binding.
+
+trap 'printf "ERROR: %s:%s: %s\n" \
+  "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >&2' ERR
+
+APP=shorin-fedora-recorder
+ACTION=${1:-toggle}
+shift || true
+case "$ACTION" in toggle|start|stop|status|status-json|is-active) ;;
+*)
+    printf 'Usage: %s {toggle|start|stop|status|status-json|is-active} [--fps N] [--width N]\n' "${0##*/}" >&2
+    exit 2
+    ;;
+esac
+
+FPS=${SHORIN_GIF_FPS:-15}
+WIDTH=${SHORIN_GIF_WIDTH:-640}
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --fps) [ "$#" -ge 2 ] || exit 2; FPS=$2; shift 2 ;;
+        --width) [ "$#" -ge 2 ] || exit 2; WIDTH=$2; shift 2 ;;
+        *) printf '%s: unknown option: %s\n' "$APP" "$1" >&2; exit 2 ;;
+    esac
+done
+[[ "$FPS" =~ ^[1-9][0-9]*$ ]] && [ "$FPS" -le 60 ] || {
+    printf '%s: fps must be an integer from 1 to 60\n' "$APP" >&2
+    exit 2
+}
+[[ "$WIDTH" =~ ^[1-9][0-9]*$ ]] && [ "$WIDTH" -le 7680 ] || {
+    printf '%s: width must be an integer from 1 to 7680\n' "$APP" >&2
+    exit 2
+}
+
+RUNTIME_ROOT=${XDG_RUNTIME_DIR:-/run/user/$UID}
+STATE_DIR=${SHORIN_RECORDER_STATE_DIR:-$RUNTIME_ROOT/shorin-vicinae-rec2gif}
+STATE_HOME=${XDG_STATE_HOME:-$HOME/.local/state}
+LOG_DIR=${SHORIN_RECORDER_LOG_DIR:-$STATE_HOME/shorin-recorder}
+LOG_FILE=${SHORIN_RECORDER_LOG_FILE:-$LOG_DIR/vicinae-rec2gif.log}
+OUTPUT_DIR=${SHORIN_RECORDER_OUTPUT_DIR:-$HOME/Videos/GIF}
+SLURP=${SHORIN_SLURP:-slurp}
+WF_RECORDER=${SHORIN_WF_RECORDER:-wf-recorder}
+FFMPEG=${SHORIN_FFMPEG:-ffmpeg}
+WL_COPY=${SHORIN_WL_COPY:-wl-copy}
+STOP_POLLS=${SHORIN_RECORDER_STOP_POLLS:-100}
+STOP_INTERVAL=${SHORIN_RECORDER_STOP_INTERVAL:-0.05}
+
+PID_FILE=$STATE_DIR/pid
+TOKEN_FILE=$STATE_DIR/start-token
+WORK_FILE_STATE=$STATE_DIR/work-file
+EXT_FILE=$STATE_DIR/source-extension
+STARTED_FILE=$STATE_DIR/started
+LOCK_FILE=$STATE_DIR/lock
+
+read_state() {
+    local file=$1 value
+    [ -f "$file" ] && [ ! -L "$file" ] || return 1
+    IFS= read -r value < "$file" || [ -n "$value" ]
+    printf '%s\n' "$value"
+}
+
+process_token() {
+    local pid=$1 stat
+    { stat=$(< "/proc/$pid/stat"); } 2>/dev/null || return 1
+    awk '{ print $22 }' <<< "$stat"
+}
+
+process_is_running() {
+    local pid=$1 stat state
+    { stat=$(< "/proc/$pid/stat"); } 2>/dev/null || return 1
+    state=$(awk '{ print $3 }' <<< "$stat") || return 1
+    [ "$state" != Z ] && kill -0 "$pid" 2>/dev/null
+}
+
+recording_is_live() {
+    local pid expected actual
+    pid=$(read_state "$PID_FILE") || return 1
+    expected=$(read_state "$TOKEN_FILE") || return 1
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+    process_is_running "$pid" || return 1
+    actual=$(process_token "$pid") || return 1
+    [ "$actual" = "$expected" ]
+}
+
+# Vicinae polls must not create directories, logs, state, or capture processes.
+case "$ACTION" in
+    status)
+        if recording_is_live; then printf 'recording\n'; else printf 'idle\n'; fi
+        exit 0
+        ;;
+    status-json)
+        if recording_is_live; then
+            printf '{"active":true,"mode":"gif"}\n'
+        else
+            printf '{"active":false,"mode":"idle"}\n'
+        fi
+        exit 0
+        ;;
+    is-active) recording_is_live; exit $? ;;
+esac
+
+umask 077
+ensure_owned_directory() {
+    local directory=$1 parent uid mode
+    uid=$(id -u)
+    parent=$(dirname "$directory")
+    [ -d "$parent" ] && [ ! -L "$parent" ] &&
+        [ "$(stat -c '%u' "$parent" 2>/dev/null)" = "$uid" ] || {
+        printf '%s: unsafe state parent: %s\n' "$APP" "$parent" >&2
+        return 1
+    }
+    if [ -e "$directory" ] || [ -L "$directory" ]; then
+        [ -d "$directory" ] && [ ! -L "$directory" ] &&
+            [ "$(stat -c '%u' "$directory" 2>/dev/null)" = "$uid" ] || {
+            printf '%s: unsafe state directory: %s\n' "$APP" "$directory" >&2
+            return 1
+        }
+    else
+        mkdir "$directory" || return 1
+    fi
+    mode=$(stat -c '%a' "$directory") || return 1
+    (( (8#$mode & 0022) == 0 )) || {
+        printf '%s: state directory must not be group/world writable: %s\n' \
+            "$APP" "$directory" >&2
+        return 1
+    }
+}
+
+ensure_owned_directory "$STATE_DIR"
+mkdir -p "$LOG_DIR"
+if [ -e "$LOCK_FILE" ] || [ -L "$LOCK_FILE" ]; then
+    [ -f "$LOCK_FILE" ] && [ ! -L "$LOCK_FILE" ] &&
+        [ "$(stat -c '%u' "$LOCK_FILE" 2>/dev/null)" = "$(id -u)" ] || {
+        printf '%s: unsafe recorder lock: %s\n' "$APP" "$LOCK_FILE" >&2
+        exit 1
+    }
+else
+    (umask 077; : > "$LOCK_FILE")
+fi
+exec 9<>"$LOCK_FILE"
+flock 9
+
+clear_state() {
+    local file status=0
+
+    for file in \
+        "$PID_FILE" "$TOKEN_FILE" "$WORK_FILE_STATE" "$EXT_FILE" "$STARTED_FILE" \
+        "${PID_FILE}.new" "${TOKEN_FILE}.new" "${WORK_FILE_STATE}.new" \
+        "${EXT_FILE}.new" "${STARTED_FILE}.new"; do
+        if [ -f "$file" ] || [ -L "$file" ]; then
+            rm -f -- "$file" || status=1
+        elif [ -e "$file" ]; then
+            # Preserve an unexpected directory/device instead of recursively
+            # deleting user data merely because it occupies a state filename.
+            status=1
+        fi
+    done
+    return "$status"
+}
+
+write_state() {
+    local file=$1 value=$2 temporary
+    temporary="$file.new"
+    if [ -e "$temporary" ] || [ -L "$temporary" ]; then
+        if [ -f "$temporary" ] || [ -L "$temporary" ]; then
+            rm -f -- "$temporary" || return 1
+        else
+            return 1
+        fi
+    fi
+    (umask 077; printf '%s\n' "$value" > "$temporary") || return 1
+    [ -f "$temporary" ] && [ ! -L "$temporary" ] || return 1
+    mv -f -- "$temporary" "$file"
+}
+
+encoder_available() {
+    "$FFMPEG" -hide_banner -encoders 2>/dev/null |
+        awk -v wanted="$1" '$2 == wanted { found=1 } END { exit !found }'
+}
+
+choose_codec() {
+    local requested=${SHORIN_RECORDER_CODEC:-} codec
+    if [ -n "$requested" ]; then
+        encoder_available "$requested" || {
+            printf '%s: requested encoder is unavailable: %s\n' "$APP" "$requested" >&2
+            return 1
+        }
+        printf '%s\n' "$requested"
+        return 0
+    fi
+    # Fedora ffmpeg-free normally provides libopenh264 and libvpx-vp9, while
+    # libx264 is absent.  Prefer H.264 when it is actually exposed, then VP9.
+    for codec in libx264 libopenh264 libvpx-vp9; do
+        encoder_available "$codec" && { printf '%s\n' "$codec"; return 0; }
+    done
+    printf '%s: no supported ffmpeg encoder (libx264/libopenh264/libvpx-vp9)\n' "$APP" >&2
+    return 1
+}
+
+codec_extension() {
+    case "$1" in libvpx-vp9) printf 'webm\n' ;; *) printf 'mp4\n' ;; esac
+}
+
+preserve_source() {
+    local work=$1 extension=$2 stamp destination
+    case "$extension" in mp4|webm) ;; *) return 1 ;; esac
+    case "$work" in
+        "$STATE_DIR"/recording.*."$extension") ;;
+        *) return 1 ;;
+    esac
+    [ -f "$work" ] && [ ! -L "$work" ] && [ -s "$work" ] &&
+        [ "$(stat -c '%u' "$work" 2>/dev/null)" = "$(id -u)" ] || return 1
+    mkdir -p "$OUTPUT_DIR"
+    stamp=$(date +%Y%m%d-%H%M%S)
+    destination="$OUTPUT_DIR/failed-recording-$stamp.$extension"
+    while [ -e "$destination" ] || [ -L "$destination" ]; do
+        destination="$OUTPUT_DIR/failed-recording-$stamp-$RANDOM.$extension"
+    done
+    mv -f "$work" "$destination"
+    printf '%s\n' "$destination"
+}
+
+cleanup_stale_state() {
+    local work extension preserved
+    [ -e "$PID_FILE" ] || [ -L "$PID_FILE" ] ||
+        [ -e "$WORK_FILE_STATE" ] || [ -L "$WORK_FILE_STATE" ] ||
+        [ -e "$TOKEN_FILE" ] || [ -L "$TOKEN_FILE" ] || return 0
+    recording_is_live && return 0
+    work=$(read_state "$WORK_FILE_STATE" 2>/dev/null || true)
+    extension=$(read_state "$EXT_FILE" 2>/dev/null || printf mp4)
+    if [ -n "$work" ] && preserved=$(preserve_source "$work" "$extension" 2>/dev/null); then
+        printf '%s stale recording preserved=%q\n' "$(date --iso-8601=seconds)" "$preserved" >> "$LOG_FILE"
+    else
+        printf '%s stale runtime state removed\n' "$(date --iso-8601=seconds)" >> "$LOG_FILE"
+    fi
+    clear_state
+}
+
+cleanup_stale_state
+
+wait_for_exit() {
+    local pid=$1 index
+    for ((index=0; index<STOP_POLLS; index++)); do
+        process_is_running "$pid" || return 0
+        sleep "$STOP_INTERVAL"
+    done
+    return 1
+}
+
+abort_recording_start() {
+    local pid=$1 work=$2
+
+    # State publication is the transaction commit.  If it fails after capture
+    # started, synchronously stop and reap that exact child before removing its
+    # unpublished work and partial state.  SIGKILL is a final no-orphan guard
+    # only after the normal INT and TERM shutdown windows both expire.
+    kill -INT "$pid" 2>/dev/null || true
+    if ! wait_for_exit "$pid"; then
+        kill -TERM "$pid" 2>/dev/null || true
+        if ! wait_for_exit "$pid"; then
+            kill -KILL "$pid" 2>/dev/null || true
+            wait_for_exit "$pid" || true
+        fi
+    fi
+    wait "$pid" 2>/dev/null || true
+    case "$work" in
+        "$STATE_DIR"/recording.*.mp4|"$STATE_DIR"/recording.*.webm)
+            [ -L "$work" ] || rm -f -- "$work"
+            ;;
+    esac
+    clear_state || true
+    ! process_is_running "$pid"
+}
+
+start_recording() {
+    local geometry codec extension work pid token
+
+    recording_is_live && { printf 'recording\n'; return 0; }
+    for command in "$SLURP" "$WF_RECORDER" "$FFMPEG"; do
+        command -v "$command" >/dev/null 2>&1 || {
+            printf '%s: required command is unavailable: %s\n' "$APP" "$command" >&2
+            return 1
+        }
+    done
+    codec=$(choose_codec) || return
+    extension=$(codec_extension "$codec")
+    if ! geometry=$("$SLURP"); then
+        printf 'cancelled\n'
+        return 0
+    fi
+    geometry=${geometry//$'\n'/}
+    [ -n "${geometry//[[:space:]]/}" ] || { printf 'cancelled\n'; return 0; }
+
+    work=$(mktemp "$STATE_DIR/recording.XXXXXX.$extension")
+    rm -f "$work"
+    printf '%s start codec=%s geometry=%q work=%q\n' \
+        "$(date --iso-8601=seconds)" "$codec" "$geometry" "$work" >> "$LOG_FILE"
+    setsid "$WF_RECORDER" -g "$geometry" -f "$work" --codec "$codec" \
+        9>&- >> "$LOG_FILE" 2>&1 &
+    pid=$!
+    sleep "${SHORIN_RECORDER_START_DELAY:-0.15}"
+    token=$(process_token "$pid" 2>/dev/null || true)
+    if [ -z "$token" ] || ! process_is_running "$pid"; then
+        rm -f "$work"
+        printf '%s: wf-recorder failed to stay alive; see %s\n' "$APP" "$LOG_FILE" >&2
+        return 1
+    fi
+    if ! write_state "$WORK_FILE_STATE" "$work" ||
+        ! write_state "$EXT_FILE" "$extension" ||
+        ! write_state "$STARTED_FILE" "$(date +%s)" ||
+        ! write_state "$TOKEN_FILE" "$token" ||
+        # PID is the commit marker and is published last.
+        ! write_state "$PID_FILE" "$pid"; then
+        abort_recording_start "$pid" "$work" ||
+            printf '%s: failed to terminate recorder after state commit failure\n' \
+                "$APP" >&2
+        printf '%s: recorder state commit failed; capture was stopped and discarded\n' \
+            "$APP" >&2
+        return 1
+    fi
+    printf 'recording\n'
+}
+
+filters_available() {
+    local filters
+    filters=$("$FFMPEG" -hide_banner -filters 2>/dev/null) || return 1
+    grep -Eq '(^|[[:space:]])palettegen([[:space:]]|$)' <<< "$filters" &&
+        grep -Eq '(^|[[:space:]])paletteuse([[:space:]]|$)' <<< "$filters"
+}
+
+convert_to_gif() {
+    local source=$1 final=$2 part="$final.part"
+    filters_available || {
+        printf '%s: ffmpeg palettegen/paletteuse filters are unavailable\n' "$APP" >&2
+        return 1
+    }
+    rm -f "$part"
+    if "$FFMPEG" -hide_banner -loglevel warning -y -i "$source" \
+        -filter_complex "fps=$FPS,scale=$WIDTH:-1:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5" \
+        -f gif "$part" >> "$LOG_FILE" 2>&1 && [ -s "$part" ]; then
+        mv -f "$part" "$final"
+        return 0
+    fi
+    rm -f "$part"
+    return 1
+}
+
+stop_recording() {
+    local pid work extension stamp final preserved uri
+
+    if ! recording_is_live; then
+        cleanup_stale_state
+        printf 'idle\n'
+        return 0
+    fi
+    pid=$(read_state "$PID_FILE") || return 1
+    work=$(read_state "$WORK_FILE_STATE") || return 1
+    extension=$(read_state "$EXT_FILE") || return 1
+    case "$extension" in mp4|webm) ;; *)
+        printf '%s: invalid recorder source extension in state\n' "$APP" >&2
+        return 1
+        ;;
+    esac
+    case "$work" in
+        "$STATE_DIR"/recording.*."$extension") ;;
+        *) printf '%s: invalid recorder work path in state\n' "$APP" >&2; return 1 ;;
+    esac
+    [ ! -L "$work" ] || {
+        printf '%s: refusing symlinked recorder work file\n' "$APP" >&2
+        return 1
+    }
+    kill -INT "$pid" 2>/dev/null || true
+    if ! wait_for_exit "$pid"; then
+        kill -TERM "$pid" 2>/dev/null || true
+        wait_for_exit "$pid" || {
+            printf '%s: wf-recorder did not stop; state retained (log: %s)\n' "$APP" "$LOG_FILE" >&2
+            return 1
+        }
+    fi
+    if [ ! -s "$work" ]; then
+        clear_state
+        printf '%s: wf-recorder produced no usable video (log: %s)\n' "$APP" "$LOG_FILE" >&2
+        return 1
+    fi
+
+    mkdir -p "$OUTPUT_DIR"
+    stamp=$(date +%Y%m%d-%H%M%S)
+    final="$OUTPUT_DIR/$stamp.gif"
+    while [ -e "$final" ] || [ -L "$final" ]; do
+        final="$OUTPUT_DIR/$stamp-$RANDOM.gif"
+    done
+    if ! convert_to_gif "$work" "$final"; then
+        preserved=$(preserve_source "$work" "$extension" || true)
+        clear_state
+        printf '%s GIF conversion failed source=%q\n' "$(date --iso-8601=seconds)" "$preserved" >> "$LOG_FILE"
+        printf '%s: GIF conversion failed; source preserved at %s (log: %s)\n' \
+            "$APP" "${preserved:-$work}" "$LOG_FILE" >&2
+        return 1
+    fi
+    rm -f "$work"
+    clear_state
+    if command -v "$WL_COPY" >/dev/null 2>&1; then
+        uri="file://$final"
+        printf '%s' "$uri" | "$WL_COPY" -t text/uri-list >> "$LOG_FILE" 2>&1 ||
+            printf '%s clipboard copy failed final=%q\n' "$(date --iso-8601=seconds)" "$final" >> "$LOG_FILE"
+    fi
+    printf '%s saved final=%q\n' "$(date --iso-8601=seconds)" "$final" >> "$LOG_FILE"
+    printf 'saved:%s\n' "$final"
+}
+
+case "$ACTION" in
+    start) start_recording ;;
+    stop) stop_recording ;;
+    toggle) if recording_is_live; then stop_recording; else start_recording; fi ;;
+esac

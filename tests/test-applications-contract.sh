@@ -83,8 +83,11 @@ NIRI_CLIP_UNIT_ENABLED=0
 LAZYVIM_CLONES=0
 LAZYVIM_CHECKOUT_FAIL=0
 WINE_SERVER_STOP_FAIL=0
-WINE_SERVER_RUNNING=0
-WINE_SERVER_QUERY_FAIL=0
+WINE_MANAGED_PREFIX_RUNNING=0
+WINE_FOREIGN_PREFIX_RUNNING=0
+WINE_SERVER_STUCK=0
+WINE_BOOT_FAIL=0
+WINE_CMD_FAIL=0
 GITHUB_HEAD=0123456789abcdef0123456789abcdef01234567
 GITHUB_CHECKOUT_DIRTY=0
 CARGO_BUILD_FAIL=0
@@ -123,14 +126,7 @@ wineserver() {
     return 0
 }
 
-pgrep() {
-    [ "$WINE_SERVER_QUERY_FAIL" -eq 0 ] || return 2
-    if [ "$WINE_SERVER_RUNNING" -eq 1 ]; then
-        printf '1234\n'
-        return 0
-    fi
-    return 1
-}
+pgrep() { return 99; }
 
 git() {
     if [ "${1:-}" = -C ] && [ "${3:-}" = rev-parse ] &&
@@ -177,15 +173,29 @@ as_user() {
         return
     fi
     if [[ " $* " == *' wineboot '* ]]; then
-        mkdir -p "$HOME_DIR/.wine"
+        [ "$WINE_BOOT_FAIL" -eq 0 ] || return 1
+        mkdir -p "$HOME_DIR/.wine/drive_c/windows/system32"
+        printf 'registry\n' > "$HOME_DIR/.wine/system.reg"
+        printf 'registry\n' > "$HOME_DIR/.wine/user.reg"
+        printf 'registry\n' > "$HOME_DIR/.wine/userdef.reg"
+        printf 'MZ\n' > "$HOME_DIR/.wine/drive_c/windows/system32/cmd.exe"
         return 0
     fi
+    if [[ " $* " == *' wine cmd /c ver '* ]]; then
+        [ "$WINE_CMD_FAIL" -eq 0 ]
+        return
+    fi
     if [[ " $* " == *' wineserver '* ]]; then
-        if [[ " $* " == *' wineserver -k '* ]] &&
-            [ "$WINE_SERVER_STOP_FAIL" -eq 1 ]; then
-            return 1
+        if [[ " $* " == *' wineserver -k '* ]]; then
+            [ "$WINE_SERVER_STOP_FAIL" -eq 0 ] || return 1
+            [ "$WINE_SERVER_STUCK" -eq 1 ] || WINE_MANAGED_PREFIX_RUNNING=0
+            return 0
         fi
-        return 0
+        if [[ " $* " == *' wineserver -w '* ]]; then
+            [ "$WINE_MANAGED_PREFIX_RUNNING" -eq 0 ] || return 124
+            return 0
+        fi
+        return 2
     fi
     if [[ " $* " == *' cargo build '* ]]; then
         local previous argument target_dir=""
@@ -267,6 +277,21 @@ done
 application_entry_satisfied wine &&
     fail 'Wine without its prefix must be configuration drift'
 WINDOWS_FONT_SOURCE="$TEST_DIR/no-windows-fonts"
+mkdir -p "$HOME_DIR/.wine"
+WINE_BOOT_FAIL=1
+if ensure_wine_config 2>/dev/null; then
+    fail 'a pre-existing partial prefix must not hide wineboot failure'
+fi
+[ ! -e "$HOME_DIR/.wine/$WINE_PREFIX_COMPLETION_MARKER" ] ||
+    fail 'failed Wine initialization must not write its completion marker'
+WINE_BOOT_FAIL=0
+WINE_CMD_FAIL=1
+if ensure_wine_config 2>/dev/null; then
+    fail 'a failed Wine command smoke test must fail prefix convergence'
+fi
+[ ! -e "$HOME_DIR/.wine/$WINE_PREFIX_COMPLETION_MARKER" ] ||
+    fail 'failed Wine smoke validation must not write its completion marker'
+WINE_CMD_FAIL=0
 ensure_wine_config
 grep -Fq "HOME=$HOME_DIR WINEPREFIX=$HOME_DIR/.wine" "$AS_USER_LOG" ||
     fail 'Wine user commands must receive explicit HOME and WINEPREFIX'
@@ -274,26 +299,58 @@ grep -Fq 'wineboot -u' "$AS_USER_LOG" ||
     fail 'Wine prefix convergence must invoke wineboot'
 grep -Fq 'wineserver -w' "$AS_USER_LOG" ||
     fail 'Wine prefix convergence must wait for wineserver with the same environment'
+grep -Fq 'timeout 30s wineserver -k' "$AS_USER_LOG" ||
+    fail 'Wine cleanup must bound the managed-prefix stop request'
+grep -Fq 'timeout 30s wineserver -w' "$AS_USER_LOG" ||
+    fail 'Wine cleanup must verify the same managed prefix with a timeout'
+grep -Fq 'wine cmd /c ver' "$AS_USER_LOG" ||
+    fail 'Wine prefix convergence must run a headless command smoke test'
+grep -Fqx 'schema=1' "$HOME_DIR/.wine/$WINE_PREFIX_COMPLETION_MARKER" ||
+    fail 'validated Wine prefix convergence must write its completion marker'
 WINDOWS_FONT_SOURCE="$ROOT_DIR/resources/windows-sim-fonts"
 mkdir -p "$HOME_DIR/.wine/drive_c/windows/Fonts"
 while IFS= read -r -d '' FONT; do
     cp "$FONT" "$HOME_DIR/.wine/drive_c/windows/Fonts/$(basename "$FONT")"
 done < <(find "$WINDOWS_FONT_SOURCE" -maxdepth 1 -type f -print0)
 application_entry_satisfied wine || fail 'complete Wine configuration must pass'
+CMD_EXE="$HOME_DIR/.wine/drive_c/windows/system32/cmd.exe"
+mv "$CMD_EXE" "$CMD_EXE.real"
+ln -s cmd.exe.real "$CMD_EXE"
+if application_entry_satisfied wine; then
+    fail 'Wine prefix verification must reject a symlinked cmd.exe payload'
+fi
+rm -f "$CMD_EXE"
+mv "$CMD_EXE.real" "$CMD_EXE"
+cp "$CMD_EXE" "$CMD_EXE.real"
+: > "$CMD_EXE"
+if application_entry_satisfied wine; then
+    fail 'Wine prefix verification must reject an empty cmd.exe payload'
+fi
+mv -f "$CMD_EXE.real" "$CMD_EXE"
+WINE_MARKER="$HOME_DIR/.wine/$WINE_PREFIX_COMPLETION_MARKER"
+mv "$WINE_MARKER" "$WINE_MARKER.real"
+ln -s "$WINE_PREFIX_COMPLETION_MARKER.real" "$WINE_MARKER"
+if application_entry_satisfied wine; then
+    fail 'Wine prefix verification must reject a symlinked completion marker'
+fi
+rm -f "$WINE_MARKER"
+mv "$WINE_MARKER.real" "$WINE_MARKER"
 WINE_SERVER_STOP_FAIL=1
 ensure_wine_config ||
     fail 'a wineserver cleanup with no running server must be idempotent'
-WINE_SERVER_RUNNING=1
-if ensure_wine_config; then
-    fail 'a wineserver that remains running must fail Wine convergence'
-fi
-WINE_SERVER_RUNNING=0
-WINE_SERVER_QUERY_FAIL=1
-if ensure_wine_config; then
-    fail 'a wineserver state query error must fail Wine convergence'
-fi
-WINE_SERVER_QUERY_FAIL=0
+WINE_FOREIGN_PREFIX_RUNNING=1
+ensure_wine_config ||
+    fail 'an unrelated Wine prefix server must not fail managed cleanup'
+[ "$WINE_FOREIGN_PREFIX_RUNNING" -eq 1 ] ||
+    fail 'managed Wine cleanup must not stop a foreign prefix server'
 WINE_SERVER_STOP_FAIL=0
+WINE_MANAGED_PREFIX_RUNNING=1
+WINE_SERVER_STUCK=1
+if ensure_wine_config; then
+    fail 'a managed-prefix wineserver that remains running must fail convergence'
+fi
+WINE_MANAGED_PREFIX_RUNNING=0
+WINE_SERVER_STUCK=0
 
 for package in "${LUTRIS_CONFIG_PACKAGES[@]}"; do
     INSTALLED_PACKAGES["$package"]=1

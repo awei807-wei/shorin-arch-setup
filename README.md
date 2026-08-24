@@ -45,6 +45,14 @@ Fedora + niri：
 sudo bash install.sh install --distro fedora --user shorin
 ```
 
+Fedora 的 `base` 首次收敛会先把已安装系统作为一个整体向当前仓库版本前向升级，
+再安装逐项目标，避免旧安装镜像与新仓库中的 KDE/Qt 包拆分发生文件冲突。该事务使用
+`dnf upgrade --refresh --best`，明确禁止 vendor 切换和降级；不会使用
+`--allowerasing`、`--skip-broken` 或 `--skip-unavailable`，并在继续前执行
+`dnf check`。若检测到 external/mixed NVIDIA driver provider，`base` 的 check 会先以
+action-required 失败，整机升级和 GPU 包事务都不会开始。整机升级可能更新内核；完成
+安装后必须先重启，再进行 Niri DRM/output 与 NVIDIA 模块来源的运行时验收。
+
 Fedora 的第三方目标按以下方式收敛：Heroic、Upscaler、MangoJuice、VS Code、
 Curtail、Mission Center 和 Steam 使用 Flathub；Steam 额外在其实际安装 scope
 设置 `LANG=zh_CN.UTF-8` override，并验收 system/user Flatpak desktop export，
@@ -93,10 +101,10 @@ SHA-256 校验和安全解压，只复制白名单文件；安装完成后使用
 | Starship | [`starship-x86_64-unknown-linux-musl.tar.gz`](https://github.com/starship/starship/releases/download/v1.26.0/starship-x86_64-unknown-linux-musl.tar.gz)，v1.26.0，SHA-256 `b7c232b0e8249d8e55a40beb79c5c43a7d370f3f9408bd215deb0170daeaadf3` | ISC | `~/.local/bin/starship` |
 | JetBrainsMono Nerd Font | [`JetBrainsMono.tar.xz`](https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.0/JetBrainsMono.tar.xz)，v3.5.0，SHA-256 `0227b220360a6f819b9ead92343e8112b34733054782561af50cfba1e8afab63`，family `JetBrainsMono Nerd Font` | OFL | `~/.local/share/fonts/shorin/` |
 | Material Design Icons | [fixed commit font](https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/57b567a448bd579892174cd47c47f9e187ea56c6/fonts/materialdesignicons-webfont.ttf)，v7.4.47，SHA-256 `61e8aba5a4e981fe22cf7c8e8bcdbea00476e75c62c37f01bf7ee33361d68428`，family `Material Design Icons` | Apache-2.0 | `~/.local/share/fonts/shorin/` |
-| Fusion JetBrainsMapleMono | [`JetBrainsMapleMono-NF-XX-XX-XX.zip`](https://github.com/SpaceTimee/Fusion-JetBrainsMapleMono/releases/download/1.2304.79/JetBrainsMapleMono-NF-XX-XX-XX.zip)，v1.2304.79，SHA-256 `50b36f9efaa3fd76de6636db6e632e537f4c5c3bdff6c783d6937493f8b4ae6e`，family `JetBrains Maple Mono` | OFL/随包 LICENSE | `~/.local/share/fonts/shorin/` |
+| Fusion JetBrainsMapleMono | [`JetBrainsMapleMono-NF-XX-XX-XX.zip`](https://github.com/SpaceTimee/Fusion-JetBrainsMapleMono/releases/download/1.2304.79/JetBrainsMapleMono-NF-XX-XX-XX.zip)，v1.2304.79，SHA-256 `3a7ed5e50f6831dc1414a4ad96b1e03c13cbc67ca32bc1bb7e9d90c56b903358`，family `JetBrains Maple Mono` | OFL/随包 LICENSE | `~/.local/share/fonts/shorin/` |
 
 Fusion JetBrainsMapleMono 是第三方融合上游的社区归档，不是 JetBrains 官方发布；固定 ZIP
-约 152.3 MB（约 145 MiB），只有活动 Kitty 配置明确包含 `font_family JetBrains Maple Mono` 时才会下载、
+为 159,715,777 字节（约 159.7 MB / 152.3 MiB），只有活动 Kitty 配置明确包含 `font_family JetBrains Maple Mono` 时才会下载、
 校验和安装。没有该配置引用时不会下载或验收 Maple，避免为未使用的字体引入体积和来源。
 
 如果 Fedora 的系统包前置已经存在，只需修复这些目标用户资产时，不必重复执行完整
@@ -260,10 +268,25 @@ bash install.sh verify --user shorin grub
 | `grub` | 必需 | `storage base` | 双启动、Btrfs 集成、主题及配置验收 |
 
 Fedora 的 virtualization 契约会把逻辑包映射为 `qemu-kvm`、`libvirt-daemon`、
-`libvirt-daemon-kvm`、`libvirt-client` 和 `libvirt-daemon-config-network`，并显式验收
-`libvirtd.service`、`virsh`、`libvirt/kvm/input` 用户组及
-`/usr/share/libvirt/networks/default.xml`；不会安装已弃用的 `bridge-utils`。Arch
-契约显式使用 `libvirt` 包。Fedora 的 `nas-rime` 目标额外安装提供
+`libvirt-daemon-kvm`、`libvirt-client` 和 `libvirt-daemon-config-network`；Arch 使用
+`libvirt` 包。两者默认都使用 `VIRTUALIZATION_PROVIDER=auto`：若现有状态只选中
+modular 或 monolithic 中的一个 provider，其完整必需 socket 均可用且与另一
+provider 互斥，就保留并收敛该 provider，不因发行版而切换。只有在状态为
+none、mixed 或现存 provider 不可用时才重新选择：Fedora 优先 modular、不可用时
+回退 monolithic；Arch 则优先 monolithic、不可用时回退 modular。apply 会先停用
+并停止另一 provider 的所有 activation path，再启用并启动选中 provider 的必需
+sockets：modular 使用 `virtqemud.socket`、`virtproxyd.socket`、
+`virtnetworkd.socket`、`virtinterfaced.socket`、`virtnodedevd.socket`、
+`virtnwfilterd.socket`、`virtsecretd.socket` 和 `virtstoraged.socket`，monolithic 使用
+`libvirtd.socket`，两者都包含共享的 `virtlockd.socket` 和 `virtlogd.socket`。
+verify 接受恰好一个有效且互斥的 provider，要求其必需
+sockets 已启用且 active、通过 `virsh` 可访问 `qemu:///system` 并列出虚拟机，且
+default network 为 active+autostart；由于 socket activation 允许 daemon 正常退出，
+不要求 modular daemon service（如 `virtqemud.service`）或 `libvirtd.service` 常驻
+active。此外还会验收
+`libvirt/kvm/input` 用户组和 virt-manager 的 system URI 设置；default network 尚未
+定义时才使用 `/usr/share/libvirt/networks/default.xml` 模板创建。契约不会安装已弃用的
+`bridge-utils`。Fedora 的 `nas-rime` 目标额外安装提供
 `/usr/bin/rime_dict_manager` 的 `librime-tools`，服务、safe-sync 脚本和只读检查共享
 同一命令路径契约。Fedora 的 GRUB 使用独立 apply，Arch 内部的 `grub-btrfs` Btrfs
 辅助脚本在 Fedora 上明确跳过。Fedora 的 base 电源能力使用 `ppd-service` provider
@@ -285,7 +308,15 @@ Fedora 的壁纸会话由 Niri 启动一次 `fedora-wallpaper-session.sh`，使�
 
 Fedora + Niri 会通过目标用户的 `~/.config/autostart/org.kde.xwaylandvideobridge.desktop` 写入 `Hidden=true`，禁用 X11 兼容桥的默认自动启动；这是仅针对 X11 兼容层的设置，不影响 Wayland 原生 portal。Arch 路径不写入或管理该文件。
 
-Fedora 的 Niri 配置收敛保留现有用户文件，不会用上游树盲目覆盖 `config.kdl` 或 `binds.kdl`。事务内会备份并迁移旧的 `~/.config/quickshell/scripts/lockscreen-wait.sh` 到 `lockscreen.sh`，并替换 polkit-gnome 路径；来源 checkout 必须提供普通、可执行的 `dotfiles/.config/quickshell/scripts/lockscreen.sh`，目标文件必须归目标用户所有。缺少来源的 `fd-rdd`、`vicinae`、`waypaper`、`niriswitcher`、`niriswitcherctl`、`waybar` 和 `hyprpicker` 只改为 `command -v` shell guard，后续安装对应程序后即可自动启用，当前不会伪造命令或宣称功能已安装。Fedora Niri 会持久 mask `mako.service`，让 Quickshell 独占 Freedesktop 通知总线并显示应用未读数字；同时持久 mask `drkonqi-coredump-launcher.socket`，关闭 KDE DrKonqi 弹窗但保留 `systemd-coredump` 与 `coredumpctl`。迁移后的配置必须通过 `niri validate`，失败会恢复原文件。
+Fedora 的 Niri 配置收敛保留现有用户文件，不会用上游树盲目覆盖 `config.kdl` 或 `binds.kdl`。事务内会备份并迁移旧的 `~/.config/quickshell/scripts/lockscreen-wait.sh` 到 `lockscreen.sh`，并把登录启动项和 `Mod+Alt+L` 都收敛为该受控脚本的绝对路径，不依赖 Niri 子进程的 `PATH`；来源 checkout 必须提供普通、可执行的 `dotfiles/.config/quickshell/scripts/lockscreen.sh`，目标文件必须归目标用户所有。缺少来源的 `fd-rdd`、`vicinae`、`waypaper`、`niriswitcher`、`niriswitcherctl`、`waybar` 和 `hyprpicker` 只改为 `command -v` shell guard，后续安装对应程序后即可自动启用，当前不会伪造命令或宣称功能已安装。Fedora 44 不再选择安装与 Python 3.14 不兼容的 `thefuck`，也不在受管 Fish 配置中调用它，避免每个互动会话产生 ABRT；Fedora 没有可信 Pywalfox native-host provider 时也不会向 Firefox 强制安装对应扩展。用户 portal 选择沿用 `gnome;gtk;` provider 顺序，保留 GNOME 的 ScreenCast/Screenshot 能力和 GTK fallback。Fedora Niri 会持久 mask `mako.service`，让 Quickshell 独占 Freedesktop 通知总线并显示应用未读数字；同时持久 mask `drkonqi-coredump-launcher.socket`，关闭 KDE DrKonqi 弹窗但保留 `systemd-coredump` 与 `coredumpctl`。迁移后的配置必须通过 `niri validate`，失败会恢复原文件。
+
+真实图形会话的 renderer/output 状态不属于 greeter 阶段的离线 desired-state 合同。用户已经通过显示管理器进入 Niri 后，可单独运行：
+
+```bash
+bash scripts/checks/niri-runtime-smoke.sh
+```
+
+该 smoke 默认检查当前用户（通过 `sudo` 调用时检查原调用用户），其所需的 `jq` 由 `desktop-niri` 必需包合同安装。它只读验证 active、local、Wayland、Niri seat 会话，目标用户的 `niri.service`、user manager 中的 `NIRI_SOCKET`，以及至少一个拥有非负整数 `current_mode` 和正数 `logical.width`/`logical.height` 的 active output；它还会从当前 Niri journal 或进程 DRM fd 记录 render/device 证据。退出码 0 表示通过，1 表示已有 active Niri 会话但 runtime 合同失败，2 表示当前没有适用会话（例如仍在 greeter）；退出码 2 不应升级成离线 `install`/`verify` 的 required failure。
 
 ## 模块契约
 

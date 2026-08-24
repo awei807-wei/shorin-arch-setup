@@ -77,6 +77,24 @@ source "$ROOT_DIR/scripts/lib/core.sh"
 [ "$FEDORA_THORIUM_SHA256" = \
     6cd793ac245ff7f0e7b76a1dc9b2c694d996b3eefb4a9ee40e39dc5e0ae11f45 ] ||
     fail 'Thorium official checksum contract changed'
+[ "$FEDORA_CLASH_VERGE_RPM_PROVENANCE_PINNED" = \
+    $'clash-verge\t0\t2.5.2\t1\tx86_64\tc3a9c3e9ad8e91e8db3820783f9915efef17c7e8050b9332929563e4af779835\t11e4561d4191c541a7750aab8ddc459e3704f97e5154a6125dec51cf3cc700f7' ] ||
+    fail 'Clash Verge exact RPM provenance contract changed'
+[ "$FEDORA_LINUXQQ_RPM_PROVENANCE_PINNED" = \
+    $'linuxqq\t0\t3.2.32_52194\t1\tx86_64\t49348e2684d7d182fd27e7f1a0820833236cd690d760e3588f841ec5ef7c5366\ta2848e7397185a317ffd35ba5659396ab3ae17705d2fb7b2124507027d7046cc' ] ||
+    fail 'Linux QQ exact RPM provenance contract changed'
+[ "$FEDORA_WECHAT_RPM_PROVENANCE_PINNED" = \
+    $'wechat\t0\t4.1.1.8\t1\tx86_64\t60f4e07a36ef192efb835643d06a5e4b822e5d50c65299d3792bf5d03ad96821\t05c14cf51fcdde80280426c72a2b0bc9f51b56b30d73d7a9c410e04a52a22704' ] ||
+    fail 'WeChat exact RPM provenance contract changed'
+[ "$FEDORA_LSFG_VK_RPM_PROVENANCE_PINNED" = \
+    $'lsfg-vk\t0\t1.0.0\t1\tx86_64\t46267aa17d5e27f7b1aca09e0b9322f1ec05429ba9ee2fa074000417dffe1d75\tc7f13d7db5f61512a6ca0c483ef09f54ec3abfdae78ae034149a4c5f6b396b8d' ] ||
+    fail 'LSFG-VK exact RPM provenance contract changed'
+[ "$FEDORA_THORIUM_RPM_PROVENANCE_PINNED" = \
+    $'thorium-browser\t0\t151.0.7922.72\t1\tx86_64\t078e6b719a2319fbd55b85d76d0cbf2ac13de8f70c63719be4ab2b0ae376e389\tcd1f8cde6a1c67f0b7cfe3eaf99b51c8939147c1b86959399f3b8bbed687c760' ] ||
+    fail 'Thorium exact RPM provenance contract changed'
+[ "$FEDORA_MARK_SHOT_RPM_PROVENANCE_PINNED" = \
+    $'mark-shot\t0\t0.1.48\t1.fc44\tx86_64\tb3a40a565810570fc14404be7fe832cddc05e56c9f442ab0d418c5e1b523858e\t1b9e7172b68aaa67680b935917831b9b3c12c67029625d930f2f336c0da790f8' ] ||
+    fail 'Mark Shot exact RPM provenance contract changed'
 [ "$FEDORA_FD_RDD_COMMIT" = \
     44b60573129c67f4471fa70f21b4a0b70bc1fec8 ] ||
     fail 'fd-rdd source commit contract changed'
@@ -85,9 +103,12 @@ source "$ROOT_DIR/scripts/lib/core.sh"
 # values rather than preserving them as a production URL/checksum.
 FEDORA_WECHAT_URL=https://attacker.invalid/wechat.rpm
 FEDORA_WECHAT_SHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+FEDORA_WECHAT_RPM_PROVENANCE_PINNED=$'attacker\t0\t1\t1\tx86_64\tbad\tbad'
 FEDORA_THORIUM_URL=https://attacker.invalid/thorium.rpm
 FEDORA_THORIUM_SHA256=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-export FEDORA_WECHAT_URL FEDORA_WECHAT_SHA256 FEDORA_THORIUM_URL FEDORA_THORIUM_SHA256
+export FEDORA_WECHAT_URL FEDORA_WECHAT_SHA256 \
+    FEDORA_WECHAT_RPM_PROVENANCE_PINNED FEDORA_THORIUM_URL \
+    FEDORA_THORIUM_SHA256
 source "$ROOT_DIR/scripts/lib/fedora-official-artifacts.sh"
 [ "$FEDORA_WECHAT_URL" = \
     https://dldir1v6.qq.com/weixin/Universal/Linux/WeChatLinux_x86_64.rpm ] ||
@@ -95,6 +116,9 @@ source "$ROOT_DIR/scripts/lib/fedora-official-artifacts.sh"
 [ "$FEDORA_WECHAT_SHA256" = \
     4aec761edac4604b0b301f9ac0385b8a9c46452e8a5783485eb3905ecdd22e8c ] ||
     fail 'WeChat checksum must not be environment-overridable'
+[ "$FEDORA_WECHAT_RPM_PROVENANCE_PINNED" = \
+    $'wechat\t0\t4.1.1.8\t1\tx86_64\t60f4e07a36ef192efb835643d06a5e4b822e5d50c65299d3792bf5d03ad96821\t05c14cf51fcdde80280426c72a2b0bc9f51b56b30d73d7a9c410e04a52a22704' ] ||
+    fail 'WeChat RPM provenance must not be environment-overridable'
 [ "$FEDORA_THORIUM_URL" = \
     https://github.com/gz83/thorium/releases/download/M151.0.7922.72/thorium-browser_151.0.7922.72_SSE3.rpm ] ||
     fail 'Thorium URL must not be environment-overridable'
@@ -102,38 +126,85 @@ source "$ROOT_DIR/scripts/lib/fedora-official-artifacts.sh"
     6cd793ac245ff7f0e7b76a1dc9b2c694d996b3eefb4a9ee40e39dc5e0ae11f45 ] ||
     fail 'Thorium checksum must not be environment-overridable'
 
-RPM_IDENTITY_METADATA='wechat x86_64'
+RPM_FILE_METADATA=$FEDORA_WECHAT_RPM_PROVENANCE_PINNED
+RPM_QUERY_METADATA=''
+RPM_FILE_QUERY_STATUS=0
+RPM_QUERY_STATUS=0
 rpm() {
-    [ "${1:-}" = -qp ] && [ "${2:-}" = --qf ] || return 1
-    printf '%s\n' "$RPM_IDENTITY_METADATA"
+    if [ "${1:-}" = -qp ] && [ "${2:-}" = --qf ]; then
+        [ "$RPM_FILE_QUERY_STATUS" -eq 0 ] || return "$RPM_FILE_QUERY_STATUS"
+        printf '%s\n' "$RPM_FILE_METADATA"
+        return 0
+    fi
+    if [ "${1:-}" = -q ] && [ "${2:-}" = --qf ]; then
+        [ "$RPM_QUERY_STATUS" -eq 0 ] || return "$RPM_QUERY_STATUS"
+        [ -n "$RPM_QUERY_METADATA" ] || return 1
+        printf '%s\n' "$RPM_QUERY_METADATA"
+        return 0
+    fi
+    return 1
 }
-fedora_verify_official_rpm_identity \
-    "$TEST_DIR/wechat.rpm" 'WeChat Linux' '^wechat$' ||
-    fail 'WeChat RPM identity must accept the exact official package name and x86_64'
-RPM_IDENTITY_METADATA='wechat aarch64'
-if fedora_verify_official_rpm_identity \
-    "$TEST_DIR/wechat.rpm" 'WeChat Linux' '^wechat$'; then
-    fail 'WeChat RPM identity must reject non-x86_64 artifacts'
+fedora_official_rpm_identity_for_target \
+    wechat-appimage "$TEST_DIR/wechat.rpm" 'WeChat Linux' ||
+    fail 'WeChat RPM file must accept the exact pinned provenance'
+
+rpm_provenance_with_field() {
+    local record=$1 index=$2 replacement=$3
+    local -a fields=()
+
+    IFS=$'\t' read -r -a fields <<< "$record"
+    fields["$index"]=$replacement
+    (IFS=$'\t'; printf '%s\n' "${fields[*]}")
+}
+
+for mutation in \
+    '0 wechat-helper' \
+    '1 1' \
+    '2 4.1.1.9' \
+    '3 2' \
+    '4 aarch64' \
+    '5 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+    '6 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'; do
+    read -r field_index field_value <<< "$mutation"
+    RPM_FILE_METADATA=$(rpm_provenance_with_field \
+        "$FEDORA_WECHAT_RPM_PROVENANCE_PINNED" "$field_index" "$field_value")
+    if fedora_official_rpm_identity_for_target \
+        wechat-appimage "$TEST_DIR/wechat.rpm" 'WeChat Linux'; then
+        fail "RPM file provenance accepted altered field $field_index"
+    fi
+done
+RPM_FILE_METADATA=$FEDORA_WECHAT_RPM_PROVENANCE_PINNED
+
+for target_contract in \
+    "clash-verge-rev|$FEDORA_CLASH_VERGE_RPM_PROVENANCE_PINNED" \
+    "linuxqq-appimage|$FEDORA_LINUXQQ_RPM_PROVENANCE_PINNED" \
+    "wechat-appimage|$FEDORA_WECHAT_RPM_PROVENANCE_PINNED" \
+    "lsfg-vk-bin|$FEDORA_LSFG_VK_RPM_PROVENANCE_PINNED" \
+    "thorium-browser-bin|$FEDORA_THORIUM_RPM_PROVENANCE_PINNED" \
+    "mark-shot|$FEDORA_MARK_SHOT_RPM_PROVENANCE_PINNED"; do
+    target=${target_contract%%|*}
+    RPM_QUERY_METADATA=${target_contract#*|}
+    fedora_fixed_official_rpm_target_satisfied "$target" ||
+        fail "installed RPM verification rejected exact provenance: $target"
+done
+RPM_QUERY_METADATA=$(rpm_provenance_with_field \
+    "$FEDORA_LINUXQQ_RPM_PROVENANCE_PINNED" 2 3.2.33_60000)
+if fedora_fixed_official_rpm_target_satisfied linuxqq-appimage; then
+    fail 'installed RPM verification must reject a higher EVR'
 fi
-RPM_IDENTITY_METADATA='com.tencent.WeChat x86_64'
-if fedora_verify_official_rpm_identity \
-    "$TEST_DIR/wechat.rpm" 'WeChat Linux' '^wechat$'; then
-    fail 'WeChat RPM identity must reject the desktop-id-like package name'
+RPM_QUERY_METADATA=$(rpm_provenance_with_field \
+    "$FEDORA_LINUXQQ_RPM_PROVENANCE_PINNED" 6 \
+    cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc)
+if fedora_fixed_official_rpm_target_satisfied linuxqq-appimage; then
+    fail 'installed RPM verification must reject the same NEVRA with another payload'
 fi
-RPM_IDENTITY_METADATA='wechat-helper x86_64'
-if fedora_verify_official_rpm_identity \
-    "$TEST_DIR/wechat.rpm" 'WeChat Linux' '^wechat$'; then
-    fail 'WeChat RPM identity must reject similar package names'
-fi
-RPM_IDENTITY_METADATA='thorium-browser x86_64'
-fedora_verify_official_rpm_identity \
-    "$TEST_DIR/thorium.rpm" 'Thorium Browser' '^thorium-browser$' ||
-    fail 'Thorium RPM identity must accept the exact official package name and x86_64'
-RPM_IDENTITY_METADATA='malicious-browser x86_64'
-if fedora_verify_official_rpm_identity \
-    "$TEST_DIR/thorium.rpm" 'Thorium Browser' '^thorium-browser$'; then
-    fail 'Thorium RPM identity must reject an unexpected package name'
-fi
+RPM_QUERY_STATUS=7
+status=0
+fedora_fixed_official_rpm_target_satisfied linuxqq-appimage || status=$?
+[ "$status" -eq 2 ] ||
+    fail 'installed RPM provenance inspection errors must remain distinguishable'
+RPM_QUERY_STATUS=0
+RPM_QUERY_METADATA=''
 
 BAD_PAYLOAD="$TEST_DIR/bad"
 printf 'unverified\n' > "$BAD_PAYLOAD"
@@ -165,8 +236,8 @@ fedora_download_verified_official_asset \
         FEDORA_OFFICIAL_DOWNLOAD_RESULT="$TEST_DIR/pinned-wechat.rpm"
         : > "$FEDORA_OFFICIAL_DOWNLOAD_RESULT"
     }
-    RPM_IDENTITY_METADATA='wechat x86_64'
-    fedora_application_target_satisfied() { return 0; }
+    RPM_FILE_METADATA=$FEDORA_WECHAT_RPM_PROVENANCE_PINNED
+    RPM_QUERY_METADATA=$FEDORA_WECHAT_RPM_PROVENANCE_PINNED
     dnf() {
         [ "${1:-}" = install ] || return 1
         printf '%s\n' "${!#}" > "$TEST_DIR/pinned-dnf-result"
@@ -177,6 +248,27 @@ fedora_download_verified_official_asset \
         "$FEDORA_WECHAT_SHA256" "$FEDORA_WECHAT_SIZE" pinned
     [ "$(< "$TEST_DIR/pinned-dnf-result")" = "$TEST_DIR/pinned-wechat.rpm" ]
 ) || fail 'pinned WeChat RPM must download with fixed inputs and install after identity verification'
+
+# A successful DNF exit is insufficient: the installed rpmdb header and
+# payload digests must still be the ones from the pinned file.
+(
+    require_writable_mode() { return 0; }
+    fedora_download_verified_official_asset() {
+        FEDORA_OFFICIAL_DOWNLOAD_RESULT="$TEST_DIR/postcheck-wechat.rpm"
+        : > "$FEDORA_OFFICIAL_DOWNLOAD_RESULT"
+    }
+    RPM_FILE_METADATA=$FEDORA_WECHAT_RPM_PROVENANCE_PINNED
+    RPM_QUERY_METADATA=$(rpm_provenance_with_field \
+        "$FEDORA_WECHAT_RPM_PROVENANCE_PINNED" 6 \
+        dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd)
+    dnf() { return 0; }
+    status=0
+    fedora_install_official_rpm_target \
+        wechat-appimage "$TARGET_USER" "$HOME_DIR" 'WeChat Linux' \
+        'WeChatLinux*.rpm' "$FEDORA_WECHAT_URL" "$FEDORA_WECHAT_ASSET" \
+        "$FEDORA_WECHAT_SHA256" "$FEDORA_WECHAT_SIZE" pinned || status=$?
+    [ "$status" -eq 1 ]
+) || fail 'official RPM install must reject a successful DNF transaction with another installed payload'
 
 # Network failure is a pending state, while a downloaded hash drift is a hard
 # failure and must not reach dnf or leave a corrupt cache entry.
@@ -232,6 +324,29 @@ curl() {
     done
     cp "$GOOD_PAYLOAD" "$output"
 }
+COLD_CACHE="$TEST_DIR/cold-cache"
+COLD_LOG="$TEST_DIR/cold-cache.log"
+mkdir -p "$COLD_CACHE"
+fedora_download_verified_official_asset \
+    https://example.invalid/cold.rpm cold.rpm "$GOOD_SHA256" \
+    "$COLD_CACHE" '' "$TARGET_USER" "$HOME_DIR" \
+    >"$TEST_DIR/cold-cache.result" 2>"$COLD_LOG" ||
+    fail 'a cold official cache must download and verify successfully'
+[ ! -s "$COLD_LOG" ] ||
+    fail "a normal cold-cache miss must not emit ERROR/Pending output: $(< "$COLD_LOG")"
+
+printf 'corrupt cache entry\n' > "$COLD_CACHE/corrupt.rpm"
+CORRUPT_LOG="$TEST_DIR/corrupt-cache.log"
+fedora_download_verified_official_asset \
+    https://example.invalid/corrupt.rpm corrupt.rpm "$GOOD_SHA256" \
+    "$COLD_CACHE" '' "$TARGET_USER" "$HOME_DIR" \
+    >"$TEST_DIR/corrupt-cache.result" 2>"$CORRUPT_LOG" ||
+    fail 'an invalid cached asset must be replaced by a verified download'
+grep -Fq 'Cached Fedora official asset is invalid; downloading a clean copy:' \
+    "$CORRUPT_LOG" || fail 'invalid cache replacement must emit one warning'
+if grep -Eq 'ERROR:|Pending Fedora artifact' "$CORRUPT_LOG"; then
+    fail 'recoverable cached corruption must not be logged as a final failure'
+fi
 EXTERNAL_CACHE="$TEST_DIR/external-cache"
 mkdir -p "$EXTERNAL_CACHE"
 chmod 1777 "$EXTERNAL_CACHE"
