@@ -25,6 +25,7 @@ satty                                   # Modern screenshot annotation tool
 
 # --- Clipboard ---
 wl-clipboard                             # Command-line copy/paste utilities
+xclip                                    # Command-line X11 clipboard bridge utility
 cliphist                                 # Clipboard history manager
 
 # --- CLI Enhancements ---

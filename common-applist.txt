@@ -46,6 +46,8 @@ AUR:vicinae-bin                              # Application launcher (like Spotli
 AUR:fd-rdd-git                           # fd-rdd extension for vicinae                
 AUR:tsukimi-bin
 AUR:thorium-browser-bin
+AUR:moonlight-qt                         # High-performance GameStream Client
+AUR:feishu-bin                           # Feishu Desktop Client
 AUR:mark-shot
 
 # --- Custom GitHub Applications (Build from Source) ---
