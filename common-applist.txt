@@ -38,6 +38,7 @@ gnome-text-editor                        # notebook
 
 # --- AUR Packages (Social) ---
 AUR:linuxqq-appimage                     # Tencent QQ (AppImage)
+AUR:linuxqq-wayland-fix-git              # Wayland screenshare & clipboard LD_PRELOAD fix for LinuxQQ
 AUR:wechat-appimage                      # WeChat (AppImage)
 AUR:typora-free                          # markdown editor
 AUR:lsfg-vk-bin                          # yellow duck frame generator
